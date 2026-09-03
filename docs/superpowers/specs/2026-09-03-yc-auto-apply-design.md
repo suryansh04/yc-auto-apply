@@ -240,6 +240,7 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D26 | A full run now slightly exceeds the Reoon free tier; buy the one-time credit pack rather than splitting the run | ~269 founders × ~2.5 verifications = ~670 against a 600/month free allowance. Options are to straddle a month boundary or spend $11.90 (~INR 1,050) once for 10,000 non-expiring credits. The pack is the better answer now that the run does not fit — it removes a quota pause from the middle of the campaign for roughly the cost of a meal |
 | D27 | The candidate is a software-engineering intern; the email never raises location | User answers 2026-09-03: software engineering, and remote or onsite both acceptable. The SWE consequence is that the job-posting hook is effectively dead — 14 of the 15 intern roles found were marketing, content, design, HR or ops, and only one was engineering — so essentially every email grounds on news, launch or description (D17), which the design already treats as the normal path. Location is simply omitted: raising it invites a constraint the founder had not thought to impose |
 | D28 | The email is short, plain and direct: ~90 words target, 120 hard cap, three parts, no sentence over 25 words | Explicit user requirement 2026-09-03: "short, simple to understand, to the point and crisp". The previous 150-word cap was too loose for cold email to a founder reading on a phone. A word cap alone is insufficient — a model writes to whatever cap it is given — so concision is enforced structurally: sentence length, paragraph count, no semicolons, and a ban on more than half the sentences starting with "I". The former parts 1 and 2 ("what they do" then "why I'm writing") are merged, since a founder knows what their own company does and naming the specific thing that prompted the email proves the research by itself |
+| D29 | The research source is how the sender learned something, never what the sentence is about. No outlet names, dates or "I saw the article" phrasing in the body | User requirement 2026-09-03. Reporting journalism back at a founder signals the sender knows them only through press; writing about the product itself reads as genuine interest. This also closes a real loophole in the grounding check (§10): the publication name is a distinctive term, so a lazy draft could pass grounding merely by naming the outlet while saying nothing about the company's actual work — the shared term must now come from the substance of the source, not `company_news.source`. Splits the hook into a grounded subject (checkable, from the source) and an unconstrained opinion on it (the sender's own view, not a factual claim), with the caveat that an opinion may not smuggle in an unverified fact |
 
 ---
 
@@ -542,6 +543,23 @@ meaning is cut.
    (D17). A posting that is not intern-appropriate is skipped entirely — never
    a fallback, because citing a senior vacancy in an internship enquiry is
    worse than citing nothing (§3, D23).
+
+   **The source is how the sender learned it, never what the sentence is about
+   (D29).** Write about the thing the company built; do not write about the
+   coverage of it. "Saw the Economic Times piece on your voice AI" reports
+   journalism back at a founder and quietly signals that the sender knows them
+   only through press. "Your voice AI for blue-collar hiring is a hard routing
+   problem" talks about their actual work. The news item, launch post or
+   description is research input — it supplies the fact, then disappears.
+
+   The sentence splits into two halves with different rules. The **subject**
+   must be grounded: "your voice AI for blue-collar hiring" comes from the
+   cited source and is checkable. The **observation** on it is the sender's own
+   opinion — "that's a hard routing problem", "that's the part I find
+   interesting" — and is deliberately unconstrained, because an opinion is not
+   a factual claim about the company. What the observation may never do is
+   assert an unverified *fact* about them ("you must be processing millions of
+   calls"), which would be a fabrication wearing an opinion's clothes.
 2. **Why the sender is worth taking on — at most two claims, ideally one.**
    Must cite only `resume_profile.claims`; never an invented skill or metric,
    never implied professional seniority. For an intern these are projects,
@@ -561,9 +579,9 @@ Subject: Backend intern — Vahan
 
 Hi Madhav,
 
-Saw the Economic Times piece on OpenAI backing Vahan's voice AI for
-blue-collar hiring. Matching workers to jobs over voice at that scale is a
-hard routing problem.
+You're matching blue-collar workers to jobs over voice, in a dozen languages.
+That routing problem is the part I keep thinking about — speech is a brutal
+input to build a matching system on.
 
 I'm a final-year CS student. I built <specific project from resume_profile
 .claims>, which <one concrete outcome>. Python and Postgres mostly.
@@ -573,10 +591,14 @@ Would you take an intern this summer? Happy to send code.
 Suryansh
 ```
 
-Note what it does not contain: no "I hope this finds you well", no paragraph
-explaining what Vahan does, no list of six technologies, no mention of
-location, no closing paragraph restating the ask. The hook is dated and
-sourced, so it could not have been sent to any other company.
+The hook is drawn from a real news item, but the news item is nowhere in the
+sentence (D29) — no outlet, no date, no "I saw". It reads as someone who
+understands the product, not someone who read about it. It still could not have
+been sent to any other company, which is the only test that matters.
+
+Note also what it does not contain: no "I hope this finds you well", no
+paragraph explaining Vahan back to Vahan, no list of six technologies, no
+mention of location, no closing paragraph restating the ask.
 
 **Structured output, not free text (D11).** The drafter calls Gemini with a
 `responseSchema` returning `{subject, body, research_source_type,
@@ -617,9 +639,20 @@ It runs on every draft and is unit-testable in isolation. A draft is rejected if
   paraphrase check, so part 1 cannot just quote the tagline back;
 - **`research_source_type` / `research_source_id` do not resolve to a real row**
   for this company, or the cited row's own text shares no distinctive term
-  (a proper noun, a number, a named person) with the "why" sentence — this is
-  the grounding check for part 2, and it is what stops the model from
-  fabricating a plausible-sounding but untrue reason;
+  (a proper noun, a number, a named person) with the hook — this is the
+  grounding check, and it is what stops the model from fabricating a
+  plausible-sounding but untrue reason;
+- **the only distinctive term shared with the cited row is its publication
+  name** (D29) — i.e. the overlap comes from `company_news.source` rather than
+  from the substance of the headline. Without this, a draft could satisfy the
+  grounding check merely by naming the outlet while saying nothing about what
+  the company actually built. The shared term must come from the substantive
+  part of the source;
+- **it refers to the source as a source** (D29) — a phrase check for "saw the",
+  "read the", "read about", "the article", "the piece", "coverage", "featured
+  in", "in the news", "press release", "came across", plus any value of
+  `company_news.source` for this company appearing verbatim in the body. Write
+  about what they built, not about the journalism describing it;
 - it asserts a skill, metric or role absent from `resume_profile.claims`;
 - **`research_source_type == "job_posting"` but the cited posting is not
   intern-appropriate** (D23) — the single most damaging failure available here,
@@ -811,6 +844,15 @@ all outreach content stay on the user's own infrastructure.
   and a 90-word three-part draft that breaks none of them must pass. Assert
   the illustrative example in §10 itself passes every rule; if a future edit
   breaks that, either the example was wrong or the rules drifted.
+
+  D29 gets two tests that matter more than they look. First, a draft opening
+  "Saw the Economic Times piece on your voice AI…" must be rejected on the
+  source-reference check, while a draft saying "You're matching blue-collar
+  workers to jobs over voice" — grounded in the same news row — must pass.
+  Second, the loophole test: a draft whose *only* overlap with the cited news
+  row is the publication name must fail grounding, proving the shared term is
+  required to come from the substance of the headline and not from
+  `company_news.source`.
 
   D24 regression: take a fixture, compute `rank_key` order, then attach job
   postings (intern-appropriate and not) to half the companies and recompute —

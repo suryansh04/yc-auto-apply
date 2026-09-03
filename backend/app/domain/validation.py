@@ -2,6 +2,7 @@
 """Deterministic anti-slop rules. Spec §10. These are domain code, not prompt
 instructions, precisely so they can be unit-tested and cannot be argued with."""
 import re
+from dataclasses import dataclass
 
 MAX_WORDS = 120
 MAX_SENTENCE_WORDS = 25
@@ -91,3 +92,74 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
             errs.append("follow-up is not shorter than the previous message")
 
     return errs
+
+
+SOURCE_REFERENCE_PHRASES = [
+    "saw the", "read the", "read about", "the article", "the piece",
+    "coverage", "featured in", "in the news", "press release", "came across",
+]
+_STOPWORDS = {
+    "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "at", "with",
+    "is", "are", "was", "were", "that", "this", "it", "its", "your", "you",
+    "their", "from", "by", "as", "be", "has", "have", "we", "our", "i", "over",
+}
+
+
+@dataclass(frozen=True)
+class SourceRow:
+    kind: str
+    text: str
+    publication: str | None
+    intern_appropriate: bool | None
+
+
+def _terms(text: str) -> set[str]:
+    return {w for w in re.findall(r"[A-Za-z0-9']+", text.lower())
+            if w not in _STOPWORDS and len(w) > 2}
+
+
+def validate_grounding(draft, source, company_name, one_liner, claims) -> list[str]:
+    # `claims` is accepted (Task 14 passes it) but not yet enforced here: the
+    # rule that rejects a draft asserting a skill absent from the resume
+    # claims cannot be calibrated until real drafts exist to look at. This is
+    # a deliberate deferral, not an oversight.
+    errs: list[str] = []
+    body = draft.body
+    low = body.lower()
+
+    if source is None or draft.research_source_id is None:
+        return ["research source does not resolve to a real row"]
+
+    for phrase in SOURCE_REFERENCE_PHRASES:
+        if phrase in low:
+            errs.append(f"refers to the source as a source: {phrase!r}")
+
+    pub_terms: set[str] = set()
+    if source.publication:
+        pub_terms = _terms(source.publication)
+        if source.publication.lower() in low:
+            errs.append("publication name appears in the body")
+
+    substantive = _terms(source.text) - pub_terms
+    shared = substantive & _terms(body)
+    if not shared:
+        errs.append("hook shares no distinctive term with the cited source")
+
+    if company_name and company_name.lower() not in low:
+        errs.append("does not name the company")
+
+    if source.kind == "job_posting" and source.intern_appropriate is False:
+        errs.append("cited job posting is not intern-appropriate")
+
+    if one_liner:
+        ol = _terms(one_liner)
+        if ol and len(ol & _terms(body)) / len(ol) > 0.6:
+            errs.append("hook overlaps more than 60% with one_liner")
+
+    return errs
+
+
+def validate_draft(draft, source, company_name, one_liner, claims,
+                   previous_body=None) -> list[str]:
+    return (validate_style(draft, previous_body)
+            + validate_grounding(draft, source, company_name, one_liner, claims))

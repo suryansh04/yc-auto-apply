@@ -20,13 +20,17 @@ enquiry per founder, routes every draft through human approval, sends from the
 user's own Gmail, follows up twice when there is no reply, and classifies every
 reply into an outcome shown on a dashboard.
 
-**The ask is an internship, not a listed vacancy (D23).** This is not an
-application to an advertised role. Most of these companies have no intern
-posting open at all — measured in §3, roughly 7 of 96 do — so the email is a
-speculative approach to a founder asking whether they would take an intern, and
-it must read that way. Where an intern-appropriate posting does exist, the
-email may reference it; where one does not, the email must not imply the sender
-is applying to anything.
+**This system sends speculative enquiries to founders. It does not submit
+applications to vacancies (D24).** Whether a company has an opening is
+irrelevant to whether it is worth writing to — the careers page lags reality at
+this size, and for internships often does not exist at all. The motivating
+real-world case is Swipe (S21, Hyderabad), which sits in the target set with
+zero advertised roles and where a cold email nonetheless landed an internship.
+Every founder at all 96 companies is written to on the same footing. Where an
+intern-appropriate posting happens to exist it may be mentioned, but that is
+incidental, and a company without one is not a weaker prospect — arguably it is
+a stronger one, since nobody else is writing to them about a role that was
+never advertised.
 
 ---
 
@@ -94,12 +98,12 @@ and `long_description`.
 
 **All 96 are targeted, both groups (D19).** The 34/62 split is not a filter —
 it changes only which research source grounds the "why I like this company"
-line (D17) and, in the dashboard, which drafts are queued for review first.
-Every founder at all 96 companies is emailed. Note that for an internship the
-34/62 split matters far less than it first appears: only ~7 of the 96 have an
-*intern-appropriate* posting (measured below), so the great majority of emails
-— hiring company or not — are grounded in news or launch posts rather than a
-job posting (D23).
+line (D17). Every founder at all 96 companies is emailed on the same footing.
+For an internship the 34/62 split is close to meaningless: only ~7 of the 96
+have an *intern-appropriate* posting, so the great majority of emails — hiring
+company or not — are grounded in news or launch posts rather than a job
+posting. The split does not affect review-queue order either; `rank_key`
+ignores postings entirely (D24).
 
 **Founder data is scrapeable; founder emails are not.** YC company pages embed
 an Inertia.js payload in a `data-page="..."` HTML attribute. Parsing it yields a
@@ -152,12 +156,25 @@ empty / "Any (new grads ok)". Second, citing *any* posting is no longer safe:
 telling a founder "I saw you're hiring a Senior Engineer, 6+ years" when you
 want an internship reads worse than citing nothing at all.
 
-One caveat worth noting, not acted on: the intern roles that do exist skew
-non-technical — of the 15 found, 14 were marketing, content, design, HR, BD or
-ops, and only one (Orangewood Labs' "Vision Engineer Intern") was engineering.
-A technical candidate should expect the job-posting hook to be rare and rely
-mostly on news and launch posts (D17's priority chain already handles this
-correctly).
+The intern roles that do exist also skew non-technical — of the 15 found, 14
+were marketing, content, design, HR, BD or ops, and only one (Orangewood Labs'
+"Vision Engineer Intern") was engineering.
+
+**A posting's absence says nothing about whether a founder will take an intern
+(D24).** The user's own counterexample is in this dataset: **Swipe** (Summer
+2021, Hyderabad, team 60, "Super AI Accountant for SMBs") is in the 96-company
+target set and carries `isHiring: false` with zero job postings — and a
+candidate known to the user got an internship there by cold email. Founders at
+this size hire opportunistically when someone interesting turns up; the careers
+page lags reality, and for an internship it often does not exist at all. If
+anything a company with no posting is a *better* cold-outreach target, because
+nobody else is writing to them about a role that was never advertised.
+
+This is the single most important framing point in the document: **this system
+sends speculative enquiries to founders, it does not submit applications to
+vacancies.** Postings are an occasional, incidental nicety when one happens to
+be relevant — never a target filter, never a ranking signal, never a
+precondition.
 
 News items and launch posts are exactly the raw material a human would use to
 write "why I like your company": specific, dated, sourced facts rather than
@@ -198,7 +215,8 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D20 | Each background pipeline stage runs as its own worker process, not one process running every stage | Explicit user requirement 2026-09-03: "different agents, different responsibility, not all at once." Confirmed as process decomposition, not LLM-agent autonomy — the LLM is still called as a pure structured-output function at exactly two points (draft, classify), unchanged from D8/D11. Each stage worker is independently deployable, restartable and observable: a stuck or crashed `SendWorker` no longer blocks `DraftWorker` from continuing to produce drafts for review, which was a real weakness of the single-process design. No new infrastructure — still Postgres-as-queue (D7), just N small entrypoints against it instead of one |
 | D21 | No APScheduler; each stage worker owns one tiny interval-or-cron loop over its single job | With one job per process, a general-purpose multi-job scheduler is unused generality. A ~20-line `run_forever(fn, every=...)` / `run_daily(fn, at=...)` helper in `worker/scheduling.py`, shared by all seven entrypoints, replaces it — one dependency removed, same behaviour |
 | D22 | Add a second LLM pass — a voice critic — after the deterministic validator, advisory only, never a gate | Explicit user requirement 2026-09-03. A fixed rule list cannot catch a draft that is technically clean but still reads generic or template-like; a language-judging pass can. Scoped narrowly to avoid reopening the fabrication risk of a fully autonomous research agent: the critic judges only tone on an already fact-checked draft, cannot introduce new claims, cannot block or approve a send by itself, and every verdict — `PASS` included — still goes to the human approval queue (D5), which stays the only step that can actually authorise a send |
-| D23 | The ask is an internship. A `job_posting` may only be cited when it is intern-appropriate; otherwise the drafter falls through to the next research source | User requirement 2026-09-03. Measured in §3: 62 of 83 postings at target companies demand 1+ to 11+ years, and only ~7 of 96 companies have any intern posting at all. Citing a senior vacancy in an internship enquiry is worse than citing nothing — it signals the sender did not read what they are quoting. Intern-appropriate is `type == "Internship"` OR title contains "intern" OR `min_experience` is empty / "Any (new grads ok)", because 4 of 15 intern-titled roles were typed `Full-time` |
+| D23 | The ask is an internship. If — and only if — the drafter chooses to cite a `job_posting`, that posting must be intern-appropriate; otherwise it is skipped and the drafter uses another source | Narrow guard against one specific, damaging error, nothing more. Measured in §3: 62 of 83 postings at target companies demand 1+ to 11+ years. Citing a senior vacancy in an internship enquiry signals the sender did not read what they are quoting. Intern-appropriate is `employment_type == "Internship"` OR title contains "intern" OR `min_experience` is empty / "Any (new grads ok)", because 4 of 15 intern-titled roles were typed `Full-time`. This rule governs *citation only* — see D24, it must never leak into targeting or ranking |
+| D24 | Job postings are never a targeting signal, never a ranking signal, and never a precondition for contacting a founder. A company with no openings is exactly as valid a target as one advertising an internship | Explicit user correction 2026-09-03: "just email them regardless of whether they have opening or not". Evidenced in the dataset itself — **Swipe** (S21, Hyderabad, team 60) sits in the target set with `isHiring: false` and zero postings, and a candidate known to the user won an internship there by cold email. The careers page lags reality at this company size, and for internships often does not exist. An earlier draft of this spec ranked intern-posting companies to the top of the review queue, which would have buried Swipe — that ranking is removed (§8 stage 5). The mental model is a speculative approach to a founder, not an application to a vacancy |
 
 ---
 
@@ -386,15 +404,22 @@ contend over the same rows, only over the same table.
    be cited by the drafter.
 5. **DraftOutreach**. See §10. Processes every `READY_TO_DRAFT` row — from all
    96 companies, hiring or not (D19) — with no filtering by `isHiring`. The one
-   place hiring status affects anything is `rank_key`, a computed (not stored)
-   domain sort used only for **review-queue display order**: rows for companies
-   with at least one **intern-appropriate** `job_posting` (D23) sort first,
-   then rows for companies with any other open posting, then the rest —
-   tie-broken by `team_size` descending, then `founder.full_name`. Ranking on
-   intern-appropriate postings rather than any posting means the ~7 companies
-   actually advertising an internship surface at the top of the queue, where
-   the strongest emails are. It changes which drafts the user reviews first; it
-   never changes who gets drafted or sent.
+   `rank_key`, a computed (not stored) domain sort, controls **review-queue
+   display order only**. It sorts by *strength of available research material*
+   — companies with a recent `company_news` item first, then those with a
+   `company_launches` post, then the rest — tie-broken by `team_size`
+   ascending, then `founder.full_name`. Its only purpose is to put the
+   best-grounded drafts in front of the reviewer early, while their attention
+   is freshest.
+
+   **`rank_key` must not consider job postings or `isHiring` at all (D24).** An
+   earlier version of this spec ranked companies with intern postings to the
+   top; that was wrong and is removed. Swipe — the real case that motivated
+   this — has zero postings and would have sunk to the bottom of the queue. A
+   company with no openings is exactly as valid a target as one advertising an
+   internship, and the queue order must not imply otherwise. Ranking never
+   changes who gets drafted or sent; every founder at all 96 companies is
+   emailed regardless (D19).
 6. **ApproveOutreach**. Dashboard action. The user may edit the subject and body
    before approving; edits set `messages.edited_by_user = true` and are retained
    as style references for later drafts (§10).
@@ -491,10 +516,14 @@ produce, and the domain model requires, four grounded parts:
    intern-appropriate is skipped entirely — it is never a fallback, because
    citing a senior vacancy in an internship enquiry is worse than citing
    nothing (§3, D23).
-3. **The ask: an internship** — explicit, and framed as a speculative approach
-   unless part 2 cited an intern-appropriate posting, in which case it may
-   reference that role directly. It must never imply an application to an
-   advertised vacancy that is not intern-appropriate.
+3. **The ask: an internship — always framed as a speculative approach.** The
+   default and overwhelmingly common case is that the company has advertised
+   nothing; the email asks the founder directly whether they would take an
+   intern, and reads as a person writing to a person. Where part 2 happened to
+   cite an intern-appropriate posting, the email may reference that role — but
+   this is the exception, not the target, and its absence is never treated as
+   a weaker email (D24). The email must never imply an application to an
+   advertised vacancy.
 4. **Why the sender is worth taking on** — must cite only
    `resume_profile.claims`; never an invented skill or metric, and never
    implied professional seniority. For an intern candidate these claims are
@@ -703,7 +732,12 @@ all outreach content stay on the user's own infrastructure.
   assert it only reorders, never filters — a fixture mixing hiring and
   non-hiring companies must produce `Outreach` rows and eligible drafts for
   every founder in both groups (D19), and a test on `DraftOutreach` must fail
-  if any code path branches on `isHiring` to skip a row.
+  if any code path branches on `isHiring` to skip a row. Add the D24
+  regression test: take a fixture, compute `rank_key` order, then attach job
+  postings (intern-appropriate and not) to half the companies and recompute —
+  **the order must be byte-identical**. A company modelled on Swipe
+  (`isHiring: false`, zero postings, one news item) must rank on its news item
+  alone and must not sort below a company that has postings but no news.
 - **Application** — each use case against in-memory fakes for every port. The
   complete pipeline runs end to end in tests with no network. `DraftOutreach`
   specifically: a fake `DraftCritic` returning `PASS` moves straight to
@@ -851,11 +885,14 @@ Not required to start.
     stop/start <service>` without a full-stack restart.
 11. Zero sent emails cite a job posting that is not intern-appropriate (D23),
     and every sent email contains an explicit internship ask — both enforced by
-    the validator, not left to the model. On the measured data that means at
-    most ~7 of 96 companies produce a posting-grounded email; the rest are
-    grounded in news or launch posts, which is the correct outcome rather than
-    a shortfall.
-12. Every draft reaching the Review Queue carries a `critic_verdict` (D22) —
+    the validator, not left to the model.
+12. No part of the pipeline treats the absence of a job posting as a negative
+    signal (D24). Specifically: `rank_key` produces identical ordering whether
+    or not companies have postings, provable by a test that adds postings to a
+    fixture and asserts the order is unchanged; and a company with
+    `isHiring: false` and zero postings — Swipe is the reference case — reaches
+    `PENDING_APPROVAL` with a fully grounded draft like any other.
+13. Every draft reaching the Review Queue carries a `critic_verdict` (D22) —
     never null for an outbound message that passed the deterministic
     validator — and a `NEEDS_REVISION` verdict is demonstrably advisory: a
     test approving and sending a draft the critic flagged must succeed

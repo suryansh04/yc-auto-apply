@@ -143,10 +143,10 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D8 | Ports and adapters for every external service | Lets the entire pipeline run in tests with no network and no API keys |
 | D9 | Single user, single-password gate | No multi-tenancy requirement exists; auth complexity would be pure overhead |
 | D10 | No tracking pixels, no link shorteners | Deliverability. These are the dominant spam signals for personal-domain cold mail |
-| D11 | Gemini Flash for drafting and reply classification, not Sarvam | Evaluated 2026-09-03. Both cost ~INR 45 per full run, so cost does not decide it. Sarvam's differentiator is 11 Indic languages and this workload is entirely English, so that capability goes unused while general English prose quality — the core requirement — suffers. Gemini also has first-class `responseSchema` structured output, where Sarvam's Python SDK requires passing `response_format` through `request_options={"additional_body_parameters": {...}}` |
-| D12 | Free tier for development, paid tier for real runs | Gemini's free tier (1,500 requests/day, far above the ~70/day peak here) may use inputs and outputs for model training. Real runs send the user's resume and ~192 founders' names and addresses, so production runs use the paid tier at roughly INR 45 per run |
+| D11 | Gemini Flash for drafting and reply classification, not Sarvam | Evaluated 2026-09-03. Both cost a broadly comparable, trivial amount per full run (§19), so cost does not decide it. Sarvam's differentiator is 11 Indic languages and this workload is entirely English, so that capability goes unused while general English prose quality — the core requirement — suffers. Gemini also has first-class `responseSchema` structured output, where Sarvam's Python SDK requires passing `response_format` through `request_options={"additional_body_parameters": {...}}` |
+| D12 | Free tier for development, paid tier for real runs | Gemini's free tier (1,500 requests/day, far above the ~70/day peak here) may use inputs and outputs for model training. Real runs send the user's resume and ~192 founders' names and addresses, so production runs use the paid tier, at roughly INR 60-65 per full run including the voice critic (D22, §19) |
 | D13 | The model id is configuration, not code | `GEMINI_MODEL` env var pins the exact model. Flash generations turn over quickly and Google has published a price increase effective 2027-01-01 for some of them, so the adapter must never hardcode a model id |
-| D14 | Pay for the paid tier by UPI through Google Cloud Billing | Verified 2026-09-03. The paid tier requires a linked Cloud Billing account, and Cloud Billing in India accepts UPI given an Indian billing address and bank account, INR billing, a registered UPI account and a one-time prepayment of about INR 500-1000. No international card is needed. At ~INR 45 per run an INR 500 prepayment covers roughly eleven full runs. Google's wording is "if you're a qualified organization in India", so individual-account eligibility should be confirmed in the console before relying on it |
+| D14 | Pay for the paid tier by UPI through Google Cloud Billing | Verified 2026-09-03. The paid tier requires a linked Cloud Billing account, and Cloud Billing in India accepts UPI given an Indian billing address and bank account, INR billing, a registered UPI account and a one-time prepayment of about INR 500-1000. No international card is needed. At ~INR 60-65 per run (§19) an INR 500 prepayment covers roughly eight full runs. Google's wording is "if you're a qualified organization in India", so individual-account eligibility should be confirmed in the console before relying on it |
 | D15 | No third-party INR/UPI LLM reseller proxies | Resellers do solve INR and UPI billing, but every prompt would route through an unvetted intermediary, and prompts here carry the user's resume plus ~192 founders' names and email addresses. That is worse for third-party personal data than the free tier's published policy. If UPI cannot be attached, the fallback is Sarvam (D11 notes the quality trade-off) or staying on the free tier for development only |
 | D16 | Company research reuses the founder-scrape request; no new API, no separate fetch | `newsItems[]`, `launches[]` and `jobPostings[]` already arrive in the `data-page` payload fetched in stage 2 (§8). Adding a second research call per company would double the request volume against YC for data already in hand |
 | D17 | Only `newsItems`, `launches` and verified resume claims may be cited as reasons for outreach; the drafter may not invent a "why I like this company" from the `one_liner`/`long_description` alone | A generic description restated as enthusiasm is the clearest tell of automated outreach. Dated, sourced facts (a funding round, a founder's own launch post) are checkable and specific; a one-liner is marketing copy every recipient has already read about their own company |
@@ -154,6 +154,7 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D19 | `isHiring` / open `jobPostings` is a review-queue ordering and personalisation signal only — never a targeting filter. All 96 companies (34 currently hiring, 62 not) get an `Outreach` row for every founder | Explicit user requirement 2026-09-03: outreach must cover companies without a current opening as well as those with one. The pipeline never gated on `isHiring` (§8 never referenced it as a filter), but this makes the guarantee explicit and traceable rather than implicit, and closes off a plausible future misreading of "rank hiring-first" as "hiring-only" |
 | D20 | Each background pipeline stage runs as its own worker process, not one process running every stage | Explicit user requirement 2026-09-03: "different agents, different responsibility, not all at once." Confirmed as process decomposition, not LLM-agent autonomy — the LLM is still called as a pure structured-output function at exactly two points (draft, classify), unchanged from D8/D11. Each stage worker is independently deployable, restartable and observable: a stuck or crashed `SendWorker` no longer blocks `DraftWorker` from continuing to produce drafts for review, which was a real weakness of the single-process design. No new infrastructure — still Postgres-as-queue (D7), just N small entrypoints against it instead of one |
 | D21 | No APScheduler; each stage worker owns one tiny interval-or-cron loop over its single job | With one job per process, a general-purpose multi-job scheduler is unused generality. A ~20-line `run_forever(fn, every=...)` / `run_daily(fn, at=...)` helper in `worker/scheduling.py`, shared by all seven entrypoints, replaces it — one dependency removed, same behaviour |
+| D22 | Add a second LLM pass — a voice critic — after the deterministic validator, advisory only, never a gate | Explicit user requirement 2026-09-03. A fixed rule list cannot catch a draft that is technically clean but still reads generic or template-like; a language-judging pass can. Scoped narrowly to avoid reopening the fabrication risk of a fully autonomous research agent: the critic judges only tone on an already fact-checked draft, cannot introduce new claims, cannot block or approve a send by itself, and every verdict — `PASS` included — still goes to the human approval queue (D5), which stays the only step that can actually authorise a send |
 
 ---
 
@@ -198,11 +199,11 @@ backend/app/
                  D19), the slop validator. Imports no framework, no ORM,
                  performs no IO.
   ports/         Protocols only: YCDirectory, FounderSource, EmailVerifier,
-                 MailSender, MailReader, Drafter, ReplyClassifier,
-                 ResumeParser, Clock, UnitOfWork.
+                 MailSender, MailReader, Drafter, DraftCritic (D22),
+                 ReplyClassifier, ResumeParser, Clock, UnitOfWork.
   adapters/      Real implementations: YcOssClient, YcPageScraper,
                  ReoonVerifier, GmailSender, GmailReader, GeminiDrafter,
-                 GeminiClassifier, SQLAlchemy repositories.
+                 GeminiCritic (D22), GeminiClassifier, SQLAlchemy repositories.
   application/   One use case per pipeline stage: SyncCompanies,
                  ScrapeCompanyPage, ResolveEmails, ParseResume, DraftOutreach,
                  ApproveOutreach, SendApproved, PollReplies,
@@ -290,7 +291,10 @@ in the domain state machine and again by a database constraint (see §13).
 - **messages** — `id`, `outreach_id`, `sequence_step`, `direction`
   (`outbound` | `inbound`), `subject`, `body`, `research_source_type`
   (`news` | `launch` | `job_posting` | `long_description`, nullable — inbound
-  messages have none), `research_source_id`, `gmail_message_id`,
+  messages have none), `research_source_id`, `critic_verdict` (`pass` |
+  `needs_revision`, nullable — inbound messages have none), `critic_concerns`
+  (jsonb array of `{span, issue}`, D22), `critic_overall_note` (maps 1:1 from
+  the critic's `overall_note` field below), `gmail_message_id`,
   `gmail_thread_id`, `approved_at`, `sent_at`, `received_at`, `edited_by_user`.
 - **outcomes** — `id`, `outreach_id`, `label`, `confidence`, `rationale`,
   `classified_at`, `source_message_id`.
@@ -483,9 +487,45 @@ second failure moves the row to `PENDING_APPROVAL` flagged *needs manual write*,
 with the rejected draft and the reasons shown. The pipeline never silently
 sends a draft that failed validation, and never discards work without showing it.
 
----
+**The voice critic (D22) — a second, judgment-based pass, advisory only.**
+The deterministic validator above catches hard, checkable violations (banned
+phrases, grounding, length). It cannot catch a draft that is technically clean
+but still *reads* generic, stiff or template-like — the kind of thing a person
+notices in one glance but no fixed rule list captures. For that, once a draft
+passes the deterministic validator, `draft-worker` (§5 — this is a step inside
+the existing `DraftOutreach` use case, not a new pipeline stage or worker) makes
+one more Gemini call with a `responseSchema` returning:
 
-## 11. Reply Classification
+```
+{
+  verdict: "PASS" | "NEEDS_REVISION",
+  concerns: [ { span: string, issue: string } ],   // 0-3 items
+  overall_note: string                              // <= 20 words
+}
+```
+
+`span` quotes the exact phrase the critic is flagging; `issue` is a short,
+specific reason ("this opener could be sent to any company", "no person
+actually writes 'the innovative work you're doing'"). The critic is asked to
+judge only naturalness and specificity of tone, never facts — it is not
+re-checking grounding, that is the deterministic validator's job and already
+done.
+
+**On `NEEDS_REVISION`:** exactly one automatic re-draft, with the critic's
+`concerns` appended to the prompt — the same one-retry pattern as the
+deterministic validator above, not a second, independent retry budget. The
+re-drafted output goes back through the deterministic validator first (a fix
+for tone could accidentally introduce a banned phrase or break grounding), then
+through the critic once more. Whatever the state after that — `PASS`,
+still `NEEDS_REVISION`, or the retry itself failed deterministic validation and
+fell back to *needs manual write* — the draft moves to `PENDING_APPROVAL`
+regardless, with the critic's latest verdict, `concerns` and `overall_note`
+stored on the `messages` row (§7) and shown next to the draft in the Review
+Queue (§16). **The critic can never block a send by itself and can never
+approve one either** — it only ever adds information for the human review
+step (D5), which stays the sole gate. Treat a `PASS` as one input, not a
+reason to skim faster; the critic is another LLM, not a person, and can share
+blind spots with the drafter that only a human reliably catches.
 
 Labels: `INTERESTED`, `REJECTED`, `REFERRAL`, `AUTO_REPLY`, `OUT_OF_OFFICE`,
 `UNCLEAR`.
@@ -584,7 +624,12 @@ all outreach content stay on the user's own infrastructure.
   every founder in both groups (D19), and a test on `DraftOutreach` must fail
   if any code path branches on `isHiring` to skip a row.
 - **Application** — each use case against in-memory fakes for every port. The
-  complete pipeline runs end to end in tests with no network.
+  complete pipeline runs end to end in tests with no network. `DraftOutreach`
+  specifically: a fake `DraftCritic` returning `PASS` moves straight to
+  `PENDING_APPROVAL`; one returning `NEEDS_REVISION` must trigger exactly one
+  re-draft call and no more, and the row must reach `PENDING_APPROVAL`
+  regardless of the second verdict — never blocked, never auto-sent, and never
+  looped past one retry (D22).
 - **Adapters** — one shared contract test suite executed against both the fake
   and the real implementation of each port, so the fakes cannot drift. Real
   adapters are marked `@pytest.mark.integration` and skip cleanly without
@@ -617,8 +662,10 @@ React with Vite, JSX, TanStack Query for server state. Four screens:
   specific `company_news` / `company_launches` / `job_posting` row named by
   `research_source_type` and `research_source_id` (§10) so the reviewer can
   check the cited fact at a glance rather than re-researching the company
-  themselves. Edit, approve, reject. Keyboard-driven, because the user will
-  move through roughly 192 drafts.
+  themselves. Also shown: the voice critic's `critic_verdict` and
+  `critic_overall_note` (D22) as one small, dismissible line — a second opinion, not a
+  gate, and not a reason to review any faster. Edit, approve, reject.
+  Keyboard-driven, because the user will move through roughly 192 drafts.
 - **Contacts** — all 96 companies and their founders — both hiring and not
   (D19) — filterable by state, hiring status, batch and email-resolution
   status. The hiring filter is a view control here, not a pipeline gate.
@@ -667,9 +714,9 @@ included regardless, as courtesy and because it improves reply quality.
 | YC founder scraping | Free |
 | Reoon Email Verifier | Free tier: 600 verifications/month for life. A full run needs ~480 |
 | Gmail sending | Free — 500/day limit against a need of ~20/day |
-| Gemini Flash drafting and classification | INR 0 on the free tier during development; about INR 45 per full run on the paid tier, which production runs use (D12) |
+| Gemini Flash drafting, classification and voice critique (D22) | INR 0 on the free tier during development; about INR 60-65 per full run on the paid tier, which production runs use (D12) |
 | Hosting | Local, or a free tier |
-| **Total** | **INR 0 to develop; about INR 45 per real 192-founder run** |
+| **Total** | **INR 0 to develop; about INR 60-65 per real 192-founder run** |
 
 A full run is roughly 450 drafts (192 founders, up to three messages each, plus
 validator retries) and about 200 reply classifications — around 1.1M input and
@@ -677,8 +724,12 @@ validator retries) and about 200 reply classifications — around 1.1M input and
 launch posts, job posting detail) added for grounding (§10); that context is a
 few hundred tokens per draft against an already input-heavy prompt, so it does
 not move the total meaningfully. At Gemini Flash rates of $0.25 / $1.50 per
-million tokens that is $0.51. Sarvam 105B, at INR 29.28 / 73.2 per million,
-comes to about INR 44 for the same work, so the two are equivalent on cost and
+million tokens that is $0.51. The voice critic (D22) adds one shorter call per
+draft, plus a second call on whichever fraction comes back `NEEDS_REVISION`
+and gets the one automatic retry — call it ~500 critic calls total at roughly
+600 input / 150 output tokens each, another $0.19, for a full-run total near
+$0.70 (~INR 62). Sarvam 105B, at INR 29.28 / 73.2 per million, comes to a
+comparable figure for the same work, so the two remain equivalent on cost and
 D11 was decided on prose quality and structured-output ergonomics instead.
 
 **Optional safety net:** Reoon's smallest one-time pack is 10,000 credits for
@@ -717,6 +768,12 @@ Not required to start.
     loss and no duplicate sends (§13). Each of the seven workers can be
     started, stopped and restarted independently via `docker compose
     stop/start <service>` without a full-stack restart.
+11. Every draft reaching the Review Queue carries a `critic_verdict` (D22) —
+    never null for an outbound message that passed the deterministic
+    validator — and a `NEEDS_REVISION` verdict is demonstrably advisory: a
+    test approving and sending a draft the critic flagged must succeed
+    identically to approving a `PASS` draft. The critic can inform the human
+    reviewer; it can never block or bypass them.
 
 ---
 

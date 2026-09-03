@@ -110,6 +110,8 @@ therefore supplies the entire targeting and personalisation dataset — roughly
 | D11 | Gemini Flash for drafting and reply classification, not Sarvam | Evaluated 2026-09-03. Both cost ~INR 45 per full run, so cost does not decide it. Sarvam's differentiator is 11 Indic languages and this workload is entirely English, so that capability goes unused while general English prose quality — the core requirement — suffers. Gemini also has first-class `responseSchema` structured output, where Sarvam's Python SDK requires passing `response_format` through `request_options={"additional_body_parameters": {...}}` |
 | D12 | Free tier for development, paid tier for real runs | Gemini's free tier (1,500 requests/day, far above the ~70/day peak here) may use inputs and outputs for model training. Real runs send the user's resume and ~192 founders' names and addresses, so production runs use the paid tier at roughly INR 45 per run |
 | D13 | The model id is configuration, not code | `GEMINI_MODEL` env var pins the exact model. Flash generations turn over quickly and Google has published a price increase effective 2027-01-01 for some of them, so the adapter must never hardcode a model id |
+| D14 | Pay for the paid tier by UPI through Google Cloud Billing | Verified 2026-09-03. The paid tier requires a linked Cloud Billing account, and Cloud Billing in India accepts UPI given an Indian billing address and bank account, INR billing, a registered UPI account and a one-time prepayment of about INR 500-1000. No international card is needed. At ~INR 45 per run an INR 500 prepayment covers roughly eleven full runs. Google's wording is "if you're a qualified organization in India", so individual-account eligibility should be confirmed in the console before relying on it |
+| D15 | No third-party INR/UPI LLM reseller proxies | Resellers do solve INR and UPI billing, but every prompt would route through an unvetted intermediary, and prompts here carry the user's resume plus ~192 founders' names and email addresses. That is worse for third-party personal data than the free tier's published policy. If UPI cannot be attached, the fallback is Sarvam (D11 notes the quality trade-off) or staying on the free tier for development only |
 
 ---
 
@@ -391,7 +393,10 @@ are read from environment variables via a typed settings object, and are never
 committed. `GEMINI_MODEL` pins the model id and `GEMINI_TIER` records whether
 the configured key is free or paid, so a run against real founder data on a
 free-tier key fails loudly rather than silently sending that data into a
-training-eligible pipeline (D12). `.env` is git-ignored; `.env.example` documents every required
+training-eligible pipeline (D12). The paid key is obtained by linking a Google
+Cloud Billing account funded by UPI (D14); on the paid tier Google states that
+prompts and responses are "not used to improve Google products", which is what
+makes real runs against founder data acceptable. `.env` is git-ignored; `.env.example` documents every required
 variable with placeholder values. OAuth refresh tokens are stored in Postgres,
 not in files. The dashboard sits behind a single-password gate; the resume and
 all outreach content stay on the user's own infrastructure.

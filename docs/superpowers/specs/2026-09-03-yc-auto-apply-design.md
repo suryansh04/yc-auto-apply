@@ -239,6 +239,7 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D25 | Target band widened from 11-200 to **1-200** people: 144 companies, ~269 founders | User decision 2026-09-03. The 48 companies of 1-10 people are the segment most likely to take an intern informally, and the founder is the person reading the inbox. Measured trade-off (§3): ~70% of them have neither news nor a launch post, so their emails ground on `long_description` detail instead — weaker, but still specific and still honest. Also pushes email verification to ~670 per run, just past Reoon's 600/month free tier (D26) |
 | D26 | A full run now slightly exceeds the Reoon free tier; buy the one-time credit pack rather than splitting the run | ~269 founders × ~2.5 verifications = ~670 against a 600/month free allowance. Options are to straddle a month boundary or spend $11.90 (~INR 1,050) once for 10,000 non-expiring credits. The pack is the better answer now that the run does not fit — it removes a quota pause from the middle of the campaign for roughly the cost of a meal |
 | D27 | The candidate is a software-engineering intern; the email never raises location | User answers 2026-09-03: software engineering, and remote or onsite both acceptable. The SWE consequence is that the job-posting hook is effectively dead — 14 of the 15 intern roles found were marketing, content, design, HR or ops, and only one was engineering — so essentially every email grounds on news, launch or description (D17), which the design already treats as the normal path. Location is simply omitted: raising it invites a constraint the founder had not thought to impose |
+| D28 | The email is short, plain and direct: ~90 words target, 120 hard cap, three parts, no sentence over 25 words | Explicit user requirement 2026-09-03: "short, simple to understand, to the point and crisp". The previous 150-word cap was too loose for cold email to a founder reading on a phone. A word cap alone is insufficient — a model writes to whatever cap it is given — so concision is enforced structurally: sentence length, paragraph count, no semicolons, and a ban on more than half the sentences starting with "I". The former parts 1 and 2 ("what they do" then "why I'm writing") are merged, since a founder knows what their own company does and naming the specific thing that prompted the email proves the research by itself |
 
 ---
 
@@ -521,36 +522,61 @@ and `company_launches` (§7, populated free in stage 2, D16); the founder's
 follow-ups; and up to three previously user-edited messages as style
 references.
 
-**Required structure of a draft.** The user asked for the email to say what the
-company does and why the sender specifically likes it, in a human voice — not
-generic praise — and to ask for an internship (D23). The drafter is prompted to
-produce, and the domain model requires, four grounded parts:
+**Required structure of a draft — three parts, ~90 words, hard cap 120 (D28).**
+The email must be short, plain and direct. A founder reads it on a phone
+between other things; length is not thoroughness, it is friction. Every
+sentence must earn its place, and anything that could be cut without losing
+meaning is cut.
 
-1. **What the company does** — one sentence, in the sender's own words, not a
-   copy of `one_liner`. Paraphrase is required by the validator (see below).
-2. **A specific, cited reason for reaching out to *this* company** — must be
-   grounded in one real source, in priority order: a `company_news` item, a
-   `company_launches` post, an **intern-appropriate** `job_posting` (D23), or
-   (only when none of the first three exist) a concrete mechanism or detail
-   from `long_description` rather than the marketing `one_liner`. Restating
-   `one_liner` back at the founder is exactly the "I came across your company"
-   pattern this system exists to avoid (D17). A posting that is not
-   intern-appropriate is skipped entirely — it is never a fallback, because
-   citing a senior vacancy in an internship enquiry is worse than citing
-   nothing (§3, D23).
-3. **The ask: an internship — always framed as a speculative approach.** The
-   default and overwhelmingly common case is that the company has advertised
-   nothing; the email asks the founder directly whether they would take an
-   intern, and reads as a person writing to a person. Where part 2 happened to
-   cite an intern-appropriate posting, the email may reference that role — but
-   this is the exception, not the target, and its absence is never treated as
-   a weaker email (D24). The email must never imply an application to an
-   advertised vacancy.
-4. **Why the sender is worth taking on** — must cite only
-   `resume_profile.claims`; never an invented skill or metric, and never
-   implied professional seniority. For an intern candidate these claims are
-   typically projects, coursework and skills, so the argument is about
-   relevant capability and genuine interest, not a track record.
+1. **The hook: what they do *and* why the sender is writing, in one or two
+   sentences.** These were previously two separate parts and are deliberately
+   merged (D28) — a founder already knows what their company does, so a
+   standalone "your company builds X" sentence spends words telling them
+   something they know. Naming the specific thing that prompted the email
+   proves the research on its own. Must be grounded in one real source, in
+   priority order: a `company_news` item, a `company_launches` post, an
+   **intern-appropriate** `job_posting` (D23), or (only when none of the first
+   three exist) a concrete mechanism or detail from `long_description` rather
+   than the marketing `one_liner`. Restating `one_liner` back at the founder is
+   exactly the "I came across your company" pattern this system exists to avoid
+   (D17). A posting that is not intern-appropriate is skipped entirely — never
+   a fallback, because citing a senior vacancy in an internship enquiry is
+   worse than citing nothing (§3, D23).
+2. **Why the sender is worth taking on — at most two claims, ideally one.**
+   Must cite only `resume_profile.claims`; never an invented skill or metric,
+   never implied professional seniority. For an intern these are projects,
+   coursework and skills, so the argument is relevant capability, not a track
+   record. A list of five technologies reads as a CV paste; one concrete thing
+   built, named specifically, reads as a person.
+3. **The ask: an internship, in one plain sentence.** Always a speculative
+   approach — the overwhelmingly common case is that nothing is advertised, so
+   the email simply asks whether they would take an intern. Where part 1 cited
+   an intern-appropriate posting it may reference that role, but that is the
+   exception (D24). Never implies an application to an advertised vacancy.
+
+**Illustrative target (not a template to copy — 61 words):**
+
+```
+Subject: Backend intern — Vahan
+
+Hi Madhav,
+
+Saw the Economic Times piece on OpenAI backing Vahan's voice AI for
+blue-collar hiring. Matching workers to jobs over voice at that scale is a
+hard routing problem.
+
+I'm a final-year CS student. I built <specific project from resume_profile
+.claims>, which <one concrete outcome>. Python and Postgres mostly.
+
+Would you take an intern this summer? Happy to send code.
+
+Suryansh
+```
+
+Note what it does not contain: no "I hope this finds you well", no paragraph
+explaining what Vahan does, no list of six technologies, no mention of
+location, no closing paragraph restating the ask. The hook is dated and
+sourced, so it could not have been sent to any other company.
 
 **Structured output, not free text (D11).** The drafter calls Gemini with a
 `responseSchema` returning `{subject, body, research_source_type,
@@ -566,16 +592,29 @@ which fact the draft is standing on.
 **The slop validator is deterministic domain code, not a prompt instruction.**
 It runs on every draft and is unit-testable in isolation. A draft is rejected if:
 
-- the body exceeds 150 words;
+- **the body exceeds 120 words** (D28) — down from 150; the drafter is
+  prompted to target ~90;
+- **any single sentence exceeds 25 words** (D28) — a word cap alone does not
+  produce crispness, because a model will happily write to whatever cap it is
+  given. Long sentences are where padding hides, so they are capped directly;
+- **the body has more than three paragraphs**, or any paragraph exceeds three
+  sentences (D28);
+- **it contains a semicolon** (D28) — in an email this short a semicolon
+  reliably means a sentence that should have been two, or one that should have
+  been cut;
+- **more than half its sentences begin with "I"** (D28) — the classic cold-email
+  failure, where an email meant to interest someone else becomes a list of the
+  sender's own activities. Checkable, and not caught by any other rule here;
 - it contains a banned phrase — "I hope this email finds you well",
   "I am reaching out", "passionate about", "leverage", "synergy",
   "game-changing", "I came across your company", "delve", "tapestry",
-  "in today's fast-paced";
+  "in today's fast-paced", "reach out", "circle back", "at your earliest
+  convenience", "I would love the opportunity", "please do not hesitate";
 - it does not name the company at least once;
 - it contains no company-specific token — a job title from `job_postings`, or a
   distinctive term from `one_liner` / `long_description`;
-- **the "what they do" sentence has more than a 60% word-overlap with
-  `one_liner`** — a paraphrase check, so part 1 cannot just quote the tagline;
+- **the hook has more than a 60% word-overlap with `one_liner`** — a
+  paraphrase check, so part 1 cannot just quote the tagline back;
 - **`research_source_type` / `research_source_id` do not resolve to a real row**
   for this company, or the cited row's own text shares no distinctive term
   (a proper noun, a number, a named person) with the "why" sentence — this is
@@ -598,7 +637,8 @@ It runs on every draft and is unit-testable in isolation. A draft is rejected if
   impose. If a founder asks, that is a reply to answer, not something to
   pre-empt;
 - it contains more than two em dashes;
-- the subject is not between three and eight words, or contains emoji or all-caps words;
+- the subject is not between **three and six words** (D28), or contains emoji
+  or all-caps words;
 - for a follow-up (`sequence_step > 0`), its body is not shorter in words than
   the previous outbound message in the same thread.
 
@@ -636,9 +676,11 @@ one more Gemini call with a `responseSchema` returning:
 `span` quotes the exact phrase the critic is flagging; `issue` is a short,
 specific reason ("this opener could be sent to any company", "no person
 actually writes 'the innovative work you're doing'"). The critic is asked to
-judge only naturalness and specificity of tone, never facts — it is not
+judge only naturalness, specificity and **concision** — never facts. It is not
 re-checking grounding, that is the deterministic validator's job and already
-done.
+done. Its most useful question is the one no rule can express: *is any sentence
+here doing no work?* A draft can pass every length rule above and still contain
+a sentence that adds nothing, and that is exactly what this pass is for (D28).
 
 **On `NEEDS_REVISION`:** exactly one automatic re-draft, with the critic's
 `concerns` appended to the prompt — the same one-retry pattern as the
@@ -673,7 +715,9 @@ silently end an outreach.
 
 Follow-up 1 at +5 days, follow-up 2 at +12 days, both configurable in
 `settings`. Each is drafted with full thread history, must be shorter than the
-message before it, and goes through the same approval queue and the same slop
+message before it — with a 120-word first email (D28) that means roughly 60
+words then 40, which is correct: a follow-up earns less of someone's attention
+than the first email did, not more — and goes through the same approval queue and the same slop
 validator. Any human reply cancels all remaining steps. After step 2 with no
 human reply, the row moves to `CLOSED`.
 
@@ -759,8 +803,16 @@ all outreach content stay on the user's own infrastructure.
   assert it only reorders, never filters — a fixture mixing hiring and
   non-hiring companies must produce `Outreach` rows and eligible drafts for
   every founder in both groups (D19), and a test on `DraftOutreach` must fail
-  if any code path branches on `isHiring` to skip a row. Add the D24
-  regression test: take a fixture, compute `rank_key` order, then attach job
+  if any code path branches on `isHiring` to skip a row.
+
+  The D28 concision rules each get a failing fixture: a 121-word body, a
+  26-word sentence, a four-paragraph body, a body containing a semicolon, and
+  a body where three of five sentences start with "I" — all must be rejected,
+  and a 90-word three-part draft that breaks none of them must pass. Assert
+  the illustrative example in §10 itself passes every rule; if a future edit
+  breaks that, either the example was wrong or the rules drifted.
+
+  D24 regression: take a fixture, compute `rank_key` order, then attach job
   postings (intern-appropriate and not) to half the companies and recompute —
   **the order must be byte-identical**. A company modelled on Swipe
   (`isHiring: false`, zero postings, one news item) must rank on its news item

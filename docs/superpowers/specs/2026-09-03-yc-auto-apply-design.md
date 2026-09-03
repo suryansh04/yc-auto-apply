@@ -28,9 +28,13 @@ outcome shown on a dashboard.
 - Nightly sync of YC companies filtered to India, active, team size 11–200.
 - Scraping founder name, title, LinkedIn, bio and open job postings from YC
   company pages.
-- Per-company research: news items, YC launch posts, job postings and a bounded
-  extract of the company's own homepage, used to say what the company does and
-  to ground a specific, factual reason for reaching out.
+- Per-company research: news items, YC launch posts and job postings, used to
+  say what the company does and to ground a specific, factual reason for
+  reaching out.
+- **Outreach to all 96 target companies regardless of current hiring status**
+  (D19) — both the 34 currently showing open roles and the 62 that are not.
+  `isHiring` / `jobPostings` are a personalisation source (D17) and a
+  review-queue ordering signal, never a targeting filter.
 - Founder email resolution by pattern generation plus third-party verification.
 - Resume parsing into structured, citable claims.
 - LLM drafting with a deterministic anti-slop validator.
@@ -70,8 +74,15 @@ and `long_description`.
 | Tagged India | 223 |
 | India + status Active | 158 |
 | India + Active + team_size 11–200 (the target band) | **96** |
-| ...of which currently hiring | 34 |
+| ...of which currently hiring (`isHiring` with `jobPostings` present) | 34 |
+| ...not currently hiring | 62 |
 | ...with a usable website | 96 |
+
+**All 96 are targeted, both groups (D19).** The 34/62 split is not a filter —
+it changes only which research source grounds the "why I like this company"
+line (D17: a matching job posting for the 34, news / launch / long_description
+for the other 62) and, in the dashboard, which drafts are queued for review
+first. Every founder at all 96 companies is sent an email.
 
 **Founder data is scrapeable; founder emails are not.** YC company pages embed
 an Inertia.js payload in a `data-page="..."` HTML attribute. Parsing it yields a
@@ -140,6 +151,7 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D16 | Company research reuses the founder-scrape request; no new API, no separate fetch | `newsItems[]`, `launches[]` and `jobPostings[]` already arrive in the `data-page` payload fetched in stage 2 (§8). Adding a second research call per company would double the request volume against YC for data already in hand |
 | D17 | Only `newsItems`, `launches` and verified resume claims may be cited as reasons for outreach; the drafter may not invent a "why I like this company" from the `one_liner`/`long_description` alone | A generic description restated as enthusiasm is the clearest tell of automated outreach. Dated, sourced facts (a funding round, a founder's own launch post) are checkable and specific; a one-liner is marketing copy every recipient has already read about their own company |
 | D18 | A founder-published email found in a `launches[]` post outranks every generated pattern | It is the founder's own address, in their own words, requiring no verification. Checked first in §9, before pattern generation |
+| D19 | `isHiring` / open `jobPostings` is a review-queue ordering and personalisation signal only — never a targeting filter. All 96 companies (34 currently hiring, 62 not) get an `Outreach` row for every founder | Explicit user requirement 2026-09-03: outreach must cover companies without a current opening as well as those with one. The pipeline never gated on `isHiring` (§8 never referenced it as a filter), but this makes the guarantee explicit and traceable rather than implicit, and closes off a plausible future misreading of "rank hiring-first" as "hiring-only" |
 
 ---
 
@@ -156,8 +168,10 @@ Two processes and one database:
 ```
 backend/app/
   domain/        Pure Python. Entities, the outreach state machine,
-                 candidate-pattern rules, targeting/ranking, the slop
-                 validator. Imports no framework, no ORM, performs no IO.
+                 candidate-pattern rules, the sync targeting filter (§8 stage
+                 1), the review-queue rank_key (§8 stage 5, ordering only,
+                 D19), the slop validator. Imports no framework, no ORM,
+                 performs no IO.
   ports/         Protocols only: YCDirectory, FounderSource, EmailVerifier,
                  MailSender, MailReader, Drafter, ReplyClassifier,
                  ResumeParser, Clock, UnitOfWork.
@@ -281,7 +295,14 @@ There is no separate queue table. The worker selects due `outreach` rows by
    `resume_profile.claims` — a list of structured facts (skill, project, metric,
    role, education), each with the verbatim source span. Only these claims may
    be cited by the drafter.
-5. **DraftOutreach**. See §10.
+5. **DraftOutreach**. See §10. Processes every `READY_TO_DRAFT` row — from all
+   96 companies, hiring or not (D19) — with no filtering by `isHiring`. The one
+   place hiring status affects anything is `rank_key`, a computed (not stored)
+   domain sort used only for **review-queue display order**: rows for
+   companies with at least one open `job_posting` sort before rows without one,
+   tie-broken by `team_size` descending, then `founder.full_name`. It changes
+   which drafts the user reviews first; it never changes who gets drafted or
+   sent.
 6. **ApproveOutreach**. Dashboard action. The user may edit the subject and body
    before approving; edits set `messages.edited_by_user = true` and are retained
    as style references for later drafts (§10).
@@ -518,7 +539,11 @@ all outreach content stay on the user's own infrastructure.
   sentence that is a near-verbatim copy of `one_liner` must fail the paraphrase
   check. Cover the no-research-material fallback path explicitly (a company
   with no news, no launches and a short `long_description` must route to
-  manual write, never to a strained generic draft).
+  manual write, never to a strained generic draft). `rank_key` ordering:
+  assert it only reorders, never filters — a fixture mixing hiring and
+  non-hiring companies must produce `Outreach` rows and eligible drafts for
+  every founder in both groups (D19), and a test on `DraftOutreach` must fail
+  if any code path branches on `isHiring` to skip a row.
 - **Application** — each use case against in-memory fakes for every port. The
   complete pipeline runs end to end in tests with no network.
 - **Adapters** — one shared contract test suite executed against both the fake
@@ -539,15 +564,17 @@ variables set and no network access.**
 React with Vite, JSX, TanStack Query for server state. Four screens:
 
 - **Pipeline** — funnel counts by state, stage health, quota banners, failures.
-- **Review Queue** — the primary workspace. Draft on the left, company and
-  founder context on the right, including the specific `company_news` /
-  `company_launches` / `job_posting` row named by `research_source_type` and
-  `research_source_id` (§10) so the reviewer can check the cited fact at a
-  glance rather than re-researching the company themselves. Edit, approve,
-  reject. Keyboard-driven, because the user will move through roughly 192
-  drafts.
-- **Contacts** — all 96 companies and their founders, filterable by state,
-  hiring status, batch and email-resolution status.
+- **Review Queue** — the primary workspace. Ordered by `rank_key` (§8 stage 5)
+  — display order only, every company's drafts appear, hiring or not (D19).
+  Draft on the left, company and founder context on the right, including the
+  specific `company_news` / `company_launches` / `job_posting` row named by
+  `research_source_type` and `research_source_id` (§10) so the reviewer can
+  check the cited fact at a glance rather than re-researching the company
+  themselves. Edit, approve, reject. Keyboard-driven, because the user will
+  move through roughly 192 drafts.
+- **Contacts** — all 96 companies and their founders — both hiring and not
+  (D19) — filterable by state, hiring status, batch and email-resolution
+  status. The hiring filter is a view control here, not a pipeline gate.
 - **Thread** — per-outreach timeline: every outbound message, every reply, the
   classified outcome with its rationale.
 
@@ -611,7 +638,10 @@ Not required to start.
 ## 20. Success Criteria
 
 1. A nightly sync produces 96 target companies without manual intervention.
-2. Founder scraping yields roughly 192 founders with name, title and LinkedIn.
+2. Founder scraping yields roughly 192 founders with name, title and LinkedIn,
+   across all 96 companies — both the 34 currently hiring and the 62 that are
+   not (D19). No founder is excluded on the basis of their company's hiring
+   status.
 3. At least 70% of founders reach a `valid` or `published` resolved address; the
    remainder land in `NEEDS_MANUAL_EMAIL` with ranked candidates, never in a
    silent failure.

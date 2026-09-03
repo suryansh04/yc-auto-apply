@@ -139,7 +139,7 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D4 | Send through the user's own Gmail via OAuth | Free, an established account has real sending reputation, and Gmail thread IDs give reply tracking with no extra infrastructure |
 | D5 | Every outbound message passes a human approval queue | At 96 companies the user can review every draft; this is the strongest available defence against low-quality LLM output |
 | D6 | Two follow-ups, at +5 and +12 days, cancelled by any human reply | Most cold-outreach replies come from follow-ups, not the first email |
-| D7 | Modular monolith: FastAPI app + worker + Postgres, DB-as-queue | Production-shaped without Redis or Celery; `SELECT ... FOR UPDATE SKIP LOCKED` is genuinely sufficient at this scale |
+| D7 | Modular monolith: FastAPI app + one worker process per pipeline stage + Postgres, DB-as-queue | Production-shaped without Redis or Celery; `SELECT ... FOR UPDATE SKIP LOCKED` is genuinely sufficient at this scale. Splitting into stage-scoped worker processes (D20) does not require either dependency — it is still N small Python entrypoints against the same queue |
 | D8 | Ports and adapters for every external service | Lets the entire pipeline run in tests with no network and no API keys |
 | D9 | Single user, single-password gate | No multi-tenancy requirement exists; auth complexity would be pure overhead |
 | D10 | No tracking pixels, no link shorteners | Deliverability. These are the dominant spam signals for personal-domain cold mail |
@@ -152,16 +152,41 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D17 | Only `newsItems`, `launches` and verified resume claims may be cited as reasons for outreach; the drafter may not invent a "why I like this company" from the `one_liner`/`long_description` alone | A generic description restated as enthusiasm is the clearest tell of automated outreach. Dated, sourced facts (a funding round, a founder's own launch post) are checkable and specific; a one-liner is marketing copy every recipient has already read about their own company |
 | D18 | A founder-published email found in a `launches[]` post outranks every generated pattern | It is the founder's own address, in their own words, requiring no verification. Checked first in §9, before pattern generation |
 | D19 | `isHiring` / open `jobPostings` is a review-queue ordering and personalisation signal only — never a targeting filter. All 96 companies (34 currently hiring, 62 not) get an `Outreach` row for every founder | Explicit user requirement 2026-09-03: outreach must cover companies without a current opening as well as those with one. The pipeline never gated on `isHiring` (§8 never referenced it as a filter), but this makes the guarantee explicit and traceable rather than implicit, and closes off a plausible future misreading of "rank hiring-first" as "hiring-only" |
+| D20 | Each background pipeline stage runs as its own worker process, not one process running every stage | Explicit user requirement 2026-09-03: "different agents, different responsibility, not all at once." Confirmed as process decomposition, not LLM-agent autonomy — the LLM is still called as a pure structured-output function at exactly two points (draft, classify), unchanged from D8/D11. Each stage worker is independently deployable, restartable and observable: a stuck or crashed `SendWorker` no longer blocks `DraftWorker` from continuing to produce drafts for review, which was a real weakness of the single-process design. No new infrastructure — still Postgres-as-queue (D7), just N small entrypoints against it instead of one |
+| D21 | No APScheduler; each stage worker owns one tiny interval-or-cron loop over its single job | With one job per process, a general-purpose multi-job scheduler is unused generality. A ~20-line `run_forever(fn, every=...)` / `run_daily(fn, at=...)` helper in `worker/scheduling.py`, shared by all seven entrypoints, replaces it — one dependency removed, same behaviour |
 
 ---
 
 ## 5. Architecture
 
-Two processes and one database:
+One API process, seven single-responsibility stage-worker processes, and one
+database (D20). Each worker does exactly one job, in its own loop, and none of
+them talk to each other directly — they only ever claim and update rows in
+Postgres:
 
-- **api** — FastAPI, serves the React dashboard's JSON API.
-- **worker** — APScheduler; claims due work from Postgres and invokes use cases.
-- **Postgres** — domain state *and* the work queue.
+| Process | Pipeline stage (§8) | Loop |
+| --- | --- | --- |
+| **api** | Serves the React dashboard's JSON API; also runs `ParseResume` and `ApproveOutreach` synchronously on user action (§8 note) | Request/response, not a loop |
+| **sync-worker** | 1. SyncCompanies | Daily, at a fixed time (`run_daily`) |
+| **scrape-worker** | 2. ScrapeCompanyPage | Every N hours (`run_forever`) |
+| **resolve-worker** | 3. ResolveEmails | Every N minutes, pauses on Reoon quota exhaustion (§9) |
+| **draft-worker** | 5. DraftOutreach | Every N minutes; the only worker besides reply-poll-worker that calls Gemini |
+| **send-worker** | 7. SendApproved | Every N minutes inside `send_window`; owns `daily_send_cap` accounting |
+| **reply-poll-worker** | 8. PollReplies | Every 15 minutes; the other Gemini caller (classification) |
+| **followup-worker** | 9. ScheduleFollowUps | Every N minutes |
+| **Postgres** | — | domain state *and* the work queue for all seven workers |
+
+Stages 4 (`ParseResume`) and 6 (`ApproveOutreach`) are **not** background
+workers — they are ordinary use cases the `api` process calls synchronously
+when the user uploads a resume or clicks approve/reject. Giving them a
+standing worker process would mean polling for events (an upload, a click)
+that the API already knows about the instant they happen.
+
+Each stage worker crashing or being restarted affects only its own stage: a
+`send-worker` outage stops sends, but `draft-worker` keeps producing drafts for
+review in the meantime, and `sync-worker`/`scrape-worker` keep the company data
+current. This was a real gap in the single-process design — one stuck job used
+to be able to starve every other stage of scheduler time in the same process.
 
 ### Layering
 
@@ -183,7 +208,14 @@ backend/app/
                  ApproveOutreach, SendApproved, PollReplies,
                  ScheduleFollowUps.
   api/           Thin FastAPI routers: parse -> call use case -> serialise.
-  worker/        APScheduler job definitions and the claim loop.
+  worker/        scheduling.py (run_forever / run_daily, D21) and the shared
+                 claim-loop helper (SELECT ... FOR UPDATE SKIP LOCKED, §7),
+                 used by seven tiny entrypoints — sync_worker.py,
+                 scrape_worker.py, resolve_worker.py, draft_worker.py,
+                 send_worker.py, reply_poll_worker.py, followup_worker.py.
+                 Each entrypoint is a few lines: construct its adapters, call
+                 run_forever/run_daily on its one use case. No stage-specific
+                 logic lives here — that is all in application/.
 ```
 
 **The rule that keeps this clean:** `domain/` and `application/` may not import
@@ -267,8 +299,11 @@ in the domain state machine and again by a database constraint (see §13).
 - **settings** — single row: `daily_send_cap`, `send_window_start`,
   `send_window_end`, `followup_day_1`, `followup_day_2`, `signature`.
 
-There is no separate queue table. The worker selects due `outreach` rows by
-`(state, next_action_at <= now())` with `FOR UPDATE SKIP LOCKED`.
+There is no separate queue table. Each stage worker (D20) selects the
+`outreach` rows due for *its own* stage — the state(s) it owns plus
+`next_action_at <= now()` — with `FOR UPDATE SKIP LOCKED`. A row is only ever
+in a state one worker cares about at a time, so the seven workers never
+contend over the same rows, only over the same table.
 
 ---
 
@@ -306,8 +341,9 @@ There is no separate queue table. The worker selects due `outreach` rows by
 6. **ApproveOutreach**. Dashboard action. The user may edit the subject and body
    before approving; edits set `messages.edited_by_user = true` and are retained
    as style references for later drafts (§10).
-7. **SendApproved**. Worker sends via the Gmail API inside the configured send
-   window, respecting `daily_send_cap`, with randomised inter-send delays.
+7. **SendApproved**. `send-worker` (D20) sends via the Gmail API inside the
+   configured send window, respecting `daily_send_cap`, with randomised
+   inter-send delays.
    Persists `gmail_message_id` and `gmail_thread_id`. Sets `next_action_at` to
    `sent_at + followup_day_1`.
 8. **PollReplies** (every 15 minutes). For each tracked `gmail_thread_id`, fetch
@@ -502,7 +538,10 @@ human reply, the row moves to `CLOSED`.
   the `SendApproved` use case asserts the same. A bug in either layer alone
   cannot send an unapproved email.
 - **Worker claims** set `locked_at`; a stale lock older than 15 minutes is
-  reclaimable, so a killed worker does not strand rows.
+  reclaimable, so a killed worker does not strand rows. This now matters more
+  than it did in the single-process design (D20): any one of the seven stage
+  workers can be killed or redeployed independently, at any time, without
+  affecting the other six.
 - **Gmail quota or auth errors** pause sending, raise a dashboard banner, and
   retry in the next window rather than burning retry budget.
 - **Hard bounces** detected during reply polling move the row to `BOUNCED` and
@@ -551,6 +590,14 @@ all outreach content stay on the user's own infrastructure.
   adapters are marked `@pytest.mark.integration` and skip cleanly without
   credentials. YC and Reoon HTTP interactions use recorded fixtures.
 - **API** — FastAPI `TestClient` wired to fakes.
+- **Worker entrypoints (D20)** — deliberately thin, so they carry no dedicated
+  test suite of their own: each is a few lines wiring adapters and calling
+  `run_forever`/`run_daily` (D21) on a use case already fully covered at the
+  application layer. One smoke test per entrypoint asserts it wires the
+  correct use case and port set, not stage behaviour — stage behaviour is the
+  application layer's job. `scheduling.py` (`run_forever`, `run_daily`) gets
+  its own unit tests: interval timing, daily-time triggering, and that an
+  exception from one call does not kill the loop.
 - **Frontend** — Vitest and React Testing Library, MSW for API mocking, with the
   approval queue covered most heavily as the highest-risk surface.
 
@@ -582,11 +629,16 @@ React with Vite, JSX, TanStack Query for server state. Four screens:
 
 ## 17. Deployment and Operations
 
-`docker compose up` starts Postgres, the API and the worker. The frontend runs
-via `npm run dev` in development and builds to static assets served by the API
-in production. Schema changes go through Alembic migrations. Structured JSON
-logging throughout; every use case logs its stage, the outreach id and the
-outcome.
+`docker compose up` starts Postgres, the API and all seven stage workers (D20)
+as separate services — one command, nine containers, no per-worker manual
+steps. Each worker's `docker-compose.yml` entry restarts independently
+(`restart: unless-stopped`), so a crash in one does not affect the others or
+require restarting the stack. The frontend runs via `npm run dev` in
+development and builds to static assets served by the API in production.
+Schema changes go through Alembic migrations. Structured JSON logging
+throughout; every use case logs its stage, the outreach id and the outcome, and
+every log line is tagged with the worker process name so the seven streams are
+distinguishable in `docker compose logs`.
 
 ---
 
@@ -659,6 +711,12 @@ Not required to start.
    verifiable by the reviewer in the Review Queue in under 10 seconds per
    draft. The remaining ~16 of 96 (7 with no material, plus grounding
    failures) route to manual write rather than a strained generic draft.
+10. Stage-worker independence (D20) is demonstrable, not just claimed: with
+    `send-worker` stopped, `draft-worker` continues producing new drafts into
+    the Review Queue; restarting `send-worker` resumes sending with no data
+    loss and no duplicate sends (§13). Each of the seven workers can be
+    started, stopped and restarted independently via `docker compose
+    stop/start <service>` without a full-stack restart.
 
 ---
 

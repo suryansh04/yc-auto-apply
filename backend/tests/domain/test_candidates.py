@@ -30,6 +30,13 @@ def test_mononym_produces_only_first_patterns():
     got = [c.address for c in generate_candidates("Madhav", "vahan.ai")]
     assert got == ["madhav@vahan.ai"]
 
+def test_mononym_yields_exactly_one_candidate_with_first_pattern():
+    # Pins the guard explicitly, rather than relying on dedup-by-coincidence
+    # to remove a first_l candidate that would otherwise collide with first.
+    cands = generate_candidates("Madhav", "vahan.ai")
+    assert len(cands) == 1
+    assert cands[0].pattern == "first"
+
 def test_no_duplicate_addresses():
     cands = generate_candidates("Ram Ram", "x.com")
     assert len({c.address for c in cands}) == len(cands)

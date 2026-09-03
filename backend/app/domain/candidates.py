@@ -32,7 +32,11 @@ def generate_candidates(full_name: str, domain: str) -> list[Candidate]:
     out: list[Candidate] = []
     seen: set[str] = set()
     for name, template in _PATTERNS:
-        if not last and "{last}" in template:
+        # Skip any template that references a name part which is empty for
+        # this name (mononym: last and its initial l are both ""). Checking
+        # both placeholders explicitly avoids relying on _PATTERNS' order to
+        # have `first` produce the same string first and get deduped away.
+        if not last and ("{last}" in template or "{l}" in template):
             continue
         local = template.format(**parts)
         address = f"{local}@{domain}"

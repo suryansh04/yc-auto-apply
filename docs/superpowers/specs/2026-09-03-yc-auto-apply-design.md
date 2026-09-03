@@ -107,6 +107,9 @@ therefore supplies the entire targeting and personalisation dataset — roughly
 | D8 | Ports and adapters for every external service | Lets the entire pipeline run in tests with no network and no API keys |
 | D9 | Single user, single-password gate | No multi-tenancy requirement exists; auth complexity would be pure overhead |
 | D10 | No tracking pixels, no link shorteners | Deliverability. These are the dominant spam signals for personal-domain cold mail |
+| D11 | Gemini Flash for drafting and reply classification, not Sarvam | Evaluated 2026-09-03. Both cost ~INR 45 per full run, so cost does not decide it. Sarvam's differentiator is 11 Indic languages and this workload is entirely English, so that capability goes unused while general English prose quality — the core requirement — suffers. Gemini also has first-class `responseSchema` structured output, where Sarvam's Python SDK requires passing `response_format` through `request_options={"additional_body_parameters": {...}}` |
+| D12 | Free tier for development, paid tier for real runs | Gemini's free tier (1,500 requests/day, far above the ~70/day peak here) may use inputs and outputs for model training. Real runs send the user's resume and ~192 founders' names and addresses, so production runs use the paid tier at roughly INR 45 per run |
+| D13 | The model id is configuration, not code | `GEMINI_MODEL` env var pins the exact model. Flash generations turn over quickly and Google has published a price increase effective 2027-01-01 for some of them, so the adapter must never hardcode a model id |
 
 ---
 
@@ -129,8 +132,8 @@ backend/app/
                  MailSender, MailReader, Drafter, ReplyClassifier,
                  ResumeParser, Clock, UnitOfWork.
   adapters/      Real implementations: YcOssClient, YcPageScraper,
-                 ReoonVerifier, GmailSender, GmailReader, ClaudeDrafter,
-                 ClaudeClassifier, SQLAlchemy repositories.
+                 ReoonVerifier, GmailSender, GmailReader, GeminiDrafter,
+                 GeminiClassifier, SQLAlchemy repositories.
   application/   One use case per pipeline stage: SyncCompanies,
                  ScrapeFounders, ResolveEmails, ParseResume, DraftOutreach,
                  ApproveOutreach, SendApproved, PollReplies,
@@ -383,9 +386,12 @@ human reply, the row moves to `CLOSED`.
 
 ## 14. Security and Secrets
 
-Gmail OAuth client credentials, the Reoon API key and the Anthropic API key are
-read from environment variables via a typed settings object, and are never
-committed. `.env` is git-ignored; `.env.example` documents every required
+Gmail OAuth client credentials, the Reoon API key and the Google Gemini API key
+are read from environment variables via a typed settings object, and are never
+committed. `GEMINI_MODEL` pins the model id and `GEMINI_TIER` records whether
+the configured key is free or paid, so a run against real founder data on a
+free-tier key fails loudly rather than silently sending that data into a
+training-eligible pipeline (D12). `.env` is git-ignored; `.env.example` documents every required
 variable with placeholder values. OAuth refresh tokens are stored in Postgres,
 not in files. The dashboard sits behind a single-password gate; the resume and
 all outreach content stay on the user's own infrastructure.
@@ -463,9 +469,16 @@ included regardless, as courtesy and because it improves reply quality.
 | YC founder scraping | Free |
 | Reoon Email Verifier | Free tier: 600 verifications/month for life. A full run needs ~480 |
 | Gmail sending | Free — 500/day limit against a need of ~20/day |
-| Claude drafting and classification | Roughly INR 150–250 for a full 192-founder run |
+| Gemini Flash drafting and classification | INR 0 on the free tier during development; about INR 45 per full run on the paid tier, which production runs use (D12) |
 | Hosting | Local, or a free tier |
-| **Total to run** | **INR 0** |
+| **Total** | **INR 0 to develop; about INR 45 per real 192-founder run** |
+
+A full run is roughly 450 drafts (192 founders, up to three messages each, plus
+validator retries) and about 200 reply classifications — around 1.1M input and
+155k output tokens. At Gemini Flash rates of $0.25 / $1.50 per million tokens
+that is $0.51. Sarvam 105B, at INR 29.28 / 73.2 per million, comes to about
+INR 44 for the same work, so the two are equivalent on cost and D11 was decided
+on prose quality and structured-output ergonomics instead.
 
 **Optional safety net:** Reoon's smallest one-time pack is 10,000 credits for
 $11.90 (about INR 1,050), and credits never expire — roughly seven full re-runs.
@@ -494,3 +507,11 @@ Not required to start.
 Widening beyond India or beyond the 11–200 band; other job sources such as
 Lever, Greenhouse and Ashby; multi-user support; A/B testing of email variants;
 LinkedIn outreach; and reply-draft assistance for the user's own responses.
+
+**A Sarvam adapter is a deliberately cheap swap.** Because `Drafter` and
+`ReplyClassifier` are ports with a shared contract test suite (§15), moving to
+Sarvam — for Indian data residency, or to compare output quality — means adding
+`SarvamDrafter` and `SarvamClassifier`, passing the same contract tests, and
+changing one config value. No domain or application code changes. If both
+providers are ever kept, the model attribution belongs on the `messages` row so
+drafts stay traceable to the model that wrote them.

@@ -9,6 +9,7 @@ node_modules/
 dist/
 .pytest_cache/
 *.db
+*.egg-info/
 credentials.json
 token.json
 .superpowers/

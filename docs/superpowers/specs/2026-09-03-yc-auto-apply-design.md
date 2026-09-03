@@ -9,7 +9,7 @@
 ## 1. Problem and Goal
 
 A single student / early-career candidate wants an **internship**, and wants to
-reach the founders of medium-sized Indian Y Combinator startups with a
+reach the founders of small and medium-sized Indian Y Combinator startups with a
 personalised cold email that attaches a resume and argues, specifically and in
 a human voice, why they would be worth taking on as an intern — then track
 every send, reply and outcome in one dashboard.
@@ -26,7 +26,7 @@ irrelevant to whether it is worth writing to — the careers page lags reality a
 this size, and for internships often does not exist at all. The motivating
 real-world case is Swipe (S21, Hyderabad), which sits in the target set with
 zero advertised roles and where a cold email nonetheless landed an internship.
-Every founder at all 96 companies is written to on the same footing. Where an
+Every founder at all 144 companies is written to on the same footing. Where an
 intern-appropriate posting happens to exist it may be mentioned, but that is
 incidental, and a company without one is not a weaker prospect — arguably it is
 a stronger one, since nobody else is writing to them about a role that was
@@ -38,14 +38,14 @@ never advertised.
 
 **In scope**
 
-- Nightly sync of YC companies filtered to India, active, team size 11–200.
+- Nightly sync of YC companies filtered to India, active, team size 1–200.
 - Scraping founder name, title, LinkedIn, bio and open job postings from YC
   company pages.
 - Per-company research: news items, YC launch posts and job postings, used to
   say what the company does and to ground a specific, factual reason for
   reaching out.
-- **Outreach to all 96 target companies regardless of current hiring status**
-  (D19) — both the 34 currently showing open roles and the 62 that are not.
+- **Outreach to all 144 target companies regardless of current hiring status**
+  (D19) — both the 48 currently showing open roles and the 96 that are not.
   `isHiring` / `jobPostings` are a personalisation source (D17) and a
   review-queue ordering signal, never a targeting filter.
 - Founder email resolution by pattern generation plus third-party verification.
@@ -91,19 +91,38 @@ and `long_description`.
 | All launched YC companies | 6,200 |
 | Tagged India | 223 |
 | India + status Active | 158 |
-| India + Active + team_size 11–200 (the target band) | **96** |
-| ...of which currently hiring (`isHiring` with `jobPostings` present) | 34 |
-| ...not currently hiring | 62 |
-| ...with a usable website | 96 |
+| India + Active + team_size 1–200 (the target band) | **144** |
+| ...of which flagged `isHiring` (34 of the 96 mid-size, 14 of the 48 small) | 48 |
+| ...not currently hiring | 96 |
+| ...with a usable website | 144 |
 
-**All 96 are targeted, both groups (D19).** The 34/62 split is not a filter —
+**All 144 are targeted, both groups (D19).** The 48/96 hiring split is not a filter —
 it changes only which research source grounds the "why I like this company"
-line (D17). Every founder at all 96 companies is emailed on the same footing.
-For an internship the 34/62 split is close to meaningless: only ~7 of the 96
+line (D17). Every founder at all 144 companies is emailed on the same footing.
+For an internship the hiring split is close to meaningless: only ~10 of the 144
 have an *intern-appropriate* posting, so the great majority of emails — hiring
 company or not — are grounded in news or launch posts rather than a job
 posting. The split does not affect review-queue order either; `rank_key`
 ignores postings entirely (D24).
+
+**The 48 smallest companies (1-10 people) widen reach but carry thinner
+research material.** Sampled 14 of them:
+
+| Signal | 1-10 people (14 sampled) | 11-200 people (10-14 sampled) |
+| --- | --- | --- |
+| Founders per company | 1.6 | 2.0 |
+| Companies with ≥1 news item | 4 / 14 | 6 / 10 |
+| Companies with ≥1 launch post | **0 / 14** | 1 / 10 |
+| Thin/absent `long_description` | 3 / 48 | 7 / 96 |
+| `long_description` median length | 342 chars | 441 chars |
+
+So roughly **70% of the newly added small companies have neither a news item
+nor a launch post**, and fall through D17's priority chain to the
+`long_description` detail — the weakest of the four grounding sources. They are
+still groundable (none of the 14 sampled had *no* usable material, since their
+descriptions hold up), just less impressively: "the SMB invoicing problem you
+describe" rather than "your Khosla round in September". This is the accepted
+cost of widening to 144 (D25), not a defect.
 
 **Founder data is scrapeable; founder emails are not.** YC company pages embed
 an Inertia.js payload in a `data-page="..."` HTML attribute. Parsing it yields a
@@ -121,7 +140,7 @@ an Inertia.js payload in a `data-page="..."` HTML attribute. Parsing it yields a
 The same payload carries `props.userCanRequestEmails: false`. YC gates actual
 founder addresses behind a logged-in Bookface/investor account. Scraping
 therefore supplies the entire targeting and personalisation dataset — roughly
-**192 founders across the 96 companies** — but cannot supply the address.
+**~269 founders across the 144 companies** — but cannot supply the address.
 
 **The same payload also carries real per-company research material, at zero
 extra cost.** The `data-page` fetch already used for founders (§8, stage 2)
@@ -145,7 +164,7 @@ Measured across 20 hiring target companies, 83 postings:
 | `type: "Internship"` | 11 / 83 | A clean structured field — no title guessing needed |
 | `minExperience: "Any (new grads ok)"` | 10 / 83 | Intern-adjacent; some are titled "Intern" but typed `Full-time` |
 | `minExperience: 1+ / 3+ / 6+ / 11+ years` | 62 / 83 | **Wrong to cite in an internship enquiry** |
-| Companies with ≥1 intern posting | **4 / 20** | Extrapolates to ~7 of the 96 target companies |
+| Companies with ≥1 intern posting | **4 / 20** | 20% of hiring companies; extrapolates to ~10 of the 144 target companies |
 
 Two consequences drive D23 below. First, `type` alone is not sufficient — of 15
 intern-titled postings found, 4 were typed `Full-time` with
@@ -162,7 +181,7 @@ were marketing, content, design, HR, BD or ops, and only one (Orangewood Labs'
 
 **A posting's absence says nothing about whether a founder will take an intern
 (D24).** The user's own counterexample is in this dataset: **Swipe** (Summer
-2021, Hyderabad, team 60, "Super AI Accountant for SMBs") is in the 96-company
+2021, Hyderabad, team 60, "Super AI Accountant for SMBs") is in the 144-company
 target set and carries `isHiring: false` with zero job postings — and a
 candidate known to the user got an internship there by cold email. Founders at
 this size hire opportunistically when someone interesting turns up; the careers
@@ -197,26 +216,29 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D2 | Founders come from parsing the `data-page` payload on YC company pages | The only free source of exact founder names and titles; 100% LinkedIn coverage in sampling |
 | D3 | Email resolution = in-house pattern generation + Reoon Email Verifier | Reoon's free tier is 600 verifications/month for life; early-exit ordering keeps a full run at ~480 checks, inside the free tier |
 | D4 | Send through the user's own Gmail via OAuth | Free, an established account has real sending reputation, and Gmail thread IDs give reply tracking with no extra infrastructure |
-| D5 | Every outbound message passes a human approval queue | At 96 companies the user can review every draft; this is the strongest available defence against low-quality LLM output |
+| D5 | Every outbound message passes a human approval queue | At 144 companies the user can review every draft; this is the strongest available defence against low-quality LLM output |
 | D6 | Two follow-ups, at +5 and +12 days, cancelled by any human reply | Most cold-outreach replies come from follow-ups, not the first email |
 | D7 | Modular monolith: FastAPI app + one worker process per pipeline stage + Postgres, DB-as-queue | Production-shaped without Redis or Celery; `SELECT ... FOR UPDATE SKIP LOCKED` is genuinely sufficient at this scale. Splitting into stage-scoped worker processes (D20) does not require either dependency — it is still N small Python entrypoints against the same queue |
 | D8 | Ports and adapters for every external service | Lets the entire pipeline run in tests with no network and no API keys |
 | D9 | Single user, single-password gate | No multi-tenancy requirement exists; auth complexity would be pure overhead |
 | D10 | No tracking pixels, no link shorteners | Deliverability. These are the dominant spam signals for personal-domain cold mail |
 | D11 | Gemini Flash for drafting and reply classification, not Sarvam | Evaluated 2026-09-03. Both cost a broadly comparable, trivial amount per full run (§19), so cost does not decide it. Sarvam's differentiator is 11 Indic languages and this workload is entirely English, so that capability goes unused while general English prose quality — the core requirement — suffers. Gemini also has first-class `responseSchema` structured output, where Sarvam's Python SDK requires passing `response_format` through `request_options={"additional_body_parameters": {...}}` |
-| D12 | Free tier for development, paid tier for real runs | Gemini's free tier (1,500 requests/day, far above the ~70/day peak here) may use inputs and outputs for model training. Real runs send the user's resume and ~192 founders' names and addresses, so production runs use the paid tier, at roughly INR 60-65 per full run including the voice critic (D22, §19) |
+| D12 | Free tier for development, paid tier for real runs | Gemini's free tier (1,500 requests/day, far above the ~70/day peak here) may use inputs and outputs for model training. Real runs send the user's resume and ~269 founders' names and addresses, so production runs use the paid tier, at roughly INR 95 per full run including the voice critic (D22, §19) |
 | D13 | The model id is configuration, not code | `GEMINI_MODEL` env var pins the exact model. Flash generations turn over quickly and Google has published a price increase effective 2027-01-01 for some of them, so the adapter must never hardcode a model id |
-| D14 | Pay for the paid tier by UPI through Google Cloud Billing | Verified 2026-09-03. The paid tier requires a linked Cloud Billing account, and Cloud Billing in India accepts UPI given an Indian billing address and bank account, INR billing, a registered UPI account and a one-time prepayment of about INR 500-1000. No international card is needed. At ~INR 60-65 per run (§19) an INR 500 prepayment covers roughly eight full runs. Google's wording is "if you're a qualified organization in India", so individual-account eligibility should be confirmed in the console before relying on it |
-| D15 | No third-party INR/UPI LLM reseller proxies | Resellers do solve INR and UPI billing, but every prompt would route through an unvetted intermediary, and prompts here carry the user's resume plus ~192 founders' names and email addresses. That is worse for third-party personal data than the free tier's published policy. If UPI cannot be attached, the fallback is Sarvam (D11 notes the quality trade-off) or staying on the free tier for development only |
+| D14 | Pay for the paid tier by UPI through Google Cloud Billing | Verified 2026-09-03. The paid tier requires a linked Cloud Billing account, and Cloud Billing in India accepts UPI given an Indian billing address and bank account, INR billing, a registered UPI account and a one-time prepayment of about INR 500-1000. No international card is needed. At ~INR 95 per run (§19) an INR 500 prepayment covers roughly five full runs. Google's wording is "if you're a qualified organization in India", so individual-account eligibility should be confirmed in the console before relying on it |
+| D15 | No third-party INR/UPI LLM reseller proxies | Resellers do solve INR and UPI billing, but every prompt would route through an unvetted intermediary, and prompts here carry the user's resume plus ~269 founders' names and email addresses. That is worse for third-party personal data than the free tier's published policy. If UPI cannot be attached, the fallback is Sarvam (D11 notes the quality trade-off) or staying on the free tier for development only |
 | D16 | Company research reuses the founder-scrape request; no new API, no separate fetch | `newsItems[]`, `launches[]` and `jobPostings[]` already arrive in the `data-page` payload fetched in stage 2 (§8). Adding a second research call per company would double the request volume against YC for data already in hand |
 | D17 | Only `newsItems`, `launches` and verified resume claims may be cited as reasons for outreach; the drafter may not invent a "why I like this company" from the `one_liner`/`long_description` alone | A generic description restated as enthusiasm is the clearest tell of automated outreach. Dated, sourced facts (a funding round, a founder's own launch post) are checkable and specific; a one-liner is marketing copy every recipient has already read about their own company |
 | D18 | A founder-published email found in a `launches[]` post outranks every generated pattern | It is the founder's own address, in their own words, requiring no verification. Checked first in §9, before pattern generation |
-| D19 | `isHiring` / open `jobPostings` is a review-queue ordering and personalisation signal only — never a targeting filter. All 96 companies (34 currently hiring, 62 not) get an `Outreach` row for every founder | Explicit user requirement 2026-09-03: outreach must cover companies without a current opening as well as those with one. The pipeline never gated on `isHiring` (§8 never referenced it as a filter), but this makes the guarantee explicit and traceable rather than implicit, and closes off a plausible future misreading of "rank hiring-first" as "hiring-only" |
+| D19 | `isHiring` / open `jobPostings` is a review-queue ordering and personalisation signal only — never a targeting filter. All 144 companies (48 currently hiring, 96 not) get an `Outreach` row for every founder | Explicit user requirement 2026-09-03: outreach must cover companies without a current opening as well as those with one. The pipeline never gated on `isHiring` (§8 never referenced it as a filter), but this makes the guarantee explicit and traceable rather than implicit, and closes off a plausible future misreading of "rank hiring-first" as "hiring-only" |
 | D20 | Each background pipeline stage runs as its own worker process, not one process running every stage | Explicit user requirement 2026-09-03: "different agents, different responsibility, not all at once." Confirmed as process decomposition, not LLM-agent autonomy — the LLM is still called as a pure structured-output function at exactly two points (draft, classify), unchanged from D8/D11. Each stage worker is independently deployable, restartable and observable: a stuck or crashed `SendWorker` no longer blocks `DraftWorker` from continuing to produce drafts for review, which was a real weakness of the single-process design. No new infrastructure — still Postgres-as-queue (D7), just N small entrypoints against it instead of one |
 | D21 | No APScheduler; each stage worker owns one tiny interval-or-cron loop over its single job | With one job per process, a general-purpose multi-job scheduler is unused generality. A ~20-line `run_forever(fn, every=...)` / `run_daily(fn, at=...)` helper in `worker/scheduling.py`, shared by all seven entrypoints, replaces it — one dependency removed, same behaviour |
 | D22 | Add a second LLM pass — a voice critic — after the deterministic validator, advisory only, never a gate | Explicit user requirement 2026-09-03. A fixed rule list cannot catch a draft that is technically clean but still reads generic or template-like; a language-judging pass can. Scoped narrowly to avoid reopening the fabrication risk of a fully autonomous research agent: the critic judges only tone on an already fact-checked draft, cannot introduce new claims, cannot block or approve a send by itself, and every verdict — `PASS` included — still goes to the human approval queue (D5), which stays the only step that can actually authorise a send |
 | D23 | The ask is an internship. If — and only if — the drafter chooses to cite a `job_posting`, that posting must be intern-appropriate; otherwise it is skipped and the drafter uses another source | Narrow guard against one specific, damaging error, nothing more. Measured in §3: 62 of 83 postings at target companies demand 1+ to 11+ years. Citing a senior vacancy in an internship enquiry signals the sender did not read what they are quoting. Intern-appropriate is `employment_type == "Internship"` OR title contains "intern" OR `min_experience` is empty / "Any (new grads ok)", because 4 of 15 intern-titled roles were typed `Full-time`. This rule governs *citation only* — see D24, it must never leak into targeting or ranking |
 | D24 | Job postings are never a targeting signal, never a ranking signal, and never a precondition for contacting a founder. A company with no openings is exactly as valid a target as one advertising an internship | Explicit user correction 2026-09-03: "just email them regardless of whether they have opening or not". Evidenced in the dataset itself — **Swipe** (S21, Hyderabad, team 60) sits in the target set with `isHiring: false` and zero postings, and a candidate known to the user won an internship there by cold email. The careers page lags reality at this company size, and for internships often does not exist. An earlier draft of this spec ranked intern-posting companies to the top of the review queue, which would have buried Swipe — that ranking is removed (§8 stage 5). The mental model is a speculative approach to a founder, not an application to a vacancy |
+| D25 | Target band widened from 11-200 to **1-200** people: 144 companies, ~269 founders | User decision 2026-09-03. The 48 companies of 1-10 people are the segment most likely to take an intern informally, and the founder is the person reading the inbox. Measured trade-off (§3): ~70% of them have neither news nor a launch post, so their emails ground on `long_description` detail instead — weaker, but still specific and still honest. Also pushes email verification to ~670 per run, just past Reoon's 600/month free tier (D26) |
+| D26 | A full run now slightly exceeds the Reoon free tier; buy the one-time credit pack rather than splitting the run | ~269 founders × ~2.5 verifications = ~670 against a 600/month free allowance. Options are to straddle a month boundary or spend $11.90 (~INR 1,050) once for 10,000 non-expiring credits. The pack is the better answer now that the run does not fit — it removes a quota pause from the middle of the campaign for roughly the cost of a meal |
+| D27 | The candidate is a software-engineering intern; the email never raises location | User answers 2026-09-03: software engineering, and remote or onsite both acceptable. The SWE consequence is that the job-posting hook is effectively dead — 14 of the 15 intern roles found were marketing, content, design, HR or ops, and only one was engineering — so essentially every email grounds on news, launch or description (D17), which the design already treats as the normal path. Location is simply omitted: raising it invites a constraint the founder had not thought to impose |
 
 ---
 
@@ -403,7 +425,7 @@ contend over the same rows, only over the same table.
    role, education), each with the verbatim source span. Only these claims may
    be cited by the drafter.
 5. **DraftOutreach**. See §10. Processes every `READY_TO_DRAFT` row — from all
-   96 companies, hiring or not (D19) — with no filtering by `isHiring`. The one
+   144 companies, hiring or not (D19) — with no filtering by `isHiring`. The one
    `rank_key`, a computed (not stored) domain sort, controls **review-queue
    display order only**. It sorts by *strength of available research material*
    — companies with a recent `company_news` item first, then those with a
@@ -418,7 +440,7 @@ contend over the same rows, only over the same table.
    this — has zero postings and would have sunk to the bottom of the queue. A
    company with no openings is exactly as valid a target as one advertising an
    internship, and the queue order must not imply otherwise. Ranking never
-   changes who gets drafted or sent; every founder at all 96 companies is
+   changes who gets drafted or sent; every founder at all 144 companies is
    emailed regardless (D19).
 6. **ApproveOutreach**. Dashboard action. The user may edit the subject and body
    before approving; edits set `messages.edited_by_user = true` and are retained
@@ -473,8 +495,8 @@ full run inside the free verification tier. For `Pratish Gandhi` at `onefin.com`
 
 **Procedure.** Verify candidates one at a time in priority order, stopping at
 the first `valid`. Persist every verdict. Expected cost is roughly 2.5
-verifications per founder — about 480 for a full 192-founder run, inside Reoon's
-600/month free tier.
+verifications per founder — about 670 for a full 269-founder run, which slightly
+exceeds Reoon's 600/month free tier.
 
 **Outcomes.** A `published` verdict from Step 0 -> `READY_TO_DRAFT` immediately,
 no verification call. Otherwise, first `valid` -> store as `resolved_email`,
@@ -570,17 +592,22 @@ It runs on every draft and is unit-testable in isolation. A draft is rejected if
   contradict nothing in `resume_profile.claims`, they simply overstate it;
 - **it does not contain an explicit internship ask** (part 3) — no
   "internship", "intern" or "interning" token anywhere in the body;
+- **it raises location, remote work or relocation** (D27) — a phrase check for
+  "remote", "relocate", "based in", "work from". The sender is open to either,
+  so mentioning it only invites a constraint the founder had not thought to
+  impose. If a founder asks, that is a reply to answer, not something to
+  pre-empt;
 - it contains more than two em dashes;
 - the subject is not between three and eight words, or contains emoji or all-caps words;
 - for a follow-up (`sequence_step > 0`), its body is not shorter in words than
   the previous outbound message in the same thread.
 
 **When no research material exists for a company** (no `company_news`, no
-`company_launches`, and a `long_description` under 80 characters — 7 of the 96
-target companies measured this way), the `long_description` fallback for part 2
+`company_launches`, and a `long_description` under 80 characters — 10 of the 144
+target companies measured this way: 7 of the 96 mid-size, 3 of the 48 small), the `long_description` fallback for part 2
 also fails, and the row moves straight to `PENDING_APPROVAL` flagged *needs
 manual write* rather than letting the model strain a generic sentence into
-looking specific. This is the honest outcome: roughly 7 of 96 companies do not
+looking specific. This is the honest outcome: roughly 10 of 144 companies do not
 currently have enough public material for a genuinely specific opener, and a
 human writes those by hand.
 
@@ -780,8 +807,8 @@ React with Vite, JSX, TanStack Query for server state. Four screens:
   themselves. Also shown: the voice critic's `critic_verdict` and
   `critic_overall_note` (D22) as one small, dismissible line — a second opinion, not a
   gate, and not a reason to review any faster. Edit, approve, reject.
-  Keyboard-driven, because the user will move through roughly 192 drafts.
-- **Contacts** — all 96 companies and their founders — both hiring and not
+  Keyboard-driven, because the user will move through roughly 269 drafts.
+- **Contacts** — all 144 companies and their founders — both hiring and not
   (D19) — filterable by state, hiring status, batch and email-resolution
   status. The hiring filter is a view control here, not a pipeline gate.
 - **Thread** — per-outreach timeline: every outbound message, every reply, the
@@ -806,7 +833,7 @@ distinguishable in `docker compose logs`.
 
 ## 18. Deliverability and Compliance
 
-Roughly 192 cold emails sent from a personal Gmail account over a short window
+Roughly 269 cold emails sent from a personal Gmail account over a short window
 can trip spam heuristics. Mitigations, all built in:
 
 - default `daily_send_cap` of 20, spreading a full run over about ten days;
@@ -829,35 +856,38 @@ included regardless, as courtesy and because it improves reply quality.
 | YC founder scraping | Free |
 | Reoon Email Verifier | Free tier: 600 verifications/month for life. A full run needs ~480 |
 | Gmail sending | Free — 500/day limit against a need of ~20/day |
-| Gemini Flash drafting, classification and voice critique (D22) | INR 0 on the free tier during development; about INR 60-65 per full run on the paid tier, which production runs use (D12) |
+| Gemini Flash drafting, classification and voice critique (D22) | INR 0 on the free tier during development; about INR 95 per full run on the paid tier, which production runs use (D12) |
 | Hosting | Local, or a free tier |
-| **Total** | **INR 0 to develop; about INR 60-65 per real 192-founder run** |
+| **Total** | **INR 0 to develop; about INR 95 per real 269-founder run, plus a one-time INR 1,050 Reoon pack (D26)** |
 
-A full run is roughly 450 drafts (192 founders, up to three messages each, plus
-validator retries) and about 200 reply classifications — around 1.1M input and
-155k output tokens, including the per-company research context (news items,
-launch posts, job posting detail) added for grounding (§10); that context is a
-few hundred tokens per draft against an already input-heavy prompt, so it does
-not move the total meaningfully. At Gemini Flash rates of $0.25 / $1.50 per
-million tokens that is $0.51. The voice critic (D22) adds one shorter call per
-draft, plus a second call on whichever fraction comes back `NEEDS_REVISION`
-and gets the one automatic retry — call it ~500 critic calls total at roughly
-600 input / 150 output tokens each, another $0.19, for a full-run total near
-$0.70 (~INR 62). Sarvam 105B, at INR 29.28 / 73.2 per million, comes to a
-comparable figure for the same work, so the two remain equivalent on cost and
-D11 was decided on prose quality and structured-output ergonomics instead.
+A full run is roughly 630 drafts (269 founders, up to three messages each, plus
+validator retries), about 380 reply classifications, and ~700 voice-critic
+calls (D22) — around 2.3M input and 0.33M output tokens all told, including the
+per-company research context (news items, launch posts, job posting detail)
+added for grounding (§10). At Gemini Flash rates of $0.25 / $1.50 per million
+tokens that is **$1.08, about INR 95** for a complete 269-founder campaign
+including both follow-ups. Sarvam 105B, at INR 29.28 / 73.2 per million, comes
+to a comparable figure for the same work, so the two remain equivalent on cost
+and D11 was decided on prose quality and structured-output ergonomics instead.
 
-**Optional safety net:** Reoon's smallest one-time pack is 10,000 credits for
-$11.90 (about INR 1,050), and credits never expire — roughly seven full re-runs.
-Not required to start.
+Widening to 144 companies (D25) raised this from roughly INR 62; it remains
+small enough that cost should not influence any design decision here. The one
+figure that did cross a threshold is email verification, which no longer fits
+the free tier — see D26 and the note below.
+
+**Now recommended, not optional (D26):** a full run needs ~670 verifications
+against a 600/month free allowance, so it no longer fits. Reoon's smallest
+one-time pack is 10,000 credits for $11.90 (about INR 1,050), credits never
+expire — roughly fifteen full runs. The alternative is straddling a month
+boundary and accepting a quota pause mid-campaign.
 
 ---
 
 ## 20. Success Criteria
 
-1. A nightly sync produces 96 target companies without manual intervention.
-2. Founder scraping yields roughly 192 founders with name, title and LinkedIn,
-   across all 96 companies — both the 34 currently hiring and the 62 that are
+1. A nightly sync produces 144 target companies without manual intervention.
+2. Founder scraping yields roughly 269 founders with name, title and LinkedIn,
+   across all 144 companies — both the 48 currently hiring and the 96 that are
    not (D19). No founder is excluded on the basis of their company's hiring
    status.
 3. At least 70% of founders reach a `valid` or `published` resolved address; the
@@ -870,12 +900,12 @@ Not required to start.
    cancel a sequence.
 7. `pytest` passes offline with no credentials.
 8. The dashboard shows, for any founder, the full timeline and current outcome.
-9. Of the ~89 target companies with usable research material (96 minus the ~7
+9. Of the ~134 target companies with usable research material (144 minus the ~10
    with no `company_news`, no `company_launches` and a `long_description` under
-   80 characters, §10), at least 80 produce a draft whose "why this company"
+   80 characters, §10), at least 120 produce a draft whose "why this company"
    sentence is grounded in and traceable to one specific, named source row,
    verifiable by the reviewer in the Review Queue in under 10 seconds per
-   draft. The remaining ~16 of 96 (7 with no material, plus grounding
+   draft. The remaining ~24 of 144 (10 with no material, plus grounding
    failures) route to manual write rather than a strained generic draft.
 10. Stage-worker independence (D20) is demonstrable, not just claimed: with
     `send-worker` stopped, `draft-worker` continues producing new drafts into
@@ -903,7 +933,7 @@ Not required to start.
 
 ## 21. Future Work (Explicitly Deferred)
 
-Widening beyond India or beyond the 11–200 band; other job sources such as
+Widening beyond India or beyond the 1–200 band; other job sources such as
 Lever, Greenhouse and Ashby; multi-user support; A/B testing of email variants;
 LinkedIn outreach; and reply-draft assistance for the user's own responses.
 

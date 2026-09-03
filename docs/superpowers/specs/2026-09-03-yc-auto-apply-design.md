@@ -8,16 +8,25 @@
 
 ## 1. Problem and Goal
 
-A single job seeker wants to reach the founders of medium-sized Indian
-Y Combinator startups with a personalised cold email that attaches a resume and
-argues, specifically and in a human voice, why the sender is a good fit — then
-track every send, reply and outcome in one dashboard.
+A single student / early-career candidate wants an **internship**, and wants to
+reach the founders of medium-sized Indian Y Combinator startups with a
+personalised cold email that attaches a resume and argues, specifically and in
+a human voice, why they would be worth taking on as an intern — then track
+every send, reply and outcome in one dashboard.
 
 **Goal:** an end-to-end system that discovers the target companies, finds their
-founders, resolves founder email addresses, drafts a tailored email per founder,
-routes every draft through human approval, sends from the user's own Gmail,
-follows up twice when there is no reply, and classifies every reply into an
-outcome shown on a dashboard.
+founders, resolves founder email addresses, drafts a tailored internship
+enquiry per founder, routes every draft through human approval, sends from the
+user's own Gmail, follows up twice when there is no reply, and classifies every
+reply into an outcome shown on a dashboard.
+
+**The ask is an internship, not a listed vacancy (D23).** This is not an
+application to an advertised role. Most of these companies have no intern
+posting open at all — measured in §3, roughly 7 of 96 do — so the email is a
+speculative approach to a founder asking whether they would take an intern, and
+it must read that way. Where an intern-appropriate posting does exist, the
+email may reference it; where one does not, the email must not imply the sender
+is applying to anything.
 
 ---
 
@@ -36,8 +45,13 @@ outcome shown on a dashboard.
   `isHiring` / `jobPostings` are a personalisation source (D17) and a
   review-queue ordering signal, never a targeting filter.
 - Founder email resolution by pattern generation plus third-party verification.
-- Resume parsing into structured, citable claims.
-- LLM drafting with a deterministic anti-slop validator.
+- Resume parsing into structured, citable claims — for an intern candidate these
+  are mostly projects, coursework, skills and education rather than professional
+  roles and metrics (D23).
+- LLM drafting of a speculative **internship** enquiry, with a deterministic
+  anti-slop validator. A listed role is referenced only when it is
+  intern-appropriate (D23); otherwise the email asks about an internship without
+  implying an application to any advertised vacancy.
 - A human approval queue. Nothing is sent without explicit approval.
 - Sending via the user's Gmail account with a daily cap.
 - Two follow-ups per founder when there is no human reply.
@@ -80,9 +94,12 @@ and `long_description`.
 
 **All 96 are targeted, both groups (D19).** The 34/62 split is not a filter —
 it changes only which research source grounds the "why I like this company"
-line (D17: a matching job posting for the 34, news / launch / long_description
-for the other 62) and, in the dashboard, which drafts are queued for review
-first. Every founder at all 96 companies is sent an email.
+line (D17) and, in the dashboard, which drafts are queued for review first.
+Every founder at all 96 companies is emailed. Note that for an internship the
+34/62 split matters far less than it first appears: only ~7 of the 96 have an
+*intern-appropriate* posting (measured below), so the great majority of emails
+— hiring company or not — are grounded in news or launch posts rather than a
+job posting (D23).
 
 **Founder data is scrapeable; founder emails are not.** YC company pages embed
 an Inertia.js payload in a `data-page="..."` HTML attribute. Parsing it yields a
@@ -115,6 +132,32 @@ returns three more arrays in one request:
 `isHiring` is not fully reliable on its own — one sampled company (OneFin) has
 `isHiring: true` with zero `jobPostings`, so the ranking and drafting logic
 must check `jobPostings` directly rather than trusting the flag alone.
+
+**Most open roles are useless to an intern, and citing one would hurt.**
+Measured across 20 hiring target companies, 83 postings:
+
+| Signal | Count | Note |
+| --- | --- | --- |
+| `type: "Internship"` | 11 / 83 | A clean structured field — no title guessing needed |
+| `minExperience: "Any (new grads ok)"` | 10 / 83 | Intern-adjacent; some are titled "Intern" but typed `Full-time` |
+| `minExperience: 1+ / 3+ / 6+ / 11+ years` | 62 / 83 | **Wrong to cite in an internship enquiry** |
+| Companies with ≥1 intern posting | **4 / 20** | Extrapolates to ~7 of the 96 target companies |
+
+Two consequences drive D23 below. First, `type` alone is not sufficient — of 15
+intern-titled postings found, 4 were typed `Full-time` with
+`minExperience: "Any (new grads ok)"` (e.g. Cityfurnish's "UI UX Intern",
+"Founder's Office - Intern"), so intern-appropriateness is
+`type == "Internship"` **or** title contains "intern" **or** `minExperience` is
+empty / "Any (new grads ok)". Second, citing *any* posting is no longer safe:
+telling a founder "I saw you're hiring a Senior Engineer, 6+ years" when you
+want an internship reads worse than citing nothing at all.
+
+One caveat worth noting, not acted on: the intern roles that do exist skew
+non-technical — of the 15 found, 14 were marketing, content, design, HR, BD or
+ops, and only one (Orangewood Labs' "Vision Engineer Intern") was engineering.
+A technical candidate should expect the job-posting hook to be rare and rely
+mostly on news and launch posts (D17's priority chain already handles this
+correctly).
 
 News items and launch posts are exactly the raw material a human would use to
 write "why I like your company": specific, dated, sourced facts rather than
@@ -155,6 +198,7 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D20 | Each background pipeline stage runs as its own worker process, not one process running every stage | Explicit user requirement 2026-09-03: "different agents, different responsibility, not all at once." Confirmed as process decomposition, not LLM-agent autonomy — the LLM is still called as a pure structured-output function at exactly two points (draft, classify), unchanged from D8/D11. Each stage worker is independently deployable, restartable and observable: a stuck or crashed `SendWorker` no longer blocks `DraftWorker` from continuing to produce drafts for review, which was a real weakness of the single-process design. No new infrastructure — still Postgres-as-queue (D7), just N small entrypoints against it instead of one |
 | D21 | No APScheduler; each stage worker owns one tiny interval-or-cron loop over its single job | With one job per process, a general-purpose multi-job scheduler is unused generality. A ~20-line `run_forever(fn, every=...)` / `run_daily(fn, at=...)` helper in `worker/scheduling.py`, shared by all seven entrypoints, replaces it — one dependency removed, same behaviour |
 | D22 | Add a second LLM pass — a voice critic — after the deterministic validator, advisory only, never a gate | Explicit user requirement 2026-09-03. A fixed rule list cannot catch a draft that is technically clean but still reads generic or template-like; a language-judging pass can. Scoped narrowly to avoid reopening the fabrication risk of a fully autonomous research agent: the critic judges only tone on an already fact-checked draft, cannot introduce new claims, cannot block or approve a send by itself, and every verdict — `PASS` included — still goes to the human approval queue (D5), which stays the only step that can actually authorise a send |
+| D23 | The ask is an internship. A `job_posting` may only be cited when it is intern-appropriate; otherwise the drafter falls through to the next research source | User requirement 2026-09-03. Measured in §3: 62 of 83 postings at target companies demand 1+ to 11+ years, and only ~7 of 96 companies have any intern posting at all. Citing a senior vacancy in an internship enquiry is worse than citing nothing — it signals the sender did not read what they are quoting. Intern-appropriate is `type == "Internship"` OR title contains "intern" OR `min_experience` is empty / "Any (new grads ok)", because 4 of 15 intern-titled roles were typed `Full-time` |
 
 ---
 
@@ -272,8 +316,11 @@ in the domain state machine and again by a database constraint (see §13).
   `team_size`, `regions` (jsonb), `all_locations`, `status`, `stage`,
   `is_hiring`, `one_liner`, `long_description`, `last_synced_at`.
 - **job_postings** — `id`, `company_id`, `title`, `location`, `url`,
-  `role_specific_type`, `salary_range`, `min_experience`, `skills` (jsonb),
-  `raw` (jsonb).
+  `employment_type` (from the payload's `type`: `Full-time` | `Internship` |
+  …), `role_specific_type`, `salary_range`, `min_experience`, `skills` (jsonb),
+  `raw` (jsonb). Intern-appropriateness is **not** stored — it is a pure domain
+  predicate over `employment_type`, `title` and `min_experience` (D23), so the
+  rule stays unit-testable and can be changed without a migration.
 - **founders** — `id`, `company_id`, `yc_user_id`, `full_name`, `title`,
   `linkedin_url`, `twitter_url`, `bio`, `scraped_at`. Unique on `yc_user_id`.
 - **company_news** — `id`, `company_id`, `title`, `url`, `source`, `published_at`,
@@ -325,10 +372,13 @@ contend over the same rows, only over the same table.
    founders, job postings, `company_news` and `company_launches`; parse any
    `mailto:`-style address out of each launch body into
    `company_launches.published_email`; create an `Outreach` row in `NEW` for
-   each new founder. Rate limit 1 request/second; cache by ETag; a parse
-   failure marks that company for retry and never aborts the run. Do not trust
-   `isHiring` alone when ranking or drafting — one sampled company carried
-   `isHiring: true` with zero `jobPostings`; always check `jobPostings` directly.
+   each new founder. Persist each posting's `type` into
+   `job_postings.employment_type` — it is what the intern-appropriateness
+   predicate keys off (D23) — alongside `minExperience` and `title`. Rate limit
+   1 request/second; cache by ETag; a parse failure marks that company for
+   retry and never aborts the run. Do not trust `isHiring` alone when ranking
+   or drafting — one sampled company carried `isHiring: true` with zero
+   `jobPostings`; always check `jobPostings` directly.
 3. **ResolveEmails**. See §9.
 4. **ParseResume**. One-off, re-runnable. Parse the uploaded resume into
    `resume_profile.claims` — a list of structured facts (skill, project, metric,
@@ -337,11 +387,14 @@ contend over the same rows, only over the same table.
 5. **DraftOutreach**. See §10. Processes every `READY_TO_DRAFT` row — from all
    96 companies, hiring or not (D19) — with no filtering by `isHiring`. The one
    place hiring status affects anything is `rank_key`, a computed (not stored)
-   domain sort used only for **review-queue display order**: rows for
-   companies with at least one open `job_posting` sort before rows without one,
-   tie-broken by `team_size` descending, then `founder.full_name`. It changes
-   which drafts the user reviews first; it never changes who gets drafted or
-   sent.
+   domain sort used only for **review-queue display order**: rows for companies
+   with at least one **intern-appropriate** `job_posting` (D23) sort first,
+   then rows for companies with any other open posting, then the rest —
+   tie-broken by `team_size` descending, then `founder.full_name`. Ranking on
+   intern-appropriate postings rather than any posting means the ~7 companies
+   actually advertising an internship surface at the top of the queue, where
+   the strongest emails are. It changes which drafts the user reviews first; it
+   never changes who gets drafted or sent.
 6. **ApproveOutreach**. Dashboard action. The user may edit the subject and body
    before approving; edits set `messages.edited_by_user = true` and are retained
    as style references for later drafts (§10).
@@ -423,20 +476,30 @@ references.
 
 **Required structure of a draft.** The user asked for the email to say what the
 company does and why the sender specifically likes it, in a human voice — not
-generic praise. The drafter is prompted to produce, and the domain model
-requires, three grounded parts:
+generic praise — and to ask for an internship (D23). The drafter is prompted to
+produce, and the domain model requires, four grounded parts:
 
 1. **What the company does** — one sentence, in the sender's own words, not a
    copy of `one_liner`. Paraphrase is required by the validator (see below).
 2. **A specific, cited reason for reaching out to *this* company** — must be
    grounded in one real source, in priority order: a `company_news` item, a
-   `company_launches` post, a matching `job_posting`, or (only when none of the
-   first three exist) a concrete mechanism or detail from `long_description`
-   rather than the marketing `one_liner`. Restating `one_liner` back at the
-   founder is exactly the "I came across your company" pattern this system
-   exists to avoid (D17).
-3. **Why the sender fits** — must cite only `resume_profile.claims`; never an
-   invented skill or metric.
+   `company_launches` post, an **intern-appropriate** `job_posting` (D23), or
+   (only when none of the first three exist) a concrete mechanism or detail
+   from `long_description` rather than the marketing `one_liner`. Restating
+   `one_liner` back at the founder is exactly the "I came across your company"
+   pattern this system exists to avoid (D17). A posting that is not
+   intern-appropriate is skipped entirely — it is never a fallback, because
+   citing a senior vacancy in an internship enquiry is worse than citing
+   nothing (§3, D23).
+3. **The ask: an internship** — explicit, and framed as a speculative approach
+   unless part 2 cited an intern-appropriate posting, in which case it may
+   reference that role directly. It must never imply an application to an
+   advertised vacancy that is not intern-appropriate.
+4. **Why the sender is worth taking on** — must cite only
+   `resume_profile.claims`; never an invented skill or metric, and never
+   implied professional seniority. For an intern candidate these claims are
+   typically projects, coursework and skills, so the argument is about
+   relevant capability and genuine interest, not a track record.
 
 **Structured output, not free text (D11).** The drafter calls Gemini with a
 `responseSchema` returning `{subject, body, research_source_type,
@@ -468,6 +531,16 @@ It runs on every draft and is unit-testable in isolation. A draft is rejected if
   the grounding check for part 2, and it is what stops the model from
   fabricating a plausible-sounding but untrue reason;
 - it asserts a skill, metric or role absent from `resume_profile.claims`;
+- **`research_source_type == "job_posting"` but the cited posting is not
+  intern-appropriate** (D23) — the single most damaging failure available here,
+  since it tells a founder the sender quoted a role they cannot possibly fill;
+- **it implies professional seniority the sender does not have** — a phrase
+  check for "years of experience", "in my current role", "my team", "I led a
+  team", "throughout my career". These are true-sounding and fatal in an
+  internship enquiry, and no grounding check would catch them because they
+  contradict nothing in `resume_profile.claims`, they simply overstate it;
+- **it does not contain an explicit internship ask** (part 3) — no
+  "internship", "intern" or "interning" token anywhere in the body;
 - it contains more than two em dashes;
 - the subject is not between three and eight words, or contains emoji or all-caps words;
 - for a follow-up (`sequence_step > 0`), its body is not shorter in words than
@@ -618,7 +691,15 @@ all outreach content stay on the user's own infrastructure.
   sentence that is a near-verbatim copy of `one_liner` must fail the paraphrase
   check. Cover the no-research-material fallback path explicitly (a company
   with no news, no launches and a short `long_description` must route to
-  manual write, never to a strained generic draft). `rank_key` ordering:
+  manual write, never to a strained generic draft). Intern-appropriateness
+  (D23) gets its own table-driven tests over the real shapes seen in §3:
+  `type == "Internship"` passes; a `Full-time` posting titled "UI UX Intern"
+  with `min_experience == "Any (new grads ok)"` passes; a `Full-time`
+  "Senior Engineer" with `min_experience == "6+ years"` fails; empty
+  `min_experience` on a non-intern title passes. A draft citing a posting that
+  fails the predicate must be rejected by the validator, and the drafter must
+  fall through to news/launch rather than treating the posting as a fallback.
+  `rank_key` ordering:
   assert it only reorders, never filters — a fixture mixing hiring and
   non-hiring companies must produce `Outreach` rows and eligible drafts for
   every founder in both groups (D19), and a test on `DraftOutreach` must fail
@@ -700,7 +781,7 @@ can trip spam heuristics. Mitigations, all built in:
 - a real signature and a single-line opt-out sentence in every email;
 - hard-bounce handling that immediately stops retrying a bad address.
 
-This is individual job-seeking correspondence rather than bulk commercial
+This is an individual student's internship enquiry rather than bulk commercial
 marketing, so it does not fall under bulk-marketing regimes. The opt-out line is
 included regardless, as courtesy and because it improves reply quality.
 
@@ -768,7 +849,13 @@ Not required to start.
     loss and no duplicate sends (§13). Each of the seven workers can be
     started, stopped and restarted independently via `docker compose
     stop/start <service>` without a full-stack restart.
-11. Every draft reaching the Review Queue carries a `critic_verdict` (D22) —
+11. Zero sent emails cite a job posting that is not intern-appropriate (D23),
+    and every sent email contains an explicit internship ask — both enforced by
+    the validator, not left to the model. On the measured data that means at
+    most ~7 of 96 companies produce a posting-grounded email; the rest are
+    grounded in news or launch posts, which is the correct outcome rather than
+    a shortfall.
+12. Every draft reaching the Review Queue carries a `critic_verdict` (D22) —
     never null for an outbound message that passed the deterministic
     validator — and a `NEEDS_REVISION` verdict is demonstrably advisory: a
     test approving and sending a draft the critic flagged must succeed

@@ -11,3 +11,11 @@ def test_settings_reads_defaults_without_env():
 def test_paid_tier_is_explicit_opt_in():
     s = Settings(database_url="postgresql://x/y", gemini_tier="paid")
     assert s.gemini_tier == "paid"
+
+
+def test_email_verifier_key_is_provider_neutral():
+    # D30: named for the role, not the vendor, so swapping providers
+    # (Reoon -> MyEmailVerifier) touches no configuration.
+    s = Settings(database_url="postgresql://x/y", email_verifier_api_key="k")
+    assert s.email_verifier_api_key == "k"
+    assert not hasattr(s, "reoon_api_key")

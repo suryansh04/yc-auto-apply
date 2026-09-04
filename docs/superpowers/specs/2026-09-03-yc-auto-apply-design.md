@@ -214,7 +214,7 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | --- | --- | --- |
 | D1 | Companies come from `yc-oss` JSON, not from scraping the directory | Free, daily-updated, structured, and avoids hammering YC's search backend |
 | D2 | Founders come from parsing the `data-page` payload on YC company pages | The only free source of exact founder names and titles; 100% LinkedIn coverage in sampling |
-| D3 | Email resolution = in-house pattern generation + Reoon Email Verifier | Reoon's free tier is 600 verifications/month for life; early-exit ordering keeps a full run at ~480 checks, inside the free tier |
+| D3 | Email resolution = in-house pattern generation + a third-party verifier behind the `EmailVerifier` port | The provider is **MyEmailVerifier** (D30, swapped from Reoon on 2026-09-04 after Reoon's app subdomain went dark). Its free tier is 100 verifications/day, roughly 3,000/month, and early-exit ordering keeps a full run at ~670 checks — comfortably inside the free tier without buying anything |
 | D4 | Send through the user's own Gmail via OAuth | Free, an established account has real sending reputation, and Gmail thread IDs give reply tracking with no extra infrastructure |
 | D5 | Every outbound message passes a human approval queue | At 144 companies the user can review every draft; this is the strongest available defence against low-quality LLM output |
 | D6 | Two follow-ups, at +5 and +12 days, cancelled by any human reply | Most cold-outreach replies come from follow-ups, not the first email |
@@ -237,10 +237,11 @@ a free bypass whenever a `launches[]` post happens to publish one.
 | D23 | The ask is an internship. If — and only if — the drafter chooses to cite a `job_posting`, that posting must be intern-appropriate; otherwise it is skipped and the drafter uses another source | Narrow guard against one specific, damaging error, nothing more. Measured in §3: 62 of 83 postings at target companies demand 1+ to 11+ years. Citing a senior vacancy in an internship enquiry signals the sender did not read what they are quoting. Intern-appropriate is `employment_type == "Internship"` OR title contains "intern" OR `min_experience` is empty / "Any (new grads ok)", because 4 of 15 intern-titled roles were typed `Full-time`. This rule governs *citation only* — see D24, it must never leak into targeting or ranking |
 | D24 | Job postings are never a targeting signal, never a ranking signal, and never a precondition for contacting a founder. A company with no openings is exactly as valid a target as one advertising an internship | Explicit user correction 2026-09-03: "just email them regardless of whether they have opening or not". Evidenced in the dataset itself — **Swipe** (S21, Hyderabad, team 60) sits in the target set with `isHiring: false` and zero postings, and a candidate known to the user won an internship there by cold email. The careers page lags reality at this company size, and for internships often does not exist. An earlier draft of this spec ranked intern-posting companies to the top of the review queue, which would have buried Swipe — that ranking is removed (§8 stage 5). The mental model is a speculative approach to a founder, not an application to a vacancy |
 | D25 | Target band widened from 11-200 to **1-200** people: 144 companies, ~269 founders | User decision 2026-09-03. The 48 companies of 1-10 people are the segment most likely to take an intern informally, and the founder is the person reading the inbox. Measured trade-off (§3): ~70% of them have neither news nor a launch post, so their emails ground on `long_description` detail instead — weaker, but still specific and still honest. Also pushes email verification to ~670 per run, just past Reoon's 600/month free tier (D26) |
-| D26 | A full run now slightly exceeds the Reoon free tier; buy the one-time credit pack rather than splitting the run | ~269 founders × ~2.5 verifications = ~670 against a 600/month free allowance. Options are to straddle a month boundary or spend $11.90 (~INR 1,050) once for 10,000 non-expiring credits. The pack is the better answer now that the run does not fit — it removes a quota pause from the middle of the campaign for roughly the cost of a meal |
+| D26 | ~~Buy a one-time credit pack because a full run exceeds the free tier~~ **REVERSED by D30.** No purchase is needed | Written when the provider was Reoon, whose 600/month free tier could not cover a ~670-verification run. MyEmailVerifier's 100/day (~3,000/month) covers a full run inside a week, and the send campaign takes ~13 days anyway at 20/day, so verification never becomes the bottleneck. Kept rather than deleted so the reasoning trail stays intact |
 | D27 | The candidate is a software-engineering intern; the email never raises location | User answers 2026-09-03: software engineering, and remote or onsite both acceptable. The SWE consequence is that the job-posting hook is effectively dead — 14 of the 15 intern roles found were marketing, content, design, HR or ops, and only one was engineering — so essentially every email grounds on news, launch or description (D17), which the design already treats as the normal path. Location is simply omitted: raising it invites a constraint the founder had not thought to impose |
 | D28 | The email is short, plain and direct: ~90 words target, 120 hard cap, three parts, no sentence over 25 words | Explicit user requirement 2026-09-03: "short, simple to understand, to the point and crisp". The previous 150-word cap was too loose for cold email to a founder reading on a phone. A word cap alone is insufficient — a model writes to whatever cap it is given — so concision is enforced structurally: sentence length, paragraph count, no semicolons, and a ban on more than half the sentences starting with "I". The former parts 1 and 2 ("what they do" then "why I'm writing") are merged, since a founder knows what their own company does and naming the specific thing that prompted the email proves the research by itself |
 | D29 | The research source is how the sender learned something, never what the sentence is about. No outlet names, dates or "I saw the article" phrasing in the body | User requirement 2026-09-03. Reporting journalism back at a founder signals the sender knows them only through press; writing about the product itself reads as genuine interest. This also closes a real loophole in the grounding check (§10): the publication name is a distinctive term, so a lazy draft could pass grounding merely by naming the outlet while saying nothing about the company's actual work — the shared term must now come from the substance of the source, not `company_news.source`. Splits the hook into a grounded subject (checkable, from the source) and an unconstrained opinion on it (the sender's own view, not a factual claim), with the caveat that an opinion may not smuggle in an unverified fact |
+| D30 | Email verifier swapped from Reoon to **MyEmailVerifier**; the config key is provider-neutral (`EMAIL_VERIFIER_API_KEY`) | 2026-09-04: the user could not log in to Reoon, and `emailverifier.reoon.com` returned a connection failure (curl 000) while their marketing domain still redirected — the app was down, not the user's machine. MyEmailVerifier was verified live (both documented endpoints return well-formed JSON auth errors), and its free tier is 100/day (~3,000/month) against Reoon's 600/month, which reverses D26's forced purchase. Cost of the swap was two documents and one config key, because `EmailVerifier` was already a port with a fake and the adapter had not been written yet — this is the ports-and-adapters boundary (D8) doing exactly what it exists for. The key is named for the ROLE, not the vendor, so the next swap touches no config. API shape: `GET https://client.myemailverifier.com/verifier/validate_single/{email}/{apikey}` → JSON with `Status` (Valid/Invalid/Catch-all/Unknown), `catch_all`, `Diagnosis`; single-verification rate limit 30/min |
 
 ---
 
@@ -256,7 +257,7 @@ Postgres:
 | **api** | Serves the React dashboard's JSON API; also runs `ParseResume` and `ApproveOutreach` synchronously on user action (§8 note) | Request/response, not a loop |
 | **sync-worker** | 1. SyncCompanies | Daily, at a fixed time (`run_daily`) |
 | **scrape-worker** | 2. ScrapeCompanyPage | Every N hours (`run_forever`) |
-| **resolve-worker** | 3. ResolveEmails | Every N minutes, pauses on Reoon quota exhaustion (§9) |
+| **resolve-worker** | 3. ResolveEmails | Every N minutes, pauses on verifier quota exhaustion (§9) |
 | **draft-worker** | 5. DraftOutreach | Every N minutes; the only worker besides reply-poll-worker that calls Gemini |
 | **send-worker** | 7. SendApproved | Every N minutes inside `send_window`; owns `daily_send_cap` accounting |
 | **reply-poll-worker** | 8. PollReplies | Every 15 minutes; the other Gemini caller (classification) |
@@ -288,7 +289,7 @@ backend/app/
                  MailSender, MailReader, Drafter, DraftCritic (D22),
                  ReplyClassifier, ResumeParser, Clock, UnitOfWork.
   adapters/      Real implementations: YcOssClient, YcPageScraper,
-                 ReoonVerifier, GmailSender, GmailReader, GeminiDrafter,
+                 MyEmailVerifierClient, GmailSender, GmailReader, GeminiDrafter,
                  GeminiCritic (D22), GeminiClassifier, SQLAlchemy repositories.
   application/   One use case per pipeline stage: SyncCompanies,
                  ScrapeCompanyPage, ResolveEmails, ParseResume, DraftOutreach,
@@ -497,8 +498,9 @@ full run inside the free verification tier. For `Pratish Gandhi` at `onefin.com`
 
 **Procedure.** Verify candidates one at a time in priority order, stopping at
 the first `valid`. Persist every verdict. Expected cost is roughly 2.5
-verifications per founder — about 670 for a full 269-founder run, which slightly
-exceeds Reoon's 600/month free tier.
+verifications per founder — about 670 for a full 269-founder run, inside
+MyEmailVerifier's ~3,000/month free allowance (100/day, D30). Spread across the
+~13 days the send campaign takes anyway, the daily cap never binds.
 
 **Outcomes.** A `published` verdict from Step 0 -> `READY_TO_DRAFT` immediately,
 no verification call. Otherwise, first `valid` -> store as `resolved_email`,
@@ -797,7 +799,7 @@ human reply, the row moves to `CLOSED`.
 
 ## 14. Security and Secrets
 
-Gmail OAuth client credentials, the Reoon API key and the Google Gemini API key
+Gmail OAuth client credentials, the email-verifier API key and the Google Gemini API key
 are read from environment variables via a typed settings object, and are never
 committed. `GEMINI_MODEL` pins the model id and `GEMINI_TIER` records whether
 the configured key is free or paid, so a run against real founder data on a
@@ -869,7 +871,7 @@ all outreach content stay on the user's own infrastructure.
 - **Adapters** — one shared contract test suite executed against both the fake
   and the real implementation of each port, so the fakes cannot drift. Real
   adapters are marked `@pytest.mark.integration` and skip cleanly without
-  credentials. YC and Reoon HTTP interactions use recorded fixtures.
+  credentials. YC and email-verifier HTTP interactions use recorded fixtures.
 - **API** — FastAPI `TestClient` wired to fakes.
 - **Worker entrypoints (D20)** — deliberately thin, so they carry no dedicated
   test suite of their own: each is a few lines wiring adapters and calling
@@ -948,11 +950,11 @@ included regardless, as courtesy and because it improves reply quality.
 | --- | --- |
 | YC company data (`yc-oss`) | Free |
 | YC founder scraping | Free |
-| Reoon Email Verifier | Free tier: 600 verifications/month for life. A full run needs ~480 |
+| MyEmailVerifier (D30) | Free tier: 100/day, ~3,000/month. A full run needs ~670, so it fits free |
 | Gmail sending | Free — 500/day limit against a need of ~20/day |
 | Gemini Flash drafting, classification and voice critique (D22) | INR 0 on the free tier during development; about INR 95 per full run on the paid tier, which production runs use (D12) |
 | Hosting | Local, or a free tier |
-| **Total** | **INR 0 to develop; about INR 95 per real 269-founder run, plus a one-time INR 1,050 Reoon pack (D26)** |
+| **Total** | **INR 0 to develop; about INR 95 per real 269-founder run. No verifier purchase needed (D30)** |
 
 A full run is roughly 630 drafts (269 founders, up to three messages each, plus
 validator retries), about 380 reply classifications, and ~700 voice-critic
@@ -966,14 +968,16 @@ and D11 was decided on prose quality and structured-output ergonomics instead.
 
 Widening to 144 companies (D25) raised this from roughly INR 62; it remains
 small enough that cost should not influence any design decision here. The one
-figure that did cross a threshold is email verification, which no longer fits
-the free tier — see D26 and the note below.
+figure that came close to a threshold is email verification — see D30.
 
-**Now recommended, not optional (D26):** a full run needs ~670 verifications
-against a 600/month free allowance, so it no longer fits. Reoon's smallest
-one-time pack is 10,000 credits for $11.90 (about INR 1,050), credits never
-expire — roughly fifteen full runs. The alternative is straddling a month
-boundary and accepting a quota pause mid-campaign.
+**Verification is free after all (D30, reversing D26).** A full run needs ~670
+verifications. Under the original provider (Reoon, 600/month) that did not fit
+and D26 called for a one-time credit pack. MyEmailVerifier's free tier is
+100/day — about 3,000/month — so a run fits with room to spare, and because the
+send campaign is rate-limited to 20 emails/day for deliverability (§18), the
+~13 days of sending give verification far more daily headroom than it needs.
+Nothing has to be bought. Paid pay-as-you-go exists at $0.0025/verification if
+volume ever grows, with credits that never expire.
 
 ---
 

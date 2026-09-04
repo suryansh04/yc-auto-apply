@@ -64,3 +64,42 @@ def test_rejects_hook_that_parrots_the_one_liner():
     body = one_liner + " at Vahan. Would you take an intern?"
     errs = validate_grounding(d(body=body), NEWS, "Vahan", one_liner, CLAIMS)
     assert any("one_liner" in e for e in errs)
+
+
+# --- Fix round 1 coverage (I1, I5) ---
+
+def test_publication_terms_are_subtracted_even_when_source_text_contains_them():
+    # D29, real regression: a headline like "Economic Times: OpenAI backs
+    # Vahan" puts the outlet's own words inside source.text. If those words
+    # (validation.py's pub_terms) aren't subtracted from the source's
+    # substantive terms before checking for a shared distinctive term, a
+    # draft that only echoes the outlet name passes grounding by accident.
+    # Deleting `- pub_terms` at validation.py's `substantive = ...` line
+    # leaves this failing while all other grounding tests stay green.
+    source = SourceRow(kind="news", text="Economic Times reports a funding round",
+                        publication="The Economic Times", intern_appropriate=None)
+    body = "Your Economic Times moment at Vahan. Would you take an intern?"
+    errs = validate_grounding(d(body=body), source, "Vahan", "x", CLAIMS)
+    assert any("publication" in e or "shares no distinctive term" in e for e in errs)
+
+
+def test_hook_grounding_ignores_a_distinctive_term_planted_in_a_later_paragraph():
+    # The source-sharing check must score only the hook (first paragraph),
+    # not the whole body — otherwise a generic opener passes grounding
+    # because a later paragraph happens to reuse a source word.
+    body = ("Your product looks good at Vahan.\n\n"
+            "I built a scheduler in Python. Also, blue-collar hiring over voice is neat. "
+            "Would you take an intern?")
+    errs = validate_grounding(d(body=body), NEWS, "Vahan", "x", CLAIMS)
+    assert any("shares no distinctive term" in e for e in errs)
+
+
+def test_hook_one_liner_overlap_ignores_a_later_paragraph():
+    # Mirror image of the above: the one_liner-overlap check must also
+    # score only the hook, so parroting the one_liner in paragraph two (not
+    # the hook) doesn't over-fire the overlap rule.
+    one_liner = "Recruitment platform for blue-collar workers using voice"
+    body = ("You're automating blue-collar hiring at Vahan. That's what caught my eye.\n\n"
+            + one_liner + " is roughly how I'd describe it. Would you take an intern?")
+    errs = validate_grounding(d(body=body), NEWS, "Vahan", one_liner, CLAIMS)
+    assert not any("one_liner" in e for e in errs)

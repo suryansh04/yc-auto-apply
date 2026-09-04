@@ -11,11 +11,11 @@ MAX_SENTENCES_PER_PARAGRAPH = 3
 MAX_EM_DASHES = 2
 
 BANNED_PHRASES = [
-    "i hope this email finds you well", "i am reaching out", "passionate about",
-    "leverage", "synergy", "game-changing", "i came across your company",
-    "delve", "tapestry", "in today's fast-paced", "reach out", "circle back",
-    "at your earliest convenience", "i would love the opportunity",
-    "please do not hesitate",
+    "i hope this email finds you well", "i am reaching out", "reaching out",
+    "passionate about", "leverage", "synergy", "game-changing",
+    "i came across your company", "delve", "tapestry", "in today's fast-paced",
+    "reach out", "circle back", "at your earliest convenience",
+    "i would love the opportunity", "please do not hesitate",
 ]
 SENIORITY_PHRASES = [
     "years of experience", "in my current role", "my team", "i led a team",
@@ -23,6 +23,8 @@ SENIORITY_PHRASES = [
 ]
 LOCATION_PHRASES = ["remote", "relocate", "based in", "work from"]
 INTERN_TOKENS = ["internship", "intern", "interning"]
+MIN_CAPS_WORD_LEN = 3
+MIN_CAPS_WORDS_TO_SHOUT = 2
 
 
 def _sentences(text: str) -> list[str]:
@@ -31,6 +33,18 @@ def _sentences(text: str) -> list[str]:
 
 def _words(text: str) -> list[str]:
     return [w for w in re.findall(r"\S+", text) if w]
+
+
+def _paragraphs(text: str) -> list[str]:
+    return [p for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+
+
+def _hook(body: str) -> str:
+    """The first paragraph — spec's part 1 of the three-part structure. The
+    hook-grounding checks score only this, not the whole body, so a later
+    paragraph can't accidentally launder a source or one_liner term."""
+    paras = _paragraphs(body)
+    return paras[0] if paras else body
 
 
 def validate_style(draft, previous_body: str | None = None) -> list[str]:
@@ -46,7 +60,7 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
             errs.append(f"a sentence exceeds {MAX_SENTENCE_WORDS} words: {s[:40]!r}")
             break
 
-    paragraphs = [p for p in re.split(r"\n\s*\n", body.strip()) if p.strip()]
+    paragraphs = _paragraphs(body)
     if len(paragraphs) > MAX_PARAGRAPHS:
         errs.append(f"more than {MAX_PARAGRAPHS} paragraphs")
     for p in paragraphs:
@@ -70,19 +84,21 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
         if phrase in low:
             errs.append(f"implies seniority: {phrase!r}")
     for phrase in LOCATION_PHRASES:
-        if phrase in low:
+        if re.search(rf"\b{re.escape(phrase)}\b", low):
             errs.append(f"raises location: {phrase!r}")
 
     if not any(t in low for t in INTERN_TOKENS):
         errs.append("no explicit internship ask")
 
-    if body.count("—") > MAX_EM_DASHES:
+    dash_count = body.count("—") + body.count("–") + body.count(" -- ")
+    if dash_count > MAX_EM_DASHES:
         errs.append("more than two em dashes")
 
     subject_words = _words(draft.subject)
     if not 3 <= len(subject_words) <= 6:
         errs.append("subject is not between three and six words")
-    if any(w.isupper() and len(w) > 1 for w in subject_words):
+    caps_words = [w for w in subject_words if len(w) >= MIN_CAPS_WORD_LEN and w.isupper()]
+    if len(caps_words) >= MIN_CAPS_WORDS_TO_SHOUT:
         errs.append("subject contains an all-caps word")
     if re.search(r"[\U0001F300-\U0001FAFF☀-➿]", draft.subject):
         errs.append("subject contains emoji")
@@ -113,9 +129,12 @@ class SourceRow:
     intern_appropriate: bool | None
 
 
+_SHORT_TERM_ALLOWLIST = {"ai", "ml", "vr", "3d"}
+
+
 def _terms(text: str) -> set[str]:
     return {w for w in re.findall(r"[A-Za-z0-9']+", text.lower())
-            if w not in _STOPWORDS and len(w) > 2}
+            if w not in _STOPWORDS and (len(w) > 2 or w in _SHORT_TERM_ALLOWLIST)}
 
 
 def validate_grounding(draft, source, company_name, one_liner, claims) -> list[str]:
@@ -140,8 +159,9 @@ def validate_grounding(draft, source, company_name, one_liner, claims) -> list[s
         if source.publication.lower() in low:
             errs.append("publication name appears in the body")
 
+    hook = _hook(body)
     substantive = _terms(source.text) - pub_terms
-    shared = substantive & _terms(body)
+    shared = substantive & _terms(hook)
     if not shared:
         errs.append("hook shares no distinctive term with the cited source")
 
@@ -153,7 +173,7 @@ def validate_grounding(draft, source, company_name, one_liner, claims) -> list[s
 
     if one_liner:
         ol = _terms(one_liner)
-        if ol and len(ol & _terms(body)) / len(ol) > 0.6:
+        if ol and len(ol & _terms(hook)) / len(ol) > 0.6:
             errs.append("hook overlaps more than 60% with one_liner")
 
     return errs

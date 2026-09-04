@@ -60,3 +60,59 @@ def test_rejects_bad_subject_length():
 def test_followup_must_be_shorter_than_previous():
     errs = validate_style(draft(step=1), previous_body="short intern ask")
     assert any("shorter" in e for e in errs)
+
+
+# --- Fix round 1 coverage (I2, I4, and cheap minors) ---
+
+def test_rejects_a_paragraph_with_more_than_three_sentences():
+    # One paragraph, four sentences, no paragraph break: isolates the
+    # per-paragraph sentence-count rule from the paragraph-COUNT rule, which
+    # the original test_rejects_more_than_three_paragraphs (four one-sentence
+    # paragraphs) never exercised.
+    body = ("You build voice AI for blue-collar workers. I think that's exciting. "
+            "I built a scheduler once. Would you take an intern?")
+    errs = validate_style(draft(body=body))
+    assert "a paragraph exceeds 3 sentences" in errs
+
+
+def test_rejects_more_than_two_em_dashes():
+    body = "You build voice AI — nice — really — impressive. Would you take an intern?"
+    assert any("em dash" in e for e in validate_style(draft(body=body)))
+
+
+def test_dash_count_includes_en_dash_and_double_hyphen():
+    body = ("You build voice AI – nice -- really — impressive today. "
+            "Would you take an intern?")
+    assert any("em dash" in e for e in validate_style(draft(body=body)))
+
+
+def test_rejects_shouting_subject_with_multiple_allcaps_words():
+    errs = validate_style(draft("Would you take an intern? Thanks.",
+                                 subject="URGENT INTERN REQUEST NOW"))
+    assert any("all-caps" in e for e in errs)
+
+
+def test_accepts_a_single_acronym_company_name_in_subject():
+    # D-something: a legitimate acronym company name must not read as
+    # shouting. One all-caps token alone no longer trips the rule.
+    body = "Would you take an intern? Thanks a lot friend."
+    assert validate_style(draft(body, subject="Backend intern at ZOKO")) == []
+    assert validate_style(draft(body, subject="Backend intern at Coulomb AI")) == []
+
+
+def test_rejects_subject_with_emoji():
+    errs = validate_style(draft("Would you take an intern? Thanks.",
+                                 subject="Backend intern \U0001F680 today"))
+    assert any("emoji" in e for e in errs)
+
+
+def test_rejects_reaching_out_banned_phrase():
+    body = "Reaching out because I think this is exciting. Would you take an intern?"
+    assert any("banned phrase" in e for e in validate_style(draft(body=body)))
+
+
+def test_location_phrase_does_not_false_positive_on_partial_word():
+    body = ("I built a rule-based inference engine for cloud-based interfaces. "
+            "Would you take an intern?")
+    errs = validate_style(draft(body=body))
+    assert not any("location" in e for e in errs)

@@ -3,11 +3,17 @@ from tests import fakes
 
 
 def test_fakes_are_structural_subtypes():
-    v: ports.EmailVerifier = fakes.FakeVerifier({})
-    d: ports.Drafter = fakes.FakeDrafter()
-    s: ports.MailSender = fakes.FakeSender()
-    c: ports.Clock = fakes.FrozenClock()
-    assert v and d and s and c
+    # Every Protocol in app.ports is @runtime_checkable, so isinstance()
+    # actually inspects each fake's methods against the Protocol instead of
+    # just checking truthiness (a fake with a renamed or missing method
+    # would fail here, which a bare `assert obj` never would).
+    assert isinstance(fakes.FakeYCDirectory(), ports.YCDirectory)
+    assert isinstance(fakes.FakeCompanyPageSource(), ports.CompanyPageSource)
+    assert isinstance(fakes.FakeVerifier({}), ports.EmailVerifier)
+    assert isinstance(fakes.FakeDrafter(), ports.Drafter)
+    assert isinstance(fakes.FakeResumeParser(), ports.ResumeParser)
+    assert isinstance(fakes.FakeSender(), ports.MailSender)
+    assert isinstance(fakes.FrozenClock(), ports.Clock)
 
 
 def test_fake_verifier_records_calls_and_respects_quota():

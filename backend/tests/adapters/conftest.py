@@ -8,6 +8,14 @@ here never affects the offline suite.
 
 Each test runs inside its own transaction that is rolled back on teardown,
 so tests never need to truncate tables between runs.
+
+PREREQUISITE: `alembic upgrade head` must have been run against the target
+database before these tests are collected for real. These fixtures do not
+create the schema themselves — an empty (unmigrated) database currently
+fails with an opaque `sqlalchemy.exc.ProgrammingError: ... UndefinedTable`
+the first time a fixture inserts a row, which does not obviously point back
+to "run the migration first." If you see that error, run
+`alembic upgrade head` (against the same `DATABASE_URL`) and retry.
 """
 
 import pytest

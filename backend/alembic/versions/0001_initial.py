@@ -51,8 +51,8 @@ def upgrade() -> None:
         sa.Column("one_liner", sa.Text(), nullable=True),
         sa.Column("long_description", sa.Text(), nullable=True),
         sa.Column("last_synced_at", sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("slug"),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_companies")),
+        sa.UniqueConstraint("slug", name=op.f("uq_companies_slug")),
     )
     op.create_index(op.f("ix_companies_yc_id"), "companies", ["yc_id"], unique=True)
 
@@ -67,8 +67,11 @@ def upgrade() -> None:
         sa.Column("twitter_url", sa.String(length=500), nullable=True),
         sa.Column("bio", sa.Text(), nullable=True),
         sa.Column("scraped_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(["company_id"], ["companies.id"]),
-        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["company_id"], ["companies.id"],
+            name=op.f("fk_founders_company_id_companies"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_founders")),
     )
     op.create_index(op.f("ix_founders_company_id"), "founders", ["company_id"], unique=False)
     op.create_index(op.f("ix_founders_yc_user_id"), "founders", ["yc_user_id"], unique=True)
@@ -86,8 +89,11 @@ def upgrade() -> None:
         sa.Column("min_experience", sa.String(length=100), nullable=True),
         sa.Column("skills", postgresql.JSONB(), nullable=True),
         sa.Column("raw", postgresql.JSONB(), nullable=True),
-        sa.ForeignKeyConstraint(["company_id"], ["companies.id"]),
-        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["company_id"], ["companies.id"],
+            name=op.f("fk_job_postings_company_id_companies"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_job_postings")),
     )
     op.create_index(op.f("ix_job_postings_company_id"), "job_postings", ["company_id"], unique=False)
 
@@ -100,9 +106,12 @@ def upgrade() -> None:
         sa.Column("source", sa.String(length=255), nullable=True),
         sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("raw", postgresql.JSONB(), nullable=True),
-        sa.ForeignKeyConstraint(["company_id"], ["companies.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("company_id", "url"),
+        sa.ForeignKeyConstraint(
+            ["company_id"], ["companies.id"],
+            name=op.f("fk_company_news_company_id_companies"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_company_news")),
+        sa.UniqueConstraint("company_id", "url", name=op.f("uq_company_news_company_id")),
     )
     op.create_index(op.f("ix_company_news_company_id"), "company_news", ["company_id"], unique=False)
 
@@ -114,8 +123,11 @@ def upgrade() -> None:
         sa.Column("body", sa.Text(), nullable=False),
         sa.Column("published_email", sa.String(length=255), nullable=True),
         sa.Column("raw", postgresql.JSONB(), nullable=True),
-        sa.ForeignKeyConstraint(["company_id"], ["companies.id"]),
-        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["company_id"], ["companies.id"],
+            name=op.f("fk_company_launches_company_id_companies"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_company_launches")),
     )
     op.create_index(op.f("ix_company_launches_company_id"), "company_launches", ["company_id"], unique=False)
 
@@ -129,9 +141,12 @@ def upgrade() -> None:
         sa.Column("verdict", sa.String(length=20), nullable=True),
         sa.Column("provider", sa.String(length=50), nullable=True),
         sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(["founder_id"], ["founders.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("founder_id", "address"),
+        sa.ForeignKeyConstraint(
+            ["founder_id"], ["founders.id"],
+            name=op.f("fk_email_candidates_founder_id_founders"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_email_candidates")),
+        sa.UniqueConstraint("founder_id", "address", name=op.f("uq_email_candidates_founder_id")),
     )
     op.create_index(op.f("ix_email_candidates_founder_id"), "email_candidates", ["founder_id"], unique=False)
 
@@ -148,9 +163,20 @@ def upgrade() -> None:
         sa.Column("last_error", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.ForeignKeyConstraint(["founder_id"], ["founders.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("founder_id"),
+        sa.ForeignKeyConstraint(
+            ["founder_id"], ["founders.id"],
+            name=op.f("fk_outreach_founder_id_founders"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_outreach")),
+        sa.UniqueConstraint("founder_id", name=op.f("uq_outreach_founder_id")),
+    )
+    # Spec §7/§8: every stage worker claims `outreach` rows by state plus a
+    # due `next_action_at`. This is the exact access pattern.
+    op.create_index(
+        op.f("ix_outreach_state_next_action_at"),
+        "outreach",
+        ["state", "next_action_at"],
+        unique=False,
     )
 
     op.create_table(
@@ -169,14 +195,26 @@ def upgrade() -> None:
         sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("received_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("edited_by_user", sa.Boolean(), nullable=False),
-        sa.ForeignKeyConstraint(["outreach_id"], ["outreach.id"]),
-        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["outreach_id"], ["outreach.id"],
+            name=op.f("fk_messages_outreach_id_outreach"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_messages")),
         # LOAD-BEARING (spec §13, D5): a message marked sent must have been
         # approved. Enforced by the database, independent of the
         # application layer.
         sa.CheckConstraint(
             "sent_at IS NULL OR approved_at IS NOT NULL",
-            name="ck_messages_sent_requires_approved",
+            name=op.f("ck_messages_sent_requires_approved"),
+        ),
+        # The partial unique index below is only as good as `direction`
+        # actually being 'outbound' or 'inbound' — an uncontrolled value
+        # falls outside the partial predicate and silently escapes
+        # deduplication. Closes that gap (spec §7 defines the domain as
+        # outbound | inbound).
+        sa.CheckConstraint(
+            "direction IN ('outbound', 'inbound')",
+            name=op.f("ck_messages_direction"),
         ),
     )
     op.create_index(op.f("ix_messages_outreach_id"), "messages", ["outreach_id"], unique=False)
@@ -198,7 +236,7 @@ def upgrade() -> None:
         sa.Column("raw_text", sa.Text(), nullable=False),
         sa.Column("claims", postgresql.JSONB(), nullable=True),
         sa.Column("parsed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_resume_profile")),
     )
 
     op.create_table(
@@ -210,7 +248,7 @@ def upgrade() -> None:
         sa.Column("followup_day_1", sa.Integer(), nullable=True),
         sa.Column("followup_day_2", sa.Integer(), nullable=True),
         sa.Column("signature", sa.Text(), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_settings")),
     )
 
 
@@ -221,6 +259,7 @@ def downgrade() -> None:
     op.drop_index("uq_messages_outreach_step_outbound", table_name="messages")
     op.drop_index(op.f("ix_messages_outreach_id"), table_name="messages")
     op.drop_table("messages")
+    op.drop_index(op.f("ix_outreach_state_next_action_at"), table_name="outreach")
     op.drop_table("outreach")
     op.drop_index(op.f("ix_email_candidates_founder_id"), table_name="email_candidates")
     op.drop_table("email_candidates")

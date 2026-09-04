@@ -27,6 +27,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    MetaData,
     String,
     Text,
     Time,
@@ -37,9 +38,22 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+# Standard Alembic-recommended naming convention. Applied now, before any
+# database has ever run this migration, so every constraint gets a
+# deterministic name instead of Postgres's implicit ones — the alternative
+# is a future `alembic revision --autogenerate` producing spurious
+# rename-only diffs the first time this convention gets added.
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
 
 class Base(DeclarativeBase):
-    pass
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
 class Company(Base):
@@ -151,6 +165,11 @@ class EmailCandidate(Base):
 
 class Outreach(Base):
     __tablename__ = "outreach"
+    __table_args__ = (
+        # Spec §7/§8: every stage worker claims `outreach` rows by state
+        # plus a due `next_action_at`. This is the exact access pattern.
+        Index("ix_outreach_state_next_action_at", "state", "next_action_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     founder_id: Mapped[int] = mapped_column(ForeignKey("founders.id"), unique=True)
@@ -195,9 +214,26 @@ class Message(Base):
         # without having been approved first. This holds even if the
         # application layer has a bug, because the database itself refuses
         # the row.
+        # NOTE on the `name=` values below: with a naming convention active
+        # on `Base.metadata`, SQLAlchemy's "ck" template
+        # ("ck_%(table_name)s_%(constraint_name)s") itself supplies the
+        # `ck_messages_` prefix — passing an already-prefixed name here
+        # would double it (`ck_messages_ck_messages_...`). The name given
+        # to `CheckConstraint` is only ever the suffix.
         CheckConstraint(
             "sent_at IS NULL OR approved_at IS NOT NULL",
-            name="ck_messages_sent_requires_approved",
+            name="sent_requires_approved",
+        ),
+        # The partial index above is only as good as `direction` actually
+        # being 'outbound' or 'inbound' — an uncontrolled value (e.g.
+        # 'Outbound', a typo) falls outside the partial predicate and
+        # silently escapes deduplication. This CHECK closes that gap so the
+        # double-send guarantee doesn't depend on every future caller
+        # spelling the string identically (spec §7 defines the domain as
+        # outbound | inbound).
+        CheckConstraint(
+            "direction IN ('outbound', 'inbound')",
+            name="direction",
         ),
     )
 

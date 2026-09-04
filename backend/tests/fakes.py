@@ -1,6 +1,34 @@
 from datetime import datetime, timezone
 
 
+class FakeYCDirectory:
+    def __init__(self, companies: list[dict] | None = None):
+        self._companies = companies or []
+
+    def fetch_companies(self) -> list[dict]:
+        return self._companies
+
+
+class FakeCompanyPageSource:
+    def __init__(self, pages: dict[str, dict] | None = None):
+        self._pages = pages or {}
+        self.calls: list[str] = []
+
+    def fetch_page(self, slug: str) -> dict:
+        self.calls.append(slug)
+        return self._pages.get(slug, {})
+
+
+class FakeResumeParser:
+    def __init__(self, claims: list[dict] | None = None):
+        self._claims = claims if claims is not None else []
+        self.calls: list[str] = []
+
+    def parse(self, raw_text: str) -> list[dict]:
+        self.calls.append(raw_text)
+        return self._claims
+
+
 class FakeVerifier:
     def __init__(self, verdicts: dict[str, str], quota: int | None = None):
         self._verdicts, self._quota, self.calls = verdicts, quota, []

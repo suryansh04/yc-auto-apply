@@ -54,7 +54,7 @@ limit)`) when that phase actually needs it, not bolted onto this one.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
@@ -66,6 +66,7 @@ from app.adapters.db.models import (
     JobPosting,
     Message,
     Outreach,
+    ResumeProfile,
 )
 from app.domain.states import OutreachState
 
@@ -382,3 +383,48 @@ class EmailCandidateRepo:
                 select(EmailCandidate).where(EmailCandidate.founder_id == founder_id)
             ).scalars()
         )
+
+
+# --- Added in Task 13 (spec §7/§10): the single-row resume profile that
+# `ParseResume` writes and `DraftOutreach` reads. Same `upsert(**fields)` /
+# `get(id)` shape as every repo above. The table is single-row by design
+# (spec §7: "resume_profile — single row"), so `upsert` is keyed on `id`
+# when given and otherwise on "the one row that exists", and `save` /
+# `get_current` are the single-row conveniences the use cases actually call.
+
+
+class ResumeProfileRepo:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def upsert(self, **fields) -> ResumeProfile:
+        """Insert or update. Keyed on `id` when given; otherwise updates the
+        existing (single) row if there is one, else inserts it."""
+        existing = None
+        if fields.get("id") is not None:
+            existing = self.session.get(ResumeProfile, fields["id"])
+        if existing is None:
+            existing = self.get_current()
+        if existing is None:
+            existing = ResumeProfile(**fields)
+            self.session.add(existing)
+        else:
+            for key, value in fields.items():
+                setattr(existing, key, value)
+        self.session.flush()
+        return existing
+
+    def get(self, id: int) -> ResumeProfile | None:
+        return self.session.get(ResumeProfile, id)
+
+    def get_current(self) -> ResumeProfile | None:
+        """The one profile row, or `None` before any resume was parsed."""
+        return self.session.execute(
+            select(ResumeProfile).order_by(ResumeProfile.id.desc()).limit(1)
+        ).scalar_one_or_none()
+
+    def save(self, raw_text: str, claims: list[dict]) -> ResumeProfile:
+        """What `ParseResume` calls (its brief's own fake repo has exactly
+        this `save(raw_text, claims)` signature): replaces the single
+        profile row's text and claims and stamps `parsed_at`."""
+        return self.upsert(raw_text=raw_text, claims=claims, parsed_at=func.now())

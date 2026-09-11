@@ -137,5 +137,76 @@ def resolve(
     )
 
 
+def _read_resume_text(path: str) -> str:
+    """PDF via `pypdf` (text extraction only — no OCR; a scanned-image resume
+    yields empty text and is rejected downstream), or a plain `.txt`/`.md`
+    read for anything else."""
+    from pathlib import Path
+
+    p = Path(path)
+    if p.suffix.lower() == ".pdf":
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(p))
+        return "\n".join((page.extract_text() or "") for page in reader.pages)
+    return p.read_text(encoding="utf-8")
+
+
+def _gemini_client():
+    from google import genai
+
+    settings = get_settings()
+    if not settings.gemini_api_key:
+        raise typer.BadParameter("GEMINI_API_KEY is not set")
+    return genai.Client(api_key=settings.gemini_api_key)
+
+
+@app.command("parse-resume")
+def parse_resume(path: str = typer.Argument(..., help="Resume file: .pdf, .txt or .md")) -> None:
+    """Parse the resume into structured, citable claims (Task 13, spec §10).
+    Re-runnable: replaces the single `resume_profile` row. Read every claim
+    it prints — these are the only things the drafter may assert about you."""
+    from app.adapters.db.repositories import ResumeProfileRepo
+    from app.adapters.gemini import GeminiResumeParser
+    from app.application.parse_resume import ParseResume
+
+    settings = get_settings()
+    raw_text = _read_resume_text(path)
+    parser = GeminiResumeParser(_gemini_client(), model=settings.gemini_model)
+    with _session() as session:
+        use_case = ParseResume(parser, ResumeProfileRepo(session))
+        claims = use_case.run(raw_text)
+        session.commit()
+
+    _print_claims([c.__dict__ for c in claims])
+    if use_case.dropped:
+        typer.echo(f"dropped {len(use_case.dropped)} claim(s) with an unknown kind or empty text:", err=True)
+        for c in use_case.dropped:
+            typer.echo(f"  {c}", err=True)
+    typer.echo(f"parsed {len(claims)} claim(s), {len(use_case.unverified)} with an unverifiable span")
+
+
+@app.command("show-claims")
+def show_claims() -> None:
+    """Print the claims currently persisted in `resume_profile` (Task 13)."""
+    from app.adapters.db.repositories import ResumeProfileRepo
+
+    with _session() as session:
+        profile = ResumeProfileRepo(session).get_current()
+        if profile is None:
+            typer.echo("no resume profile yet - run `parse-resume PATH` first", err=True)
+            raise typer.Exit(code=1)
+        claims = list(profile.claims or [])
+    _print_claims(claims)
+    typer.echo(f"{len(claims)} claim(s)")
+
+
+def _print_claims(claims: list[dict]) -> None:
+    for i, c in enumerate(claims, 1):
+        flag = "" if c.get("span_verified", True) else "  [span NOT found verbatim in resume]"
+        typer.echo(f"{i:>3}. [{c.get('kind')}] {c.get('text')}{flag}")
+        typer.echo(f"       span: {c.get('source_span')!r}")
+
+
 if __name__ == "__main__":
     app()

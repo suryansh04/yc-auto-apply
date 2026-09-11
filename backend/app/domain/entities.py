@@ -60,6 +60,12 @@ class ResumeClaim:
     kind: str          # skill | project | metric | role | education
     text: str
     source_span: str
+    # Task 13: False when `source_span` could not be found verbatim in the
+    # resume text — the audit trail (spec §10) is broken for that claim and
+    # the operator should read it with suspicion. Defaults True so every
+    # pre-existing `ResumeClaim(kind, text, source_span)` call site is
+    # untouched.
+    span_verified: bool = True
 
 
 @dataclass

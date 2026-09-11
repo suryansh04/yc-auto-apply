@@ -3,7 +3,12 @@
 Every repo exposes `upsert` and `get`; `FounderRepo`, `OutreachRepo` and
 `MessageRepo` also expose `list_by_state` (per Task 9's Interfaces block).
 `CompanyRepo` exposes `list_by_status` instead — see below for why that one
-name deliberately differs.
+name deliberately differs. `FounderRepo.get_by_yc_user_id` and
+`OutreachRepo.get_by_founder_id` were added in Task 11 for
+`ScrapeCompanyPage`, which needs to look a row up by natural key *before*
+deciding whether to `upsert` it (see their docstrings). `JobPostingRepo`,
+`CompanyNewsRepo` and `CompanyLaunchRepo`, also added in Task 11, follow the
+same `upsert`/`get` shape as the four Task 9 repos above.
 
 The brief pins the method NAMES but not their exact signatures (unlike
 Task 8's ports, which ship a test file that fixes every Protocol method to
@@ -52,7 +57,15 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Company, Founder, Message, Outreach
+from app.adapters.db.models import (
+    Company,
+    CompanyLaunch,
+    CompanyNews,
+    Founder,
+    JobPosting,
+    Message,
+    Outreach,
+)
 from app.domain.states import OutreachState
 
 
@@ -106,6 +119,15 @@ class FounderRepo:
     def get(self, id: int) -> Founder | None:
         return self.session.get(Founder, id)
 
+    def get_by_yc_user_id(self, yc_user_id: int) -> Founder | None:
+        """Added in Task 11: lets `ScrapeCompanyPage` tell a brand-new
+        founder from a re-scraped one *before* calling `upsert` (whose
+        update-if-present semantics erase that distinction), so it creates
+        an `Outreach` row only for founders that don't have one yet."""
+        return self.session.execute(
+            select(Founder).where(Founder.yc_user_id == yc_user_id)
+        ).scalar_one_or_none()
+
     def list_by_state(self, state: OutreachState | str) -> list[Founder]:
         """Plain unordered listing (see module docstring) of founders whose
         `Outreach` row is currently in `state`. Not a claim primitive."""
@@ -139,6 +161,15 @@ class OutreachRepo:
 
     def get(self, id: int) -> Outreach | None:
         return self.session.get(Outreach, id)
+
+    def get_by_founder_id(self, founder_id: int) -> Outreach | None:
+        """Added in Task 11, the read-side counterpart of `upsert`'s
+        `founder_id` key: lets `ScrapeCompanyPage` check whether a founder
+        already has an `Outreach` row before creating one in `NEW`, so a
+        re-scrape never resets an outreach that has already progressed."""
+        return self.session.execute(
+            select(Outreach).where(Outreach.founder_id == founder_id)
+        ).scalar_one_or_none()
 
     def list_by_state(self, state: OutreachState | str) -> list[Outreach]:
         """Plain unordered `WHERE state = :state` listing — sufficient for
@@ -197,3 +228,92 @@ class MessageRepo:
                 .where(Outreach.state == str(state))
             ).scalars()
         )
+
+
+# --- Added in Task 11 (spec §3/§9): repos for the research tables a company
+# page scrape populates. None of these were needed until `ScrapeCompanyPage`
+# existed, so Task 9 never built them. Same `upsert(**fields)` / `get(id)`
+# shape as the four repos above; each `upsert` is keyed on the closest thing
+# its table has to a natural key, matching how `CompanyRepo`/`FounderRepo`/
+# `OutreachRepo` are keyed on theirs.
+
+
+class JobPostingRepo:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def upsert(self, **fields) -> JobPosting:
+        """Insert or update, keyed on `(company_id, url)` — `JobPosting` has
+        no DB-level uniqueness (unlike `CompanyNews`), so this dedup is
+        application-side only, same as every other repo's `upsert`."""
+        existing = self.session.execute(
+            select(JobPosting).where(
+                JobPosting.company_id == fields["company_id"],
+                JobPosting.url == fields.get("url"),
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            existing = JobPosting(**fields)
+            self.session.add(existing)
+        else:
+            for key, value in fields.items():
+                setattr(existing, key, value)
+        self.session.flush()
+        return existing
+
+    def get(self, id: int) -> JobPosting | None:
+        return self.session.get(JobPosting, id)
+
+
+class CompanyNewsRepo:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def upsert(self, **fields) -> CompanyNews:
+        """Insert or update, keyed on `(company_id, url)` — matches the
+        table's own `UniqueConstraint("company_id", "url")`."""
+        existing = self.session.execute(
+            select(CompanyNews).where(
+                CompanyNews.company_id == fields["company_id"],
+                CompanyNews.url == fields.get("url"),
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            existing = CompanyNews(**fields)
+            self.session.add(existing)
+        else:
+            for key, value in fields.items():
+                setattr(existing, key, value)
+        self.session.flush()
+        return existing
+
+    def get(self, id: int) -> CompanyNews | None:
+        return self.session.get(CompanyNews, id)
+
+
+class CompanyLaunchRepo:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def upsert(self, **fields) -> CompanyLaunch:
+        """Insert or update, keyed on `(company_id, title)` — the parsed
+        launch payload (`app.adapters.yc_page.parse_company_page`) carries
+        no external id for a launch, so title is the closest available
+        natural key."""
+        existing = self.session.execute(
+            select(CompanyLaunch).where(
+                CompanyLaunch.company_id == fields["company_id"],
+                CompanyLaunch.title == fields.get("title"),
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            existing = CompanyLaunch(**fields)
+            self.session.add(existing)
+        else:
+            for key, value in fields.items():
+                setattr(existing, key, value)
+        self.session.flush()
+        return existing
+
+    def get(self, id: int) -> CompanyLaunch | None:
+        return self.session.get(CompanyLaunch, id)

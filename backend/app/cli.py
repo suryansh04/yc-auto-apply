@@ -46,5 +46,49 @@ def sync() -> None:
     )
 
 
+@app.command()
+def scrape() -> None:
+    """Scrape founders, news, launches and job postings for every synced
+    target company (Task 11). Rate-limited to 1 request/second inside
+    `YCPageSource`; a company whose page fails to fetch or parse is skipped
+    with its error recorded, and the run continues with the rest."""
+    from app.adapters.db.repositories import (
+        CompanyLaunchRepo,
+        CompanyNewsRepo,
+        CompanyRepo,
+        FounderRepo,
+        JobPostingRepo,
+        OutreachRepo,
+    )
+    from app.adapters.yc_page import YCPageSource
+    from app.application.scrape_company_page import ScrapeCompanyPage, ScrapeRepos
+
+    with _session() as session:
+        companies = CompanyRepo(session).list_by_status(status="Active")
+        repos = ScrapeRepos(
+            founder=FounderRepo(session),
+            job_posting=JobPostingRepo(session),
+            news=CompanyNewsRepo(session),
+            launch=CompanyLaunchRepo(session),
+            outreach=OutreachRepo(session),
+        )
+        use_case = ScrapeCompanyPage(YCPageSource(), repos)
+
+        total_founders = total_new_founders = errors = 0
+        for company in companies:
+            result = use_case.run(company)
+            session.commit()
+            total_founders += result.founders
+            total_new_founders += result.new_founders
+            if result.error:
+                errors += 1
+                typer.echo(f"  error: {result.error}", err=True)
+
+    typer.echo(
+        f"companies {len(companies)}, founders {total_founders} "
+        f"(new {total_new_founders}), errors {errors}"
+    )
+
+
 if __name__ == "__main__":
     app()

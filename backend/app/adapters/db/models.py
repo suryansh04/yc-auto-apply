@@ -265,6 +265,33 @@ class ResumeProfile(Base):
     parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class GmailCredential(Base):
+    """Task 15 (spec §14): the OAuth refresh token for the sending Gmail
+    account lives in Postgres, not in a `token.json` file. One row per
+    account (`account_email` unique). Only the *refresh* token is stored —
+    the short-lived access token is fetched on demand by
+    `app.adapters.gmail.GmailSender` and never persisted — and the OAuth
+    client id/secret stay in the client-secrets JSON the operator points
+    `GMAIL_CLIENT_SECRETS_PATH` at, so this row alone cannot mint tokens.
+    Added in migration 0002."""
+
+    __tablename__ = "gmail_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_email: Mapped[str] = mapped_column(String(320), unique=True)
+    refresh_token: Mapped[str] = mapped_column(Text)
+    token_uri: Mapped[str] = mapped_column(String(500), default="https://oauth2.googleapis.com/token")
+    scopes: Mapped[list | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class AppSettings(Base):
     """Maps to the `settings` table (spec §7). Named `AppSettings`, not
     `Settings`, to avoid colliding with `app.config.Settings` (the typed

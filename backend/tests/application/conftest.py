@@ -31,6 +31,7 @@ in these fixtures is what makes that call resolve to the right row.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import pytest
 
@@ -93,6 +94,7 @@ class FakeOutreachRow:
     resolved_email: str | None = None
     last_error: str | None = None
     sequence_step: int = 0
+    next_action_at: object = None  # Task 15: stamped via the injected Clock port
 
 
 class FakeOutreachRepo:
@@ -267,6 +269,9 @@ class FakeMessageRow:
     research_source_id: int | None = None
     approved_at: object = None
     edited_by_user: bool = False
+    sent_at: object = None            # Task 15: set by `reserve_for_send`
+    gmail_message_id: str | None = None
+    gmail_thread_id: str | None = None
 
 
 class FakeMessageRepo:
@@ -297,6 +302,9 @@ class FakeMessageRepo:
                 setattr(existing, k, v)
         return existing
 
+    def get(self, id: int) -> FakeMessageRow | None:
+        return next((r for r in self.rows if r.id == id), None)
+
     def get_outbound(self, outreach_id: int, sequence_step: int) -> FakeMessageRow | None:
         return next((r for r in self.rows
                      if r.outreach_id == outreach_id and r.sequence_step == sequence_step
@@ -304,6 +312,26 @@ class FakeMessageRepo:
 
     def list_by_outreach_id(self, outreach_id: int) -> list[FakeMessageRow]:
         return [r for r in self.rows if r.outreach_id == outreach_id]
+
+    def reserve_for_send(self, message_id: int, now) -> int:
+        """Task 15 (ruling R1): models the real repo's single conditional
+        `UPDATE messages SET sent_at = :now WHERE id = :id AND sent_at IS
+        NULL AND approved_at IS NOT NULL` and returns its rowcount — 1 when
+        this call won the reservation, 0 when the row is missing, already
+        reserved, or not approved. The predicate lives here, not in the use
+        case, so `test_crash_after_gmail_call_does_not_double_send` exercises
+        the same semantics Postgres would enforce."""
+        row = self.get(message_id)
+        if row is None or row.sent_at is not None or row.approved_at is None:
+            return 0
+        row.sent_at = now
+        return 1
+
+    def count_sent_since(self, since) -> int:
+        """Task 15: outbound rows with `sent_at >= since` — what the daily
+        cap is counted against, so a re-run never exceeds it."""
+        return sum(1 for r in self.rows
+                   if r.direction == "outbound" and r.sent_at is not None and r.sent_at >= since)
 
 
 @dataclass
@@ -324,10 +352,26 @@ class FakeResumeProfileRepo:
         return self.profile
 
 
+class FakeSession:
+    """Task 15: `SendApproved` commits the reservation in its own
+    transaction *before* calling the sender, then commits the record step.
+    Counting commits lets a test assert that ordering."""
+
+    def __init__(self):
+        self.commit_calls = 0
+        self.rollback_calls = 0
+
+    def commit(self) -> None:
+        self.commit_calls += 1
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
+
+
 @dataclass
 class FakeRepos:
-    """Structural superset of `ResolveRepos` (Task 12) and `DraftRepos`
-    (Task 14) — see the module docstring."""
+    """Structural superset of `ResolveRepos` (Task 12), `DraftRepos`
+    (Task 14) and `SendRepos` (Task 15) — see the module docstring."""
     founder: FakeFounderRepo
     company: FakeCompanyRepo
     launch: FakeLaunchRepo
@@ -337,6 +381,7 @@ class FakeRepos:
     job_posting: FakeJobPostingRepo
     message: FakeMessageRepo
     resume_profile: FakeResumeProfileRepo
+    session: FakeSession
 
 
 RESUME_CLAIMS = [
@@ -358,6 +403,7 @@ def repos() -> FakeRepos:
         job_posting=FakeJobPostingRepo(),
         message=FakeMessageRepo(),
         resume_profile=FakeResumeProfileRepo(),
+        session=FakeSession(),
     )
     bundle.resume_profile.save("Built a scheduler in Python, cut wait 50%", list(RESUME_CLAIMS))
     return bundle
@@ -448,3 +494,78 @@ def founder_with_senior_posting(repos: FakeRepos) -> FakeFounderRow:
     repos.job_posting.add(id=1, company_id=6, title="Senior Engineer",
                           employment_type="Full-time", min_experience="6+ years")
     return founder
+
+
+# --- Task 15 fixtures ---------------------------------------------------------
+
+APPROVED_AT = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+APPROVED_BODY = (
+    "You're matching blue-collar workers to jobs over voice, in a dozen languages.\n\n"
+    "I'm a final-year CS student. I built a scheduler in Python.\n\n"
+    "Would you take an intern this summer? Happy to send code."
+)
+
+
+def _add_founder_with_draft(repos: FakeRepos, id: int, full_name: str, email: str | None,
+                            state: OutreachState, approved: bool) -> FakeFounderRow:
+    """One founder at their own company, an outreach row in `state` with
+    `resolved_email`, and the step-0 outbound draft row — `approved_at`
+    stamped only when `approved`. Outreach id == founder id (see the
+    module docstring)."""
+    repos.company.add(id=id, domain=f"co{id}.example.com", name=f"Company {id}")
+    founder = repos.founder.add(id=id, company_id=id, full_name=full_name)
+    outreach = repos.outreach.add(id=id, founder_id=founder.id, state=str(state))
+    outreach.resolved_email = email
+    repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="outbound",
+        subject=f"Backend intern at Company {id}", body=APPROVED_BODY,
+        research_source_type="news", research_source_id=1,
+        approved_at=APPROVED_AT if approved else None,
+    )
+    return founder
+
+
+@pytest.fixture
+def one_approved(repos: FakeRepos) -> FakeFounderRow:
+    """Madhav, `APPROVED`, draft approved, address resolved."""
+    return _add_founder_with_draft(repos, 10, "Madhav Krishna", "madhav@example.com",
+                                   OutreachState.APPROVED, approved=True)
+
+
+@pytest.fixture
+def pending_and_approved(repos: FakeRepos) -> tuple[FakeFounderRow, FakeFounderRow]:
+    """One `PENDING_APPROVAL` founder (draft not approved) and one
+    `APPROVED` founder at `approved@example.com` — the brief's own address."""
+    pending = _add_founder_with_draft(repos, 11, "Riya Nair", "pending@example.com",
+                                      OutreachState.PENDING_APPROVAL, approved=False)
+    approved = _add_founder_with_draft(repos, 12, "Asha Rao", "approved@example.com",
+                                       OutreachState.APPROVED, approved=True)
+    return pending, approved
+
+
+@pytest.fixture
+def five_approved(repos: FakeRepos) -> list[FakeFounderRow]:
+    names = ["Asha Rao", "Vikram Shah", "Riya Nair", "Pratish Gandhi", "Jane Founder"]
+    return [
+        _add_founder_with_draft(repos, 20 + i, name, f"founder{i}@example.com",
+                                OutreachState.APPROVED, approved=True)
+        for i, name in enumerate(names)
+    ]
+
+
+@pytest.fixture
+def sent_today(repos: FakeRepos):
+    """`sent_today(n, at=...)` adds `n` already-sent outbound rows (with
+    Gmail ids) for `SENT` founders, stamped `at` — default 08:00 UTC on the
+    `FrozenClock` default day (2026-09-04, 09:00 UTC)."""
+    def _add(n: int, at: datetime | None = None) -> None:
+        at = at or datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+        for i in range(n):
+            id = 100 + len(repos.message.rows)
+            _add_founder_with_draft(repos, id, f"Sent Earlier{i}", f"earlier{id}@example.com",
+                                    OutreachState.SENT, approved=True)
+            row = repos.message.get_outbound(id, 0)
+            row.sent_at = at
+            row.gmail_message_id = f"earlier-{id}"
+            row.gmail_thread_id = f"earlier-thread-{id}"
+    return _add

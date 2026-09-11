@@ -81,3 +81,108 @@ def test_parse_resume_does_not_warn_on_the_paid_tier(monkeypatch, env, tmp_path)
     result = runner.invoke(cli.app, ["parse-resume", str(resume)])
     assert "warning" not in result.output.lower()
     assert env == [True]
+
+
+# --- Task 15: `send` refuses to build a sender or open a session until every
+# send-side setting is present; all four default to empty in `app.config`.
+
+import json  # noqa: E402
+
+
+class _SessionOpened(Exception):
+    """Raised by the patched session factory: the guard passed and the
+    command reached the database step (which needs no DB here)."""
+
+
+@pytest.fixture
+def send_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    for var in ("SIGNATURE", "RESUME_PATH", "GMAIL_SENDER_ADDRESS", "GMAIL_CLIENT_SECRETS_PATH"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(tmp_path)  # no stray .env file can supply the settings
+    get_settings.cache_clear()
+    built = []
+
+    def fake_sender(*a, **kw):
+        built.append(kw)
+        raise AssertionError("no sender may be built before the guard passes")
+
+    def fake_session():
+        raise _SessionOpened()
+
+    monkeypatch.setattr(cli, "_gmail_sender", fake_sender)
+    monkeypatch.setattr(cli, "_session", fake_session)
+    yield built
+    get_settings.cache_clear()
+
+
+def _complete_send_config(monkeypatch, tmp_path):
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4 fake")
+    secrets = tmp_path / "client_secret.json"
+    secrets.write_text(json.dumps({"installed": {"client_id": "cid", "client_secret": "csec"}}),
+                       encoding="utf-8")
+    monkeypatch.setenv("SIGNATURE", "Suryansh")
+    monkeypatch.setenv("RESUME_PATH", str(resume))
+    monkeypatch.setenv("GMAIL_SENDER_ADDRESS", "me@gmail.com")
+    monkeypatch.setenv("GMAIL_CLIENT_SECRETS_PATH", str(secrets))
+    get_settings.cache_clear()
+
+
+def test_send_refuses_with_no_send_configuration(send_env):
+    result = runner.invoke(cli.app, ["send"])
+    assert result.exit_code == 2
+    out = result.output
+    assert "refusing to send" in out
+    for name in ("SIGNATURE", "RESUME_PATH", "GMAIL_SENDER_ADDRESS", "GMAIL_CLIENT_SECRETS_PATH"):
+        assert name in out
+    assert send_env == []
+    assert not isinstance(result.exception, _SessionOpened)
+
+
+@pytest.mark.parametrize("missing", ["SIGNATURE", "RESUME_PATH", "GMAIL_SENDER_ADDRESS",
+                                     "GMAIL_CLIENT_SECRETS_PATH"])
+def test_send_refuses_when_any_one_setting_is_missing(monkeypatch, tmp_path, send_env, missing):
+    _complete_send_config(monkeypatch, tmp_path)
+    monkeypatch.setenv(missing, "")
+    get_settings.cache_clear()
+    result = runner.invoke(cli.app, ["send", "--to-self"])
+    assert result.exit_code == 2
+    assert missing in result.output
+    assert send_env == []
+
+
+def test_send_refuses_a_resume_path_that_does_not_exist(monkeypatch, tmp_path, send_env):
+    _complete_send_config(monkeypatch, tmp_path)
+    monkeypatch.setenv("RESUME_PATH", str(tmp_path / "missing.pdf"))
+    get_settings.cache_clear()
+    result = runner.invoke(cli.app, ["send"])
+    assert result.exit_code == 2 and "RESUME_PATH" in result.output
+
+
+def test_send_with_complete_config_reaches_the_database_step(monkeypatch, tmp_path, send_env):
+    _complete_send_config(monkeypatch, tmp_path)
+    result = runner.invoke(cli.app, ["send", "--limit", "1"])
+    assert "refusing" not in result.output
+    assert isinstance(result.exception, _SessionOpened)   # guard passed; stopped at the DB
+    assert send_env == []                                   # no sender before credentials are loaded
+
+
+def test_send_refuses_a_client_secrets_file_without_a_client(monkeypatch, tmp_path, send_env):
+    _complete_send_config(monkeypatch, tmp_path)
+    (tmp_path / "client_secret.json").write_text(json.dumps({"installed": {}}), encoding="utf-8")
+    result = runner.invoke(cli.app, ["send"])
+    assert result.exit_code != 0
+    assert not isinstance(result.exception, _SessionOpened)
+
+
+def test_load_oauth_client_reads_installed_or_web_blocks(tmp_path):
+    p = tmp_path / "web.json"
+    p.write_text(json.dumps({"web": {"client_id": "w-id", "client_secret": "w-secret"}}), encoding="utf-8")
+    assert cli._load_oauth_client(str(p)) == ("w-id", "w-secret")
+
+
+def test_gmail_auth_also_requires_the_send_configuration(send_env):
+    result = runner.invoke(cli.app, ["gmail-auth"])
+    assert result.exit_code == 2
+    assert "refusing" in result.output

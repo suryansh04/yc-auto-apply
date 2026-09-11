@@ -54,7 +54,9 @@ limit)`) when that phase actually needs it, not bolted onto this one.
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from datetime import datetime
+
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
@@ -63,6 +65,7 @@ from app.adapters.db.models import (
     CompanyNews,
     EmailCandidate,
     Founder,
+    GmailCredential,
     JobPosting,
     Message,
     Outreach,
@@ -208,12 +211,13 @@ class MessageRepo:
         key). Update when `fields["id"]` is given and matches an existing
         row; insert a new row otherwise.
 
-        This is NOT the reserve-before-send double-send guard (spec §13):
-        that relies on a plain `INSERT` failing the database's unique
-        constraint on first write, which `upsert`'s update-if-present
-        semantics would silently paper over. Callers implementing the
-        "reserve" step should add a `Message` to the session directly (as
-        `tests/adapters/test_repositories.py` does) rather than call this.
+        This is NOT the reserve-before-send double-send guard (spec §13).
+        Since ruling R1 the draft-time outbound row is the reservation and
+        the guard is `reserve_for_send` below — a single conditional
+        UPDATE whose rowcount says whether this caller won. `upsert`'s
+        update-if-present semantics would silently paper over a lost race,
+        so `SendApproved` never uses it to claim a row, only to record the
+        Gmail ids afterwards.
         """
         existing = None
         if fields.get("id") is not None:
@@ -255,6 +259,46 @@ class MessageRepo:
                 .join(Outreach, Outreach.id == Message.outreach_id)
                 .where(Outreach.state == str(state))
             ).scalars()
+        )
+
+    def reserve_for_send(self, message_id: int, now: datetime) -> int:
+        """Task 15 (spec §13, ruling R1): the reserve step. ONE conditional
+        statement — never read-then-write —
+
+            UPDATE messages SET sent_at = :now
+             WHERE id = :id AND sent_at IS NULL AND approved_at IS NOT NULL
+
+        and its rowcount is the verdict: 1 means this caller holds the
+        reservation and may call Gmail; 0 means the row is already
+        reserved/sent, or was never approved, or does not exist — never
+        send. Two callers racing on the same row cannot both see 1,
+        because the second UPDATE evaluates its WHERE against the first's
+        committed `sent_at`. `synchronize_session="fetch"` keeps any
+        already-loaded `Message` instance's `sent_at` in step with the
+        row. The caller commits immediately after."""
+        result = self.session.execute(
+            update(Message)
+            .where(
+                Message.id == message_id,
+                Message.sent_at.is_(None),
+                Message.approved_at.is_not(None),
+            )
+            .values(sent_at=now)
+            .execution_options(synchronize_session="fetch")
+        )
+        return int(result.rowcount)
+
+    def count_sent_since(self, since: datetime) -> int:
+        """Task 15: outbound messages with `sent_at >= since`. `SendApproved`
+        subtracts this (from 00:00 UTC today) from `daily_send_cap`, so
+        re-running the CLI never exceeds the cap. Reserved-but-unrecorded
+        rows count too — deliberately conservative."""
+        return int(
+            self.session.execute(
+                select(func.count())
+                .select_from(Message)
+                .where(Message.direction == "outbound", Message.sent_at >= since)
+            ).scalar_one()
         )
 
 
@@ -464,3 +508,39 @@ class ResumeProfileRepo:
         this `save(raw_text, claims)` signature): replaces the single
         profile row's text and claims and stamps `parsed_at`."""
         return self.upsert(raw_text=raw_text, claims=claims, parsed_at=func.now())
+
+
+# --- Added in Task 15 (spec §14): the Gmail OAuth refresh token, one row per
+# sending account, written by `gmail-auth` and read by `send`. Same
+# `upsert(**fields)` / `get(id)` shape as every repo above; `upsert` is keyed
+# on `account_email` (the table's own unique constraint), so re-running
+# `gmail-auth` for the same account replaces its refresh token in place.
+
+
+class GmailCredentialRepo:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def upsert(self, **fields) -> GmailCredential:
+        """Insert or update, keyed on the natural key `account_email`."""
+        existing = self.session.execute(
+            select(GmailCredential).where(
+                GmailCredential.account_email == fields["account_email"]
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            existing = GmailCredential(**fields)
+            self.session.add(existing)
+        else:
+            for key, value in fields.items():
+                setattr(existing, key, value)
+        self.session.flush()
+        return existing
+
+    def get(self, id: int) -> GmailCredential | None:
+        return self.session.get(GmailCredential, id)
+
+    def get_by_account_email(self, account_email: str) -> GmailCredential | None:
+        return self.session.execute(
+            select(GmailCredential).where(GmailCredential.account_email == account_email)
+        ).scalar_one_or_none()

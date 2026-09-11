@@ -296,5 +296,172 @@ def _print_claims(claims: list[dict]) -> None:
         typer.echo(f"       span: {c.get('source_span')!r}")
 
 
+# --- Task 15: Gmail sending ----------------------------------------------------
+
+_MIN_PAUSE_SECONDS, _MAX_PAUSE_SECONDS = 20.0, 75.0  # spec §18: randomised inter-send delay
+
+
+class _UTCClock:
+    def now(self):
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc)
+
+
+def _random_pause() -> None:
+    import random
+    import time
+
+    time.sleep(random.uniform(_MIN_PAUSE_SECONDS, _MAX_PAUSE_SECONDS))
+
+
+def _require_send_config(settings) -> None:
+    """Refuse to build a sender until every send-side setting is present
+    (all default to empty in `app.config`, so a fresh `.env` can never send
+    by accident): a real signature (spec §18), an existing resume PDF, the
+    sending address, and the OAuth client-secrets file."""
+    from pathlib import Path
+
+    missing = []
+    if not settings.signature.strip():
+        missing.append("SIGNATURE (your sign-off; every email must carry a real signature)")
+    if not settings.resume_path or not Path(settings.resume_path).is_file():
+        missing.append("RESUME_PATH (must point at an existing PDF)")
+    if not settings.gmail_sender_address:
+        missing.append("GMAIL_SENDER_ADDRESS (the Gmail account authorised by gmail-auth)")
+    if not settings.gmail_client_secrets_path or not Path(settings.gmail_client_secrets_path).is_file():
+        missing.append("GMAIL_CLIENT_SECRETS_PATH (must point at the OAuth client JSON)")
+    if missing:
+        typer.echo("refusing to send: missing configuration", err=True)
+        for m in missing:
+            typer.echo(f"  - {m}", err=True)
+        raise typer.Exit(code=2)
+
+
+def _load_oauth_client(path: str) -> tuple[str, str]:
+    """`client_id` / `client_secret` from a Google Cloud OAuth client JSON
+    (`{"installed": {...}}` for a Desktop app, or `{"web": {...}}`)."""
+    import json
+    from pathlib import Path
+
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    block = data.get("installed") or data.get("web") or {}
+    client_id, client_secret = block.get("client_id"), block.get("client_secret")
+    if not client_id or not client_secret:
+        raise typer.BadParameter("client secrets JSON has no installed/web client_id + client_secret")
+    return client_id, client_secret
+
+
+def _gmail_sender(client_id: str, client_secret: str, refresh_token: str, sender_address: str):
+    from app.adapters.gmail import GmailSender
+
+    return GmailSender(client_id=client_id, client_secret=client_secret,
+                       refresh_token=refresh_token, sender_address=sender_address)
+
+
+@app.command("gmail-auth")
+def gmail_auth() -> None:
+    """One-time OAuth bootstrap (Task 15, spec §14): opens a browser for the
+    Google consent screen with the `gmail.send` scope only, then stores the
+    resulting REFRESH token in the `gmail_credentials` table (never in a
+    file) under GMAIL_SENDER_ADDRESS. Re-run it if `send` reports
+    `invalid_grant` (token revoked/expired). Not covered by the offline
+    suite: it needs a browser and Google's servers."""
+    from app.adapters.db.repositories import GmailCredentialRepo
+    from app.adapters.gmail import SCOPES
+
+    settings = get_settings()
+    _require_send_config(settings)
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    flow = InstalledAppFlow.from_client_secrets_file(settings.gmail_client_secrets_path, scopes=SCOPES)
+    creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
+    if not creds.refresh_token:
+        typer.echo("Google returned no refresh token - revoke the app's access at "
+                   "https://myaccount.google.com/permissions and run gmail-auth again.", err=True)
+        raise typer.Exit(code=1)
+    with _session() as session:
+        GmailCredentialRepo(session).upsert(
+            account_email=settings.gmail_sender_address,
+            refresh_token=creds.refresh_token,
+            token_uri=creds.token_uri or "https://oauth2.googleapis.com/token",
+            scopes=list(creds.scopes or SCOPES),
+        )
+        session.commit()
+    typer.echo(f"stored a refresh token for {settings.gmail_sender_address} (scope: gmail.send)")
+
+
+@app.command()
+def send(
+    limit: Optional[int] = typer.Option(None, "--limit", help="Max emails to send this run (on top of the daily cap)."),
+    to_self: bool = typer.Option(
+        False, "--to-self",
+        help="Smoke test: send the first approved draft(s) to GMAIL_SENDER_ADDRESS instead of the founders. "
+             "Reserves nothing and changes no state, so the real send can follow.",
+    ),
+) -> None:
+    """Send every APPROVED outreach through Gmail (Task 15, spec §13/§18),
+    at most DAILY_SEND_CAP per UTC day counting what was already sent today.
+    Reserve-before-send: each message row is claimed by a committed
+    conditional UPDATE before Gmail is called, so a crash can never produce
+    a second copy - a row left reserved without a Gmail id is reported as
+    `needs manual check` on the next run and is never re-sent. The first
+    Gmail failure stops the run (auth/quota errors should pause, not burn
+    through the queue); fix the cause and re-run."""
+    from app.adapters.db.repositories import (
+        FounderRepo,
+        GmailCredentialRepo,
+        MessageRepo,
+        OutreachRepo,
+    )
+    from app.application.send_approved import SendApproved, SendRepos
+
+    settings = get_settings()
+    _require_send_config(settings)
+    client_id, client_secret = _load_oauth_client(settings.gmail_client_secrets_path)
+    with _session() as session:
+        cred = GmailCredentialRepo(session).get_by_account_email(settings.gmail_sender_address)
+        if cred is None:
+            typer.echo(f"no Gmail refresh token stored for {settings.gmail_sender_address} - "
+                       "run `gmail-auth` first", err=True)
+            raise typer.Exit(code=2)
+        sender = _gmail_sender(client_id, client_secret, cred.refresh_token, settings.gmail_sender_address)
+        repos = SendRepos(
+            founder=FounderRepo(session),
+            outreach=OutreachRepo(session),
+            message=MessageRepo(session),
+            session=session,
+        )
+        use_case = SendApproved(
+            sender, _UTCClock(), repos,
+            signature=settings.signature,
+            attachment_path=settings.resume_path,
+            pause_between_sends=_random_pause,
+        )
+        try:
+            if to_self:
+                n = use_case.send_to_self(settings.gmail_sender_address, limit=limit or 1)
+                typer.echo(f"sent {n} test copy/copies to {settings.gmail_sender_address}; "
+                           "nothing was reserved or marked sent")
+                return
+            result = use_case.run(cap=settings.daily_send_cap, limit=limit)
+        finally:
+            sender.close()
+
+    typer.echo(
+        f"sent {result.sent}, skipped (daily cap) {result.skipped_cap}, "
+        f"not reservable {result.skipped_not_reservable}, "
+        f"needs manual check {result.needs_manual_check}, errors {result.errors}"
+    )
+    if result.needs_manual_check:
+        typer.echo(
+            "needs manual check: a message row has sent_at set but no gmail_message_id "
+            "(a previous run crashed between reserving and recording). Look in the Gmail "
+            "Sent folder; if it went out, set gmail_message_id/gmail_thread_id and the "
+            "outreach state to 'sent' by hand, otherwise clear sent_at to let it send.",
+            err=True,
+        )
+
+
 if __name__ == "__main__":
     app()

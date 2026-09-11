@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     gemini_tier: Literal["free", "paid"] = "free"
     daily_send_cap: int = 20
 
+    # Task 15 (sending). Every default below is EMPTY on purpose: `send`
+    # refuses to build a sender until all four are set, so no configuration
+    # gap can let a real email go out with a blank signature, no resume, or
+    # an unknown sender address.
+    signature: str = ""                   # sign-off appended at send time (ruling R2, spec §18)
+    resume_path: str = ""                 # the PDF attached to every outreach email
+    gmail_client_secrets_path: str = ""   # OAuth "Desktop app" client JSON from Google Cloud
+    gmail_sender_address: str = ""        # the Gmail account that was authorised by `gmail-auth`
+
 
 @lru_cache
 def get_settings() -> Settings:

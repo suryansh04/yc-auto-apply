@@ -170,6 +170,8 @@ across your company", "delve", "in today's fast-paced", "circle back", "at
 your earliest convenience", "I would love the opportunity", "please do not
 hesitate".
 
+Name the company once in the body (not only in the subject).
+
 OUTPUT: JSON with "subject" (three to six words, no emoji, no all-caps
 words, naming the company), "body" (plain text, no markdown, no HTML, NO
 greeting line and NO sign-off - those are added at send time), and
@@ -180,10 +182,12 @@ source from AVAILABLE SOURCES that part 1 is grounded on.
 
 def _format_sources(sources: list[dict]) -> str:
     lines = []
+    # Fix round 1 (F10): the publication name is deliberately NOT rendered.
+    # D29 says the body must never name the outlet, so handing it to the
+    # model only creates the temptation; nothing in the draft needs it.
     for s in sources:
-        extra = f" (publication: {s['publication']})" if s.get("publication") else ""
         text = str(s.get("text", "")).replace("\n", " ").strip()
-        lines.append(f"- kind={s.get('kind')} id={s.get('id')}{extra}: {text}")
+        lines.append(f"- kind={s.get('kind')} id={s.get('id')}: {text}")
     return "\n".join(lines) if lines else "- (none)"
 
 

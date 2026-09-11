@@ -230,6 +230,21 @@ class MessageRepo:
     def get(self, id: int) -> Message | None:
         return self.session.get(Message, id)
 
+    def get_outbound(self, outreach_id: int, sequence_step: int) -> Message | None:
+        """Added in fix round 1 of Tasks 13/14 (F1, ruling R1): the
+        draft-time outbound row for `(outreach_id, sequence_step)` IS the
+        send reservation guarded by `uq_messages_outreach_step_outbound`.
+        `DraftOutreach` looks the row up by this natural key and updates it
+        in place on a redraft (`PENDING_APPROVAL -> READY_TO_DRAFT`) instead
+        of inserting a second row the index would reject."""
+        return self.session.execute(
+            select(Message).where(
+                Message.outreach_id == outreach_id,
+                Message.sequence_step == sequence_step,
+                Message.direction == "outbound",
+            )
+        ).scalar_one_or_none()
+
     def list_by_state(self, state: OutreachState | str) -> list[Message]:
         """Plain unordered listing (see module docstring) of messages whose
         parent `Outreach` is currently in `state` — e.g. the Review Queue
@@ -417,12 +432,14 @@ class ResumeProfileRepo:
         self.session = session
 
     def upsert(self, **fields) -> ResumeProfile:
-        """Insert or update. Keyed on `id` when given; otherwise updates the
-        existing (single) row if there is one, else inserts it."""
+        """Insert or update. Keyed on `id` when given (an unknown `id`
+        inserts a row with that id — it never falls back to rewriting the
+        current row's primary key, fix round 1 F12); with no `id`, updates
+        the existing (single) row if there is one, else inserts it."""
         existing = None
         if fields.get("id") is not None:
             existing = self.session.get(ResumeProfile, fields["id"])
-        if existing is None:
+        else:
             existing = self.get_current()
         if existing is None:
             existing = ResumeProfile(**fields)

@@ -250,6 +250,28 @@ def test_drafter_raises_on_a_response_missing_required_fields():
         GeminiDrafter(client, model=MODEL).draft(CONTEXT)
 
 
+# --- fix round 1 ----------------------------------------------------------------
+
+def test_f10_the_publication_name_is_not_handed_to_the_model():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    assert "economic times" not in _prompt_of(client)
+    assert "publication" not in str(client.models.calls[0]["contents"]).lower()
+
+
+def test_f11_the_prompt_requires_the_company_name_in_the_body():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    assert "name the company once in the body" in _prompt_of(client)
+
+
+def test_f17_parser_drops_non_dict_items_from_the_array():
+    client = FakeGenAIClient(json.dumps(["garbage", 42, None,
+                                         {"kind": "skill", "text": "Python", "source_span": "Python"}]))
+    claims = GeminiResumeParser(client, model=MODEL).parse("x")
+    assert claims == [{"kind": "skill", "text": "Python", "source_span": "Python"}]
+
+
 # --- D13: the model id is configuration, not code ----------------------------
 
 def test_no_gemini_model_id_is_hardcoded_in_the_adapter_module():

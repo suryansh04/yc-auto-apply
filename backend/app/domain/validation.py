@@ -177,34 +177,54 @@ def validate_grounding(draft, source, company_name, one_liner, claims) -> list[s
 
     return errs
 
-
 # --- Resume-claims rule (spec §10: "asserts a skill, metric or role absent
-# from resume_profile.claims"). Deferred from Task 9, implemented in Task 14.
+# from resume_profile.claims"). Deferred from Task 9, implemented in Task 14;
+# tightened in fix round 1 (F4/F5).
 #
-# Deliberately conservative. What it polices: *first-person* sentences — the
-# "about me" material (spec §10 part 2) — and within those only two kinds of
-# token that are unambiguously a factual assertion about the sender:
-#   - a capitalised token of 3+ characters that is not the first word of its
-#     sentence (a technology, tool, product, institution: "Rust", "Kafka",
-#     "Stanford"), and
-#   - a number ("90%", "10,000", "2027": a metric, a year).
-# A token is fine if it occurs (case-insensitively, as a substring) in any
-# claim's `text` or `source_span`, or in the caller-supplied `allowed_text`
-# (`validate_draft` passes the company name, the one-liner and the cited
-# source's text, because "I'd like to work on your voice AI at Vahan" is a
-# claim about *them*, not about the sender).
+# Two checks, each scoped to where it is unambiguous:
+#
+#   1. Proper-noun check, *first-person* sentences only (the "about me"
+#      material, spec §10 part 2): a capitalised token of 3+ characters that
+#      is not the first word of its sentence (a technology, tool, product,
+#      institution: "Rust", "Kafka", "Stanford") must appear as a whole
+#      token in some claim's `text`/`source_span` or in `allowed_text`.
+#      Whole-token membership, not substring — a "JavaScript" claim does not
+#      license "Java" (F5a).
+#   2. Number check, every sentence outside the hook paragraph plus every
+#      first-person sentence anywhere: a number ("90%", "10,000", "2027")
+#      must appear (comma-stripped) in a claim or in `allowed_text`. The
+#      hook is exempt because its numbers are facts about the company and
+#      the grounding check owns those; a fabricated metric about the
+#      sender's own project is most naturally written in the third person
+#      ("The scheduler cut wait by 90%"), so first-person scoping alone
+#      missed the most damaging fabrication (F5b). Bare one-digit numbers
+#      ("3 months") are ignored (F4).
+#
+# `allowed_text` is everything that is a fact about *them* rather than the
+# sender: `validate_draft` passes the company name, one-liner, cited source
+# text, and (via `extra_allowed_text`) whatever the caller adds — the
+# drafting use case adds `long_description` and the founder's name, since
+# the prompt hands the model both (F4). `_CLAIM_STOPWORDS` exempts the
+# ordinary capitalised words an internship email legitimately contains
+# (month/day names for availability, GitHub/LinkedIn for "my code is on").
 #
 # What it deliberately does NOT police: lower-case technology names
 # ("python", "postgres"), two-letter abbreviations ("CS", "AI", "ML"),
 # sentence-initial capitals (indistinguishable from ordinary capitalisation),
-# contractions ("I've", "Madhav's"), and any sentence with no first-person
-# marker at all. A false positive costs a wasted retry; a miss is caught by
-# the human reviewer (D5). The rule errs toward silence.
+# contractions ("I've", "Madhav's"). A false positive costs a wasted retry;
+# a miss is caught by the human reviewer (D5). The rule errs toward silence.
 
 _FIRST_PERSON = re.compile(r"\bI\b|\bI'(?:m|ve|d|ll)\b|\b[Mm](?:y|e|ine)\b")
 _PROPER_TOKEN = re.compile(r"^[A-Z][A-Za-z0-9+#]{2,}$")
 _NUMBER = re.compile(r"\d[\d,]*")
-_MIN_PROPER_TOKEN_LEN = 3
+_KNOWN_TOKEN = re.compile(r"[a-z0-9+#]+")
+_MIN_NUMBER_DIGITS = 2
+_CLAIM_STOPWORDS = frozenset({
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "github", "linkedin",
+})
 
 
 def _claim_field(claim, name: str) -> str:
@@ -218,31 +238,44 @@ def _numbers_in(text: str) -> set[str]:
 
 
 def validate_claims(draft, claims, allowed_text=()) -> list[str]:
-    """Reject a first-person sentence that names a technology/tool/proper
-    noun or a number found in no resume claim (and not in `allowed_text`).
-    One error per offending sentence, listing every unmatched token."""
-    claims_blob = " ".join(
-        _claim_field(c, "text") + " " + _claim_field(c, "source_span") for c in claims
+    """Reject a sentence that asserts a technology/tool/proper noun (first-
+    person sentences) or a number (any sentence outside the hook, or any
+    first-person sentence) found in no resume claim and not in
+    `allowed_text`. One error per offending sentence, listing every
+    unmatched token."""
+    known_text = " ".join(
+        [_claim_field(c, "text") + " " + _claim_field(c, "source_span") for c in claims]
+        + [str(t or "") for t in allowed_text]
     ).lower()
-    allowed_blob = " ".join(str(t or "") for t in allowed_text).lower()
-    known = claims_blob + " " + allowed_blob
-    known_numbers = _numbers_in(known)
+    known_tokens = set(_KNOWN_TOKEN.findall(known_text)) | _CLAIM_STOPWORDS
+    known_numbers = _numbers_in(known_text)
+
+    hook_sentences = set(_sentences(_hook(draft.body)))
 
     errs: list[str] = []
     for sentence in _sentences(draft.body):
-        if not _FIRST_PERSON.search(sentence):
-            continue
-        words = [w.strip(".,;:!?()[]{}\"'") for w in sentence.split()]
+        first_person = bool(_FIRST_PERSON.search(sentence))
         unmatched: list[str] = []
-        for index, word in enumerate(words):
-            if index == 0 or not word:
-                continue
-            if _PROPER_TOKEN.match(word) and len(word) >= _MIN_PROPER_TOKEN_LEN:
-                if word.lower() not in known:
-                    unmatched.append(word)
-        for number in _NUMBER.findall(sentence):
-            if number.replace(",", "") not in known_numbers:
-                unmatched.append(number)
+
+        if first_person:
+            words = [w.strip(".,;:!?()[]{}\"'") for w in sentence.split()]
+            for index, word in enumerate(words):
+                if index == 0 or not word:
+                    continue
+                # `_PROPER_TOKEN` requires 3+ characters, which is what exempts
+                # two-letter abbreviations ("CS", "AI", "ML").
+                if _PROPER_TOKEN.match(word):
+                    if word.lower() not in known_tokens:
+                        unmatched.append(word)
+
+        if first_person or sentence not in hook_sentences:
+            for number in _NUMBER.findall(sentence):
+                digits = number.replace(",", "")
+                if len(digits) < _MIN_NUMBER_DIGITS:
+                    continue
+                if digits not in known_numbers:
+                    unmatched.append(number)
+
         if unmatched:
             errs.append(
                 "asserts something found in no resume claim: "
@@ -252,8 +285,9 @@ def validate_claims(draft, claims, allowed_text=()) -> list[str]:
 
 
 def validate_draft(draft, source, company_name, one_liner, claims,
-                   previous_body=None) -> list[str]:
-    allowed = [company_name or "", one_liner or "", source.text if source else ""]
+                   previous_body=None, extra_allowed_text=()) -> list[str]:
+    allowed = [company_name or "", one_liner or "", source.text if source else "",
+               *extra_allowed_text]
     return (validate_style(draft, previous_body)
             + validate_grounding(draft, source, company_name, one_liner, claims)
             + validate_claims(draft, claims, allowed_text=allowed))

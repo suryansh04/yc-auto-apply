@@ -92,6 +92,7 @@ class FakeOutreachRow:
     state: str = str(OutreachState.NEEDS_EMAIL)
     resolved_email: str | None = None
     last_error: str | None = None
+    sequence_step: int = 0
 
 
 class FakeOutreachRepo:
@@ -248,6 +249,12 @@ class FakeJobPostingRepo:
         return [r for r in self.rows if r.company_id == company_id]
 
 
+class DuplicateOutboundMessage(Exception):
+    """Stands in for the real `IntegrityError` raised by
+    `uq_messages_outreach_step_outbound` (fix round 1, F1): a second
+    outbound insert for the same `(outreach_id, sequence_step)`."""
+
+
 @dataclass
 class FakeMessageRow:
     id: int
@@ -258,9 +265,16 @@ class FakeMessageRow:
     subject: str | None = None
     research_source_type: str | None = None
     research_source_id: int | None = None
+    approved_at: object = None
+    edited_by_user: bool = False
 
 
 class FakeMessageRepo:
+    """Mirrors `MessageRepo` including, since fix round 1, the schema's
+    partial unique index on outbound `(outreach_id, sequence_step)`: an
+    insert that would duplicate it raises, so a use case that forgets to
+    upsert on the natural key fails here the way it would fail in Postgres."""
+
     def __init__(self):
         self.rows: list[FakeMessageRow] = []
 
@@ -269,12 +283,24 @@ class FakeMessageRepo:
         if fields.get("id") is not None:
             existing = next((r for r in self.rows if r.id == fields["id"]), None)
         if existing is None:
-            existing = FakeMessageRow(id=len(self.rows) + 1, **fields)
+            if fields.get("direction") == "outbound" and self.get_outbound(
+                fields["outreach_id"], fields["sequence_step"]
+            ) is not None:
+                raise DuplicateOutboundMessage(
+                    f"outbound message for outreach {fields['outreach_id']} "
+                    f"step {fields['sequence_step']} already exists"
+                )
+            existing = FakeMessageRow(id=len(self.rows) + 1, **{k: v for k, v in fields.items() if k != "id"})
             self.rows.append(existing)
         else:
             for k, v in fields.items():
                 setattr(existing, k, v)
         return existing
+
+    def get_outbound(self, outreach_id: int, sequence_step: int) -> FakeMessageRow | None:
+        return next((r for r in self.rows
+                     if r.outreach_id == outreach_id and r.sequence_step == sequence_step
+                     and r.direction == "outbound"), None)
 
     def list_by_outreach_id(self, outreach_id: int) -> list[FakeMessageRow]:
         return [r for r in self.rows if r.outreach_id == outreach_id]

@@ -152,6 +152,12 @@ def _read_resume_text(path: str) -> str:
     return p.read_text(encoding="utf-8")
 
 
+_FREE_TIER_NOTICE = (
+    "GEMINI_TIER is 'free': Google may use free-tier inputs and outputs for "
+    "training (spec D12)."
+)
+
+
 def _gemini_client():
     from google import genai
 
@@ -159,6 +165,23 @@ def _gemini_client():
     if not settings.gemini_api_key:
         raise typer.BadParameter("GEMINI_API_KEY is not set")
     return genai.Client(api_key=settings.gemini_api_key)
+
+
+def _refuse_free_tier_for_founder_data(allow_free_tier: bool) -> None:
+    """Fix round 1 (F2, ruling R4): `draft` sends founders' names, titles
+    and bios to Gemini. On a free-tier key that is third-party personal
+    data going to a provider that may train on it (D12, spec §14 "fails
+    loudly"), so the run refuses unless the operator opts in explicitly —
+    the intended use being the brief's own 'draft five and read them'
+    check (14.6), never a full run."""
+    if get_settings().gemini_tier == "free" and not allow_free_tier:
+        typer.echo(
+            f"refusing to draft: {_FREE_TIER_NOTICE} Founder data would be sent to a "
+            "free-tier key. Set GEMINI_TIER=paid, or pass --allow-free-tier for a "
+            "small deliberate test run.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
 
 
 @app.command("parse-resume")
@@ -172,6 +195,10 @@ def parse_resume(path: str = typer.Argument(..., help="Resume file: .pdf, .txt o
 
     settings = get_settings()
     raw_text = _read_resume_text(path)
+    if settings.gemini_tier == "free":
+        # Only the user's own resume goes out here (no third-party data), so
+        # a warning is enough (ruling R4); `draft` is the hard refusal.
+        typer.echo(f"warning: {_FREE_TIER_NOTICE} Your resume text is being sent.", err=True)
     parser = GeminiResumeParser(_gemini_client(), model=settings.gemini_model)
     with _session() as session:
         use_case = ParseResume(parser, ResumeProfileRepo(session))
@@ -203,7 +230,15 @@ def show_claims() -> None:
 
 @app.command()
 def draft(
-    limit: Optional[int] = typer.Option(None, "--limit", help="Max founders to draft for this run.")
+    limit: Optional[int] = typer.Option(None, "--limit", help="Max founders to draft for this run."),
+    keep_unverified: bool = typer.Option(
+        False, "--keep-unverified",
+        help="Also offer claims whose source_span was not found in the resume (read them with show-claims first).",
+    ),
+    allow_free_tier: bool = typer.Option(
+        False, "--allow-free-tier",
+        help="Permit sending founder data to a free-tier Gemini key (small test runs only).",
+    ),
 ) -> None:
     """Draft an internship enquiry for each READY_TO_DRAFT founder (Task 14,
     spec §10). Sources are offered in priority order news > launch >
@@ -228,6 +263,7 @@ def draft(
     from app.application.draft_outreach import DraftOutreach, DraftRepos
 
     settings = get_settings()
+    _refuse_free_tier_for_founder_data(allow_free_tier)
     drafter = GeminiDrafter(_gemini_client(), model=settings.gemini_model)
     with _session() as session:
         repos = DraftRepos(
@@ -240,13 +276,17 @@ def draft(
             message=MessageRepo(session),
             resume_profile=ResumeProfileRepo(session),
         )
-        result = DraftOutreach(drafter, repos).run(limit=limit)
+        result = DraftOutreach(drafter, repos, keep_unverified=keep_unverified).run(limit=limit)
         session.commit()
 
     typer.echo(
         f"drafted {result.drafted}, manual write {result.manual_write}, "
         f"retried {result.retried}, errors {result.errors}"
+        + (" - ABORTED after consecutive drafter failures (see outreach.last_error)"
+           if result.aborted else "")
     )
+    if result.aborted:
+        raise typer.Exit(code=1)
 
 
 def _print_claims(claims: list[dict]) -> None:

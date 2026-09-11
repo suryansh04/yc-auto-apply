@@ -12,6 +12,8 @@ mentions are not policed — the cost of a false positive (rejecting a true
 draft) is a wasted retry, the cost of a miss is caught by the human
 reviewer (D5), so the rule errs toward silence."""
 
+import pytest
+
 from app.domain.entities import Draft, ResumeClaim
 from app.domain.validation import SourceRow, validate_claims, validate_draft
 
@@ -141,3 +143,91 @@ def test_validate_draft_exempts_the_company_name_and_source_terms():
             "I built a scheduler in Python. Would you take an intern?")
     errs = validate_draft(d(body), NEWS, "Vahan", "x", CLAIMS)
     assert errs == []
+
+
+# --- fix round 1 ---------------------------------------------------------------
+
+F4_CLAIMS = CLAIMS + [
+    ResumeClaim(kind="skill", text="JavaScript", source_span="Skills: JavaScript"),
+]
+VAHAN_DESCRIPTION = ("Vahan screens and places delivery riders for Zomato and Swiggy over a "
+                     "Hindi speech pipeline.")
+F4_ALLOWED = ["Vahan", NEWS.text, VAHAN_DESCRIPTION, "Madhav Krishna"]
+
+
+@pytest.mark.parametrize("sentence", [
+    "I could start in May 2027 after my exams.",           # month name; 2027 is in the education span
+    "I have 3 months free this summer.",                    # bare 1-digit number
+    "I'd like to work with you, Madhav.",                   # founder's name (allowed_text)
+    "I keep thinking about how you screen for Zomato and Swiggy.",  # long_description terms
+    "I'd like to work on the Hindi speech pipeline.",       # long_description term
+    "My code is on GitHub.",                                # stopword
+    "I can share my LinkedIn on Monday.",                   # stopwords
+])
+def test_f4_table_rows_are_not_flagged(sentence):
+    body = f"{sentence} Would you take an intern?"
+    assert validate_claims(d(body), F4_CLAIMS, allowed_text=F4_ALLOWED) == []
+
+
+def test_validate_draft_extra_allowed_text_exempts_description_and_founder_terms():
+    body = ("You're matching blue-collar workers to jobs over voice at Vahan.\n\n"
+            "I keep thinking about the Hindi speech pipeline, Madhav.\n\n"
+            "I built a scheduler in Python. Would you take an intern?")
+    assert any("Hindi" in e for e in validate_draft(d(body), NEWS, "Vahan", "x", CLAIMS))
+    assert validate_draft(d(body), NEWS, "Vahan", "x", CLAIMS,
+                          extra_allowed_text=[VAHAN_DESCRIPTION, "Madhav Krishna"]) == []
+
+
+def test_f5a_substring_of_a_claim_token_does_not_license_a_different_technology():
+    # A "JavaScript" claim must not make "Java" pass.
+    body = "I built a scheduler in Java. Would you take an intern?"
+    errs = validate_claims(d(body), F4_CLAIMS)
+    assert any("Java" in e for e in errs)
+
+
+def test_f5b_a_fabricated_metric_in_a_third_person_sentence_outside_the_hook_is_flagged():
+    body = ("You're matching blue-collar workers to jobs over voice at Vahan.\n\n"
+            "The scheduler cut wait by 90% across 10,000 jobs. I built it in Python.\n\n"
+            "Would you take an intern?")
+    errs = validate_claims(d(body), CLAIMS)
+    assert len(errs) == 1
+    assert "90%" in errs[0] and "10,000" in errs[0]
+
+
+def test_numbers_in_the_hook_paragraph_are_left_to_the_grounding_check():
+    body = ("You route 40,000 calls a day at Vahan.\n\n"
+            "I built a scheduler in Python.\n\n"
+            "Would you take an intern?")
+    assert validate_claims(d(body), CLAIMS) == []
+
+
+def test_numbers_in_a_single_paragraph_third_person_sentence_are_not_policed():
+    # One paragraph means the whole body is the hook; only first-person
+    # sentences are policed for numbers there.
+    body = "You route 40,000 calls a day at Vahan. Would you take an intern?"
+    assert validate_claims(d(body), CLAIMS) == []
+
+
+def test_f13_comma_separated_number_matches_its_claim_without_commas():
+    claims = [ResumeClaim(kind="metric", text="handled 10000 jobs", source_span="handled 10000 jobs")]
+    body = "I handled 10,000 jobs. Would you take an intern?"
+    assert validate_claims(d(body), claims) == []
+    claims = [ResumeClaim(kind="metric", text="handled 10,000 jobs", source_span="handled 10,000 jobs")]
+    body = "I handled 10000 jobs. Would you take an intern?"
+    assert validate_claims(d(body), claims) == []
+
+
+def test_a_two_digit_fabricated_number_is_still_flagged():
+    body = "I have 12 side projects. Would you take an intern?"
+    assert any("12" in e for e in validate_claims(d(body), CLAIMS))
+
+
+def test_two_letter_abbreviations_are_exempt():
+    # Pins _MIN_PROPER_TOKEN_LEN = 3 (reviewer's M12).
+    body = "I'm a CS student who likes ML and AI. Would you take an intern?"
+    assert validate_claims(d(body), CLAIMS) == []
+
+
+def test_a_three_letter_all_caps_technology_is_policed():
+    body = "I run everything on AWS. Would you take an intern?"
+    assert any("AWS" in e for e in validate_claims(d(body), CLAIMS))

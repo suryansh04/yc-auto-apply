@@ -128,14 +128,62 @@ def test_every_allowed_kind_is_accepted(kind):
     assert [c.kind for c in claims] == [kind]
 
 
+GOOD_CLAIM = {"kind": "skill", "text": "SQL", "source_span": "Skills: Python, SQL"}
+
+
 def test_a_claim_with_empty_text_is_dropped():
-    parser = ListParser([{"kind": "skill", "text": "  ", "source_span": "Skills: Python, SQL"}])
+    parser = ListParser([{"kind": "skill", "text": "  ", "source_span": "Skills: Python, SQL"},
+                         GOOD_CLAIM])
     use_case = ParseResume(parser, FakeProfileRepo())
-    assert use_case.run(RESUME) == []
+    assert [c.text for c in use_case.run(RESUME)] == ["SQL"]
     assert len(use_case.dropped) == 1
 
 
 def test_the_parser_receives_the_raw_text_unchanged():
-    parser = ListParser([])
+    parser = ListParser([GOOD_CLAIM])
     ParseResume(parser, FakeProfileRepo()).run(RESUME)
     assert parser.calls == [RESUME]
+
+
+# --- fix round 1 ---------------------------------------------------------------
+
+
+def test_f6_a_parser_run_with_no_usable_claims_does_not_replace_the_profile():
+    repo = FakeProfileRepo()
+    repo.saved = ("old resume", [GOOD_CLAIM])          # a good profile already exists
+    for parser in (ListParser([]),                       # parser returned nothing
+                   ListParser([{"kind": "hobby", "text": "x", "source_span": "Skills: Python, SQL"}])):
+        with pytest.raises(ValueError, match="no usable claims"):
+            ParseResume(parser, repo).run(RESUME)
+        assert repo.saved == ("old resume", [GOOD_CLAIM])
+
+
+def test_f8_a_span_crossing_a_pdf_line_wrap_is_still_verified():
+    wrapped = "Projects\nBuilt a scheduler in\nPython, cut  wait 50%\nSkills: Python, SQL"
+    parser = ListParser([{"kind": "project", "text": "built a scheduler",
+                          "source_span": "Built a scheduler in Python, cut wait 50%"}])
+    claims = ParseResume(parser, FakeProfileRepo()).run(wrapped)
+    assert claims[0].span_verified is True
+    assert claims[0].source_span == "Built a scheduler in Python, cut wait 50%"  # stored as given
+
+
+def test_f8_a_span_carrying_the_pdf_line_wrap_matches_a_single_spaced_resume():
+    # The other direction: the model copied the wrapped text (line break,
+    # doubled space) while the stored resume text is single-spaced.
+    parser = ListParser([{"kind": "project", "text": "built a scheduler",
+                          "source_span": "Built a scheduler in\nPython, cut  wait 50%"}])
+    claims = ParseResume(parser, FakeProfileRepo()).run(RESUME)
+    assert claims[0].span_verified is True
+
+
+def test_f8_whitespace_normalisation_does_not_fold_case():
+    parser = ListParser([{"kind": "project", "text": "built a scheduler",
+                          "source_span": "built a scheduler in\npython, cut wait 50%"}])
+    claims = ParseResume(parser, FakeProfileRepo()).run(RESUME)
+    assert claims[0].span_verified is False
+
+
+def test_f17_kind_is_case_folded():
+    parser = ListParser([{"kind": "Skill", "text": "SQL", "source_span": "Skills: Python, SQL"}])
+    claims = ParseResume(parser, FakeProfileRepo()).run(RESUME)
+    assert claims[0].kind == "skill"

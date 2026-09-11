@@ -201,6 +201,54 @@ def show_claims() -> None:
     typer.echo(f"{len(claims)} claim(s)")
 
 
+@app.command()
+def draft(
+    limit: Optional[int] = typer.Option(None, "--limit", help="Max founders to draft for this run.")
+) -> None:
+    """Draft an internship enquiry for each READY_TO_DRAFT founder (Task 14,
+    spec §10). Sources are offered in priority order news > launch >
+    intern-appropriate posting > long description (D17/D23); each draft is
+    run through the deterministic validator, retried once on failure, and
+    a second failure is surfaced in the approval queue flagged for a manual
+    write - nothing is silently dropped. A drafter exception on one founder
+    is absorbed inside the use case (that founder stays READY_TO_DRAFT), so
+    the single commit at the end holds everything drafted this run; use
+    `--limit` to keep any one run's exposure small."""
+    from app.adapters.db.repositories import (
+        CompanyLaunchRepo,
+        CompanyNewsRepo,
+        CompanyRepo,
+        FounderRepo,
+        JobPostingRepo,
+        MessageRepo,
+        OutreachRepo,
+        ResumeProfileRepo,
+    )
+    from app.adapters.gemini import GeminiDrafter
+    from app.application.draft_outreach import DraftOutreach, DraftRepos
+
+    settings = get_settings()
+    drafter = GeminiDrafter(_gemini_client(), model=settings.gemini_model)
+    with _session() as session:
+        repos = DraftRepos(
+            founder=FounderRepo(session),
+            company=CompanyRepo(session),
+            news=CompanyNewsRepo(session),
+            launch=CompanyLaunchRepo(session),
+            job_posting=JobPostingRepo(session),
+            outreach=OutreachRepo(session),
+            message=MessageRepo(session),
+            resume_profile=ResumeProfileRepo(session),
+        )
+        result = DraftOutreach(drafter, repos).run(limit=limit)
+        session.commit()
+
+    typer.echo(
+        f"drafted {result.drafted}, manual write {result.manual_write}, "
+        f"retried {result.retried}, errors {result.errors}"
+    )
+
+
 def _print_claims(claims: list[dict]) -> None:
     for i, c in enumerate(claims, 1):
         flag = "" if c.get("span_verified", True) else "  [span NOT found verbatim in resume]"

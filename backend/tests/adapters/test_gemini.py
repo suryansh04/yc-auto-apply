@@ -16,7 +16,7 @@ import pathlib
 import pytest
 
 import app.adapters.gemini as gemini_module
-from app.adapters.gemini import GeminiResumeParser
+from app.adapters.gemini import GeminiDrafter, GeminiResumeParser
 
 MODEL = "some-model-id-from-settings"
 
@@ -117,6 +117,137 @@ def test_parser_temperature_is_zero_for_determinism():
     GeminiResumeParser(client, model=MODEL).parse("x")
     cfg = _config_as_dict(client.models.calls[0]["config"])
     assert cfg.get("temperature") == 0
+
+
+# --- GeminiDrafter ------------------------------------------------------------
+
+CONTEXT = {
+    "company": {"name": "Vahan", "one_liner": "Recruitment over voice",
+                "long_description": "Vahan matches blue-collar workers to jobs over voice in a dozen languages."},
+    "founder": {"full_name": "Madhav Krishna", "title": "Founder", "bio": None},
+    "available_sources": [
+        {"kind": "news", "id": 7,
+         "text": "OpenAI backs Indian startup Vahan's tech to automate blue-collar hiring with voice AI",
+         "publication": "The Economic Times"},
+        {"kind": "long_description", "id": 3,
+         "text": "Vahan matches blue-collar workers to jobs over voice in a dozen languages."},
+    ],
+    "claims": [{"kind": "project", "text": "built a scheduler in Python"}],
+    "sequence_step": 0,
+}
+DRAFT_JSON = json.dumps({
+    "subject": "Backend intern at Vahan",
+    "body": "You're matching blue-collar workers to jobs over voice at Vahan. Would you take an intern?",
+    "research_source_type": "news",
+    "research_source_id": 7,
+})
+
+
+def _prompt_of(client) -> str:
+    call = client.models.calls[0]
+    cfg = _config_as_dict(call["config"])
+    return (str(call["contents"]) + " " + str(cfg.get("system_instruction", ""))).lower()
+
+
+def test_drafter_returns_the_decoded_draft_dict():
+    client = FakeGenAIClient(DRAFT_JSON)
+    out = GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    assert out == json.loads(DRAFT_JSON)
+    assert isinstance(out["research_source_id"], int)
+
+
+def test_drafter_uses_the_injected_model_id():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    assert client.models.calls[0]["model"] == MODEL
+
+
+def test_drafter_requests_structured_json_with_the_four_field_schema():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    cfg = _config_as_dict(client.models.calls[0]["config"])
+    assert cfg["response_mime_type"] == "application/json"
+    schema = json.dumps(cfg.get("response_schema") or cfg.get("response_json_schema"), default=str)
+    for field in ("subject", "body", "research_source_type", "research_source_id"):
+        assert field in schema
+    for kind in ("news", "launch", "job_posting", "long_description"):
+        assert kind in schema
+
+
+def test_drafter_prompt_states_the_three_part_structure_and_length_targets():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    prompt = _prompt_of(client)
+    assert "three" in prompt and "part" in prompt
+    assert "90" in prompt
+    assert "120" in prompt
+    assert "25 words" in prompt
+
+
+def test_drafter_prompt_says_the_source_is_never_named_in_the_body():
+    # D29: the source is how the sender learned something, never what the
+    # sentence is about.
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    prompt = _prompt_of(client)
+    assert "never" in prompt
+    assert "outlet" in prompt or "publication" in prompt
+    assert "how you learned" in prompt or "how the sender learned" in prompt
+
+
+def test_drafter_prompt_forbids_location_and_asks_for_a_swe_internship():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    prompt = _prompt_of(client)
+    assert "location" in prompt and "remote" in prompt
+    assert "software engineering internship" in prompt
+
+
+def test_drafter_prompt_restricts_claims_to_the_resume_and_forbids_greeting_and_signoff():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    prompt = _prompt_of(client)
+    assert "built a scheduler in python" in prompt          # the claim is offered
+    assert "only" in prompt and "claims" in prompt           # ...and is the only allowed material
+    assert "greeting" in prompt and "sign-off" in prompt
+
+
+def test_drafter_prompt_lists_every_available_source_with_kind_and_id():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    prompt = _prompt_of(client)
+    assert "news" in prompt and "id=7" in prompt.replace(" ", "").replace(":", "=")
+    assert "openai backs indian startup" in prompt
+    assert "long_description" in prompt
+
+
+def test_drafter_appends_validation_errors_from_a_retry_context():
+    client = FakeGenAIClient(DRAFT_JSON)
+    ctx = {**CONTEXT, "validation_errors": ["banned phrase: 'reach out'", "no explicit internship ask"],
+           "previous_draft": {"subject": "old subject here now", "body": "old body"}}
+    GeminiDrafter(client, model=MODEL).draft(ctx)
+    prompt = _prompt_of(client)
+    assert "banned phrase: 'reach out'" in prompt
+    assert "no explicit internship ask" in prompt
+    assert "old body" in prompt
+
+
+def test_drafter_does_not_mention_validation_errors_on_a_first_attempt():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    assert "previous attempt" not in _prompt_of(client)
+
+
+def test_drafter_coerces_a_string_source_id_to_int():
+    client = FakeGenAIClient(json.dumps({**json.loads(DRAFT_JSON), "research_source_id": "7"}))
+    out = GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    assert out["research_source_id"] == 7
+
+
+def test_drafter_raises_on_a_response_missing_required_fields():
+    client = FakeGenAIClient(json.dumps({"subject": "x"}))
+    with pytest.raises(ValueError):
+        GeminiDrafter(client, model=MODEL).draft(CONTEXT)
 
 
 # --- D13: the model id is configuration, not code ----------------------------

@@ -277,6 +277,16 @@ class JobPostingRepo:
     def get(self, id: int) -> JobPosting | None:
         return self.session.get(JobPosting, id)
 
+    def list_by_company_id(self, company_id: int) -> list[JobPosting]:
+        """Added in Task 14: `DraftOutreach` filters a company's postings
+        through `is_intern_appropriate` (D23) before offering any as a
+        source."""
+        return list(
+            self.session.execute(
+                select(JobPosting).where(JobPosting.company_id == company_id)
+            ).scalars()
+        )
+
 
 class CompanyNewsRepo:
     def __init__(self, session: Session):
@@ -302,6 +312,15 @@ class CompanyNewsRepo:
 
     def get(self, id: int) -> CompanyNews | None:
         return self.session.get(CompanyNews, id)
+
+    def list_by_company_id(self, company_id: int) -> list[CompanyNews]:
+        """Added in Task 14: news is the first-priority research source
+        (D17) `DraftOutreach` offers the drafter."""
+        return list(
+            self.session.execute(
+                select(CompanyNews).where(CompanyNews.company_id == company_id)
+            ).scalars()
+        )
 
 
 class CompanyLaunchRepo:

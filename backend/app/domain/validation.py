@@ -138,10 +138,9 @@ def _terms(text: str) -> set[str]:
 
 
 def validate_grounding(draft, source, company_name, one_liner, claims) -> list[str]:
-    # `claims` is accepted (Task 14 passes it) but not yet enforced here: the
-    # rule that rejects a draft asserting a skill absent from the resume
-    # claims cannot be calibrated until real drafts exist to look at. This is
-    # a deliberate deferral, not an oversight.
+    # `claims` is accepted for signature stability but the resume-claims rule
+    # itself lives in `validate_claims` below (Task 14), which `validate_draft`
+    # composes in alongside this function.
     errs: list[str] = []
     body = draft.body
     low = body.lower()
@@ -179,7 +178,82 @@ def validate_grounding(draft, source, company_name, one_liner, claims) -> list[s
     return errs
 
 
+# --- Resume-claims rule (spec §10: "asserts a skill, metric or role absent
+# from resume_profile.claims"). Deferred from Task 9, implemented in Task 14.
+#
+# Deliberately conservative. What it polices: *first-person* sentences — the
+# "about me" material (spec §10 part 2) — and within those only two kinds of
+# token that are unambiguously a factual assertion about the sender:
+#   - a capitalised token of 3+ characters that is not the first word of its
+#     sentence (a technology, tool, product, institution: "Rust", "Kafka",
+#     "Stanford"), and
+#   - a number ("90%", "10,000", "2027": a metric, a year).
+# A token is fine if it occurs (case-insensitively, as a substring) in any
+# claim's `text` or `source_span`, or in the caller-supplied `allowed_text`
+# (`validate_draft` passes the company name, the one-liner and the cited
+# source's text, because "I'd like to work on your voice AI at Vahan" is a
+# claim about *them*, not about the sender).
+#
+# What it deliberately does NOT police: lower-case technology names
+# ("python", "postgres"), two-letter abbreviations ("CS", "AI", "ML"),
+# sentence-initial capitals (indistinguishable from ordinary capitalisation),
+# contractions ("I've", "Madhav's"), and any sentence with no first-person
+# marker at all. A false positive costs a wasted retry; a miss is caught by
+# the human reviewer (D5). The rule errs toward silence.
+
+_FIRST_PERSON = re.compile(r"\bI\b|\bI'(?:m|ve|d|ll)\b|\b[Mm](?:y|e|ine)\b")
+_PROPER_TOKEN = re.compile(r"^[A-Z][A-Za-z0-9+#]{2,}$")
+_NUMBER = re.compile(r"\d[\d,]*")
+_MIN_PROPER_TOKEN_LEN = 3
+
+
+def _claim_field(claim, name: str) -> str:
+    if isinstance(claim, dict):
+        return str(claim.get(name) or "")
+    return str(getattr(claim, name, "") or "")
+
+
+def _numbers_in(text: str) -> set[str]:
+    return {n.replace(",", "") for n in _NUMBER.findall(text)}
+
+
+def validate_claims(draft, claims, allowed_text=()) -> list[str]:
+    """Reject a first-person sentence that names a technology/tool/proper
+    noun or a number found in no resume claim (and not in `allowed_text`).
+    One error per offending sentence, listing every unmatched token."""
+    claims_blob = " ".join(
+        _claim_field(c, "text") + " " + _claim_field(c, "source_span") for c in claims
+    ).lower()
+    allowed_blob = " ".join(str(t or "") for t in allowed_text).lower()
+    known = claims_blob + " " + allowed_blob
+    known_numbers = _numbers_in(known)
+
+    errs: list[str] = []
+    for sentence in _sentences(draft.body):
+        if not _FIRST_PERSON.search(sentence):
+            continue
+        words = [w.strip(".,;:!?()[]{}\"'") for w in sentence.split()]
+        unmatched: list[str] = []
+        for index, word in enumerate(words):
+            if index == 0 or not word:
+                continue
+            if _PROPER_TOKEN.match(word) and len(word) >= _MIN_PROPER_TOKEN_LEN:
+                if word.lower() not in known:
+                    unmatched.append(word)
+        for number in _NUMBER.findall(sentence):
+            if number.replace(",", "") not in known_numbers:
+                unmatched.append(number)
+        if unmatched:
+            errs.append(
+                "asserts something found in no resume claim: "
+                f"{', '.join(dict.fromkeys(unmatched))} in {sentence[:40]!r}"
+            )
+    return errs
+
+
 def validate_draft(draft, source, company_name, one_liner, claims,
                    previous_body=None) -> list[str]:
+    allowed = [company_name or "", one_liner or "", source.text if source else ""]
     return (validate_style(draft, previous_body)
-            + validate_grounding(draft, source, company_name, one_liner, claims))
+            + validate_grounding(draft, source, company_name, one_liner, claims)
+            + validate_claims(draft, claims, allowed_text=allowed))

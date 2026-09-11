@@ -61,6 +61,7 @@ from app.adapters.db.models import (
     Company,
     CompanyLaunch,
     CompanyNews,
+    EmailCandidate,
     Founder,
     JobPosting,
     Message,
@@ -136,6 +137,17 @@ class FounderRepo:
                 select(Founder)
                 .join(Outreach, Outreach.founder_id == Founder.id)
                 .where(Outreach.state == str(state))
+            ).scalars()
+        )
+
+    def list_by_company_id(self, company_id: int) -> list[Founder]:
+        """Added in Task 12: `ResolveEmails` needs every founder at a
+        company to decide whether a launch's `published_email` (D18) is
+        attributable — it is only auto-assigned when the company has
+        exactly one founder (spec §9)."""
+        return list(
+            self.session.execute(
+                select(Founder).where(Founder.company_id == company_id)
             ).scalars()
         )
 
@@ -317,3 +329,56 @@ class CompanyLaunchRepo:
 
     def get(self, id: int) -> CompanyLaunch | None:
         return self.session.get(CompanyLaunch, id)
+
+    def list_by_company_id(self, company_id: int) -> list[CompanyLaunch]:
+        """Added in Task 12: `ResolveEmails` reads a company's launches to
+        find a `published_email` (D18) short-circuit before spending any
+        verification budget."""
+        return list(
+            self.session.execute(
+                select(CompanyLaunch).where(CompanyLaunch.company_id == company_id)
+            ).scalars()
+        )
+
+
+# --- Added in Task 12 (spec §9, D30): repo for the email verification
+# verdicts `ResolveEmails` persists. Same `upsert`/`get` shape as every repo
+# above; `upsert` is keyed on `(founder_id, address)` — the table's own
+# `UniqueConstraint` — so re-verifying the same candidate updates its verdict
+# in place instead of accumulating duplicate rows.
+
+
+class EmailCandidateRepo:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def upsert(self, **fields) -> EmailCandidate:
+        """Insert or update, keyed on `(founder_id, address)`."""
+        existing = self.session.execute(
+            select(EmailCandidate).where(
+                EmailCandidate.founder_id == fields["founder_id"],
+                EmailCandidate.address == fields.get("address"),
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            existing = EmailCandidate(**fields)
+            self.session.add(existing)
+        else:
+            for key, value in fields.items():
+                setattr(existing, key, value)
+        self.session.flush()
+        return existing
+
+    def get(self, id: int) -> EmailCandidate | None:
+        return self.session.get(EmailCandidate, id)
+
+    def list_by_founder_id(self, founder_id: int) -> list[EmailCandidate]:
+        """Lets `ResolveEmails` skip re-verifying an address a prior run
+        already judged (spec §9): a re-run never re-verifies an address
+        already judged, so this is queried before spending any candidate's
+        verification budget."""
+        return list(
+            self.session.execute(
+                select(EmailCandidate).where(EmailCandidate.founder_id == founder_id)
+            ).scalars()
+        )

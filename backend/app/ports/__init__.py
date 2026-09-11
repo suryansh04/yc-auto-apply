@@ -10,6 +10,15 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 
+class QuotaExhausted(Exception):
+    """Raised by an `EmailVerifier` when its provider signals no
+    verification credits remain (D30). Lives here, not in
+    `app.adapters.email_verifier`, so `ResolveEmails` (application/) can
+    catch it without importing a concrete adapter (D8) — this module is
+    the shared contract both layers already depend on for the `EmailVerifier`
+    Protocol itself."""
+
+
 @runtime_checkable
 class YCDirectory(Protocol):
     def fetch_companies(self) -> list[dict]: ...

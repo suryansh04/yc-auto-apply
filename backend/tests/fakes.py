@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+from app.ports import QuotaExhausted
+
 
 class FakeYCDirectory:
     def __init__(self, companies: list[dict] | None = None):
@@ -36,7 +38,12 @@ class FakeVerifier:
     def verify(self, address: str) -> str:
         if self._quota is not None:
             if self._quota <= 0:
-                raise RuntimeError("quota exhausted")
+                # Fix round 1: raises the real `QuotaExhausted` type
+                # (`app.ports`) rather than a bare `RuntimeError`, so
+                # `ResolveEmails.run` can catch exactly that type instead
+                # of a broad `except (QuotaExhausted, RuntimeError)` that
+                # would mask unrelated bugs as a quota pause.
+                raise QuotaExhausted("quota exhausted")
             self._quota -= 1
         self.calls.append(address)
         return self._verdicts.get(address, "invalid")

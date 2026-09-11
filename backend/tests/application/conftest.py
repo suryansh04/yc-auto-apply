@@ -155,6 +155,7 @@ class FakeEmailCandidateRow:
     priority: int | None = None
     verdict: str | None = None
     provider: str | None = None
+    verified_at: object = None  # fix round 1: stamped via the injected Clock port
 
 
 class FakeEmailCandidateRepo:

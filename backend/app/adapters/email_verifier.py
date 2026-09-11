@@ -15,25 +15,40 @@ this adapter does not use: `Disposable_Domain`, `Role_Based`, `Diagnosis`).
 An invalid API key yields HTTP 401 with
 `{"status": false, "message": "Invalid API Key"}`.
 
-Quota-exhaustion assumption, disclosed: the docs do not pin an exact
-response shape for "no credits remain" on this endpoint. Per the brief's
-own fallback instruction, `QuotaExhausted` (`app.ports.QuotaExhausted` —
-raised from here, not defined here, so `ResolveEmails` in application/ can
-catch it without importing this adapter, D8) is raised whenever the HTTP
-status is 402 or 403, *or* the raw response body text mentions "credit" or
-"quota" (case-insensitive) regardless of status code, since some providers
-signal exhaustion with a 200 and a message body rather than an error
-status. This is a documented guess, not a verified provider contract.
+Fix round 1 — two blockers from the review of commit `c6c0e8e`:
+
+1. **The API key must never leak.** The URL embeds it in the path, so two
+   independent things used to leak it: (a) any `httpx.HTTPStatusError`/
+   `httpx.HTTPError` escaping `verify` — httpx formats those exceptions
+   with the full request URL, and an uncaught one reached the CLI's
+   traceback or any log recording it; (b) httpx's *own* internal logger,
+   which logs `"HTTP Request: GET <full url> ..."` at INFO regardless of
+   anything this module does. Fix: every httpx exception is now caught
+   inside `verify` and re-raised as `app.ports.VerifierError`, which
+   carries only the address and HTTP status, never the URL or the
+   underlying exception's own message; and a `logging.Filter` redacting
+   this instance's own key is attached to the `httpx` logger in
+   `__init__` (not a module-level `setLevel`, which was a global,
+   silently-reversible side effect — see the class docstring).
+2. **The quota heuristic false-positived on ordinary responses.** The
+   original version scanned the *entire* raw response body for the
+   substrings "credit"/"quota" before even trying to parse JSON — so a
+   perfectly normal `{"Status": "Valid", "Address": "raj@creditkarma.com",
+   ...}` response (MyEmailVerifier echoes the queried address back) was
+   misread as quota exhaustion, permanently stalling every run that ever
+   reached a "credit"-named domain (and YC's own batch has several).
+   Fixed in `verify` below: JSON is parsed first, and *any* response
+   carrying a `Status` key is mapped to a verdict directly — quota is
+   never even considered once `Status` is present. Only when `Status` is
+   absent does quota get checked at all, and then only via the HTTP status
+   (402/403) or a `message`/`error` field specifically (never the whole
+   body).
 
 Rate limit: 30 single-verification requests/minute -> a 2-second minimum
 interval between calls, self-throttled the same way as
 `app.adapters.yc_page.YCPageSource` (Task 11): an injectable `_now`/`_sleep`
 pair (defaulting to `time.monotonic`/`time.sleep`) so tests can pin the
 throttle's behaviour without a real sleep.
-
-The URL embeds the API key in its path, so it must never be logged (the
-task-12 brief is explicit about this) — only the address and the resulting
-verdict are logged, at INFO.
 """
 
 import logging
@@ -41,25 +56,20 @@ import time
 
 import httpx
 
-from app.ports import QuotaExhausted
+from app.ports import QuotaExhausted, VerifierError
 
 logger = logging.getLogger(__name__)
-
-# httpx's own client logs "HTTP Request: GET <full url> ..." at INFO by
-# default, which would leak the API key embedded in the URL path straight
-# into the log stream regardless of anything this module logs itself.
-# Raising its level is the only way to keep that promise, since the leak
-# happens inside httpx's request path, not this adapter's.
-logging.getLogger("httpx").setLevel(logging.WARNING)
 
 _VALIDATE_URL = "https://client.myemailverifier.com/verifier/validate_single/{address}/{api_key}"
 _RATE_LIMIT_PER_MINUTE = 30
 _MIN_INTERVAL_SECONDS = 60.0 / _RATE_LIMIT_PER_MINUTE  # 2.0s
 _QUOTA_STATUS_CODES = {402, 403}
 _QUOTA_KEYWORDS = ("credit", "quota")
+_QUOTA_SIGNAL_FIELDS = ("message", "error")
 
 _VALID_VERDICTS = {"valid", "invalid"}
 _TRUTHY = {"true", "1", "yes"}
+_REDACTED = "***REDACTED***"
 
 
 def _is_catch_all_flag(value) -> bool:
@@ -70,11 +80,34 @@ def _is_catch_all_flag(value) -> bool:
     return str(value).strip().lower() in _TRUTHY
 
 
-def _looks_like_quota_exhaustion(response: httpx.Response) -> bool:
-    if response.status_code in _QUOTA_STATUS_CODES:
+class _RedactApiKeyFilter(logging.Filter):
+    """Strips this client's own API key out of any log record it appears
+    in, wherever the record came from — in particular httpx's own
+    request-URL log (`"HTTP Request: GET <full url> ..."` at INFO), which
+    otherwise leaks the key embedded in the URL path regardless of
+    anything `MyEmailVerifierClient` logs itself. Attached to the `httpx`
+    logger in `__init__`.
+
+    Deliberately a filter, not a module-level `logging.getLogger("httpx")
+    .setLevel(...)` (fix round 1, minor): a `setLevel` call is a global
+    side effect any later logging reconfiguration (a `dictConfig`, an
+    unrelated `setLevel(DEBUG)` on the same logger) can silently
+    re-enable, and it also mutes `httpx` for every *other* adapter in the
+    process, not just this one. A filter degrades to a no-op (the message
+    just doesn't contain the key) rather than to a leak if it's ever
+    accidentally removed, and only redacts — it never suppresses log
+    output other code may depend on.
+    """
+
+    def __init__(self, api_key: str):
+        super().__init__()
+        self._api_key = api_key
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if self._api_key and self._api_key in record.getMessage():
+            record.msg = record.getMessage().replace(self._api_key, _REDACTED)
+            record.args = ()
         return True
-    body_text = (response.text or "").lower()
-    return any(keyword in body_text for keyword in _QUOTA_KEYWORDS)
 
 
 class MyEmailVerifierClient:
@@ -85,6 +118,7 @@ class MyEmailVerifierClient:
         min_interval: float = _MIN_INTERVAL_SECONDS,
         _now=time.monotonic,
         _sleep=time.sleep,
+        _client: httpx.Client | None = None,
     ):
         self._api_key = api_key
         self._timeout = timeout
@@ -93,6 +127,16 @@ class MyEmailVerifierClient:
         self._now = _now
         self._sleep = _sleep
         self._remaining_quota: int | None = None
+        # Fix round 1 (minor): one persistent client per instance, rather
+        # than a fresh `httpx.get(...)` (and its own throwaway SSL
+        # context/TLS handshake) per call — `_client` is injectable so
+        # tests can supply their own if ever needed, though respx patches
+        # the default transport either way.
+        self._client = _client if _client is not None else httpx.Client()
+        logging.getLogger("httpx").addFilter(_RedactApiKeyFilter(api_key))
+
+    def close(self) -> None:
+        self._client.close()
 
     def _throttle(self) -> None:
         if self._last_request_at is None:
@@ -105,21 +149,51 @@ class MyEmailVerifierClient:
     def verify(self, address: str) -> str:
         self._throttle()
         url = _VALIDATE_URL.format(address=address, api_key=self._api_key)
-        response = httpx.get(url, timeout=self._timeout)
+
+        try:
+            response = self._client.get(url, timeout=self._timeout)
+        except httpx.HTTPError as exc:
+            # Transport-level failure (connect error, timeout, ...): never
+            # let the underlying exception's own message escape, since
+            # httpx transport errors can carry the request (and its URL,
+            # with the key) on `.request`.
+            self._last_request_at = self._now()
+            logger.info("verify %s -> transport error (%s)", address, type(exc).__name__)
+            raise VerifierError(address, detail=type(exc).__name__) from None
+
         self._last_request_at = self._now()
+        status = response.status_code
 
-        if _looks_like_quota_exhaustion(response):
+        try:
+            data = response.json()
+        except ValueError:
+            data = None
+
+        # Fix round 1 (blocker): a `Status` key always wins — a response
+        # carrying one is a real verdict, never a quota signal, no matter
+        # what its status code or any other field says (MyEmailVerifier
+        # echoes the queried `Address` back, so a domain like
+        # "creditkarma.com" must never be misread as "out of credits").
+        if isinstance(data, dict) and "Status" in data:
+            verdict = self._map_verdict(data)
+            logger.info("verify %s -> %s", address, verdict)
+            return verdict
+
+        if self._signals_quota_exhaustion(status, data):
             self._remaining_quota = 0
-            logger.info("verify %s -> quota_exhausted (status %s)", address, response.status_code)
-            raise QuotaExhausted(
-                f"no MyEmailVerifier credits remaining (HTTP {response.status_code})"
-            )
+            logger.info("verify %s -> quota_exhausted (status %s)", address, status)
+            raise QuotaExhausted(f"no MyEmailVerifier credits remaining (HTTP {status})")
 
-        response.raise_for_status()
+        logger.info("verify %s -> error (status %s)", address, status)
+        raise VerifierError(address, status=status)
 
-        verdict = self._map_verdict(response.json())
-        logger.info("verify %s -> %s", address, verdict)
-        return verdict
+    def _signals_quota_exhaustion(self, status: int, data) -> bool:
+        if status in _QUOTA_STATUS_CODES:
+            return True
+        if not isinstance(data, dict):
+            return False
+        text = " ".join(str(data.get(field, "")) for field in _QUOTA_SIGNAL_FIELDS).lower()
+        return any(keyword in text for keyword in _QUOTA_KEYWORDS)
 
     def _map_verdict(self, data: dict) -> str:
         status = str(data.get("Status", "")).strip().lower()

@@ -19,6 +19,34 @@ class QuotaExhausted(Exception):
     Protocol itself."""
 
 
+class VerifierError(Exception):
+    """Raised by an `EmailVerifier` for any verification failure that is
+    *not* quota exhaustion — a bad API key, a 4xx/5xx, a transport failure,
+    a malformed response body. Fix round 1 (blocker): the real adapter used
+    to let `httpx.HTTPStatusError`/`httpx.HTTPError` propagate straight out
+    of `verify`, and httpx formats those exceptions with the full request
+    URL — which embeds the provider API key in its path (D30) — so an
+    uncaught one printed the key to stderr via a CLI traceback, or into any
+    log that records the exception. `VerifierError` carries only `address`
+    and, when known, the HTTP `status`; its message is built from those two
+    fields alone, never from the underlying httpx exception's own message,
+    so it is always safe to log, print, or str() including via an uncaught
+    traceback. Like `QuotaExhausted`, it lives here rather than in
+    `app.adapters.email_verifier` so `ResolveEmails` can catch it without
+    importing a concrete adapter (D8)."""
+
+    def __init__(self, address: str, status: int | None = None, detail: str | None = None):
+        self.address = address
+        self.status = status
+        self.detail = detail
+        parts = [f"verification failed for {address}"]
+        if status is not None:
+            parts.append(f"(HTTP {status})")
+        if detail:
+            parts.append(f"- {detail}")
+        super().__init__(" ".join(parts))
+
+
 @runtime_checkable
 class YCDirectory(Protocol):
     def fetch_companies(self) -> list[dict]: ...
@@ -39,7 +67,18 @@ class EmailVerifier(Protocol):
 
     def verify(self, address: str) -> str: ...  # valid|invalid|catch_all|unknown
 
-    def remaining_quota(self) -> int | None: ...
+    def remaining_quota(self) -> int | None:
+        """Credits left in the current quota period, if the provider
+        exposes that directly; `None` when it doesn't. Fix round 1 (minor):
+        the real Phase 1 adapter (`MyEmailVerifierClient`) never learns this
+        from MyEmailVerifier's `validate_single` responses, which carry no
+        remaining-credits field — it always returns `None` until a
+        `QuotaExhausted` has actually been raised, at which point it
+        returns `0`. A provider whose API does expose a live count is free
+        to return it here instead; nothing downstream assumes either
+        behaviour beyond "a number means credits are known to be left,
+        `None` means they aren't."
+        """
 
 
 @runtime_checkable

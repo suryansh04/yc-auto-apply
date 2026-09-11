@@ -123,11 +123,15 @@ def resolve(
             email_candidate=EmailCandidateRepo(session),
         )
         verifier = MyEmailVerifierClient(settings.email_verifier_api_key)
-        result = ResolveEmails(verifier, repos).run(limit=limit)
+        try:
+            result = ResolveEmails(verifier, repos).run(limit=limit)
+        finally:
+            verifier.close()
         session.commit()
 
     typer.echo(
         f"resolved {result.resolved}, manual {result.manual}, "
+        f"errors {result.errors}, "
         f"verifications used {result.verifications_used}, "
         f"paused on quota: {result.paused_on_quota}"
     )

@@ -152,6 +152,18 @@ def test_send_refuses_when_any_one_setting_is_missing(monkeypatch, tmp_path, sen
     assert send_env == []
 
 
+def test_send_refuses_a_whitespace_only_signature(monkeypatch, tmp_path, send_env):
+    """Fix round 1 (F2): pins the `.strip()` in the guard - `SIGNATURE="  "`
+    is not a real signature (spec §18)."""
+    _complete_send_config(monkeypatch, tmp_path)
+    monkeypatch.setenv("SIGNATURE", "   ")
+    get_settings.cache_clear()
+    result = runner.invoke(cli.app, ["send"])
+    assert result.exit_code == 2
+    assert "SIGNATURE" in result.output
+    assert send_env == []
+
+
 def test_send_refuses_a_resume_path_that_does_not_exist(monkeypatch, tmp_path, send_env):
     _complete_send_config(monkeypatch, tmp_path)
     monkeypatch.setenv("RESUME_PATH", str(tmp_path / "missing.pdf"))
@@ -182,7 +194,158 @@ def test_load_oauth_client_reads_installed_or_web_blocks(tmp_path):
     assert cli._load_oauth_client(str(p)) == ("w-id", "w-secret")
 
 
-def test_gmail_auth_also_requires_the_send_configuration(send_env):
+def test_gmail_auth_requires_the_gmail_configuration(send_env):
     result = runner.invoke(cli.app, ["gmail-auth"])
     assert result.exit_code == 2
     assert "refusing" in result.output
+    assert "GMAIL_SENDER_ADDRESS" in result.output and "GMAIL_CLIENT_SECRETS_PATH" in result.output
+
+
+class _FlowStarted(Exception):
+    """Raised by the patched OAuth flow: `gmail-auth` passed its guard."""
+
+
+def test_gmail_auth_does_not_need_the_resume_or_signature(monkeypatch, tmp_path, send_env):
+    """Fix round 1 (F5): authorising Gmail is a separate setup step from
+    having the resume and signature in place."""
+    import google_auth_oauthlib.flow as flow_module
+
+    _complete_send_config(monkeypatch, tmp_path)
+    monkeypatch.setenv("SIGNATURE", "")
+    monkeypatch.setenv("RESUME_PATH", "")
+    get_settings.cache_clear()
+
+    class _Flow:
+        @staticmethod
+        def from_client_secrets_file(path, scopes):
+            raise _FlowStarted()
+
+    monkeypatch.setattr(flow_module, "InstalledAppFlow", _Flow)
+    result = runner.invoke(cli.app, ["gmail-auth"])
+    assert "refusing" not in result.output
+    assert isinstance(result.exception, _FlowStarted)
+
+
+# --- Fix round 1 (F1): `--to-self` routing. The reviewer's mutant "route
+# `--to-self` to `run()`" - the operator's smoke test emailing every founder -
+# survived the suite because every CLI test stopped at the patched session.
+# These drive `send` past the session and credential lookup with a spy in
+# place of `SendApproved`.
+
+
+class _StubSession:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _StubCredentialRepo:
+    def __init__(self, session):
+        pass
+
+    def get_by_account_email(self, account_email):
+        return type("Cred", (), {"refresh_token": "1//stub-refresh-token"})()
+
+
+class _StubSender:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _SpySendApproved:
+    """Records which entry point the CLI calls, and with what."""
+    instances: list = []
+
+    def __init__(self, sender, clock, repos, **kwargs):
+        self.kwargs = kwargs
+        self.run_calls: list[dict] = []
+        self.to_self_calls: list[dict] = []
+        _SpySendApproved.instances.append(self)
+
+    def run(self, cap, limit=None):
+        self.run_calls.append({"cap": cap, "limit": limit})
+        from app.application.send_approved import SendResult
+        return SendResult(sent=1)
+
+    def send_to_self(self, address, limit=1):
+        self.to_self_calls.append({"address": address, "limit": limit})
+        return limit
+
+
+@pytest.fixture
+def wired_send(monkeypatch, tmp_path, send_env):
+    import app.adapters.db.repositories as repositories
+    import app.application.send_approved as send_approved
+
+    _complete_send_config(monkeypatch, tmp_path)
+    monkeypatch.setenv("DAILY_SEND_CAP", "7")
+    get_settings.cache_clear()
+    sender = _StubSender()
+    monkeypatch.setattr(cli, "_session", lambda: _StubSession())
+    monkeypatch.setattr(cli, "_gmail_sender", lambda *a, **kw: sender)
+    monkeypatch.setattr(repositories, "GmailCredentialRepo", _StubCredentialRepo)
+    monkeypatch.setattr(send_approved, "SendApproved", _SpySendApproved)
+    _SpySendApproved.instances.clear()
+    yield sender
+    _SpySendApproved.instances.clear()
+
+
+def _spy() -> _SpySendApproved:
+    assert len(_SpySendApproved.instances) == 1
+    return _SpySendApproved.instances[0]
+
+
+def test_send_to_self_calls_send_to_self_and_never_run(wired_send):
+    result = runner.invoke(cli.app, ["send", "--to-self"])
+    assert result.exit_code == 0, result.output
+    spy = _spy()
+    assert spy.to_self_calls == [{"address": "me@gmail.com", "limit": 1}]
+    assert spy.run_calls == []
+    assert "nothing was reserved" in result.output
+    assert wired_send.closed
+
+
+def test_send_without_the_flag_calls_run_with_the_daily_cap_and_never_send_to_self(wired_send):
+    result = runner.invoke(cli.app, ["send"])
+    assert result.exit_code == 0, result.output
+    spy = _spy()
+    assert spy.run_calls == [{"cap": 7, "limit": None}]
+    assert spy.to_self_calls == []
+    assert wired_send.closed
+
+
+def test_send_passes_limit_through_to_run(wired_send):
+    result = runner.invoke(cli.app, ["send", "--limit", "2"])
+    assert result.exit_code == 0, result.output
+    assert _spy().run_calls == [{"cap": 7, "limit": 2}]
+
+
+def test_send_to_self_limit_is_clamped_to_three(wired_send):
+    """Fix round 1 (F8): copies to yourself bypass the DB cap but not
+    Gmail's real quota and spam heuristics."""
+    result = runner.invoke(cli.app, ["send", "--to-self", "--limit", "50"])
+    assert result.exit_code == 0, result.output
+    assert _spy().to_self_calls == [{"address": "me@gmail.com", "limit": 3}]
+
+
+def test_send_to_self_limit_below_the_clamp_is_honoured(wired_send):
+    runner.invoke(cli.app, ["send", "--to-self", "--limit", "2"])
+    assert _spy().to_self_calls == [{"address": "me@gmail.com", "limit": 2}]
+
+
+def test_send_to_self_help_states_the_clamp():
+    result = runner.invoke(cli.app, ["send", "--help"])
+    assert "clamped to 3" in result.output
+
+
+def test_send_wires_signature_and_resume_into_the_use_case(wired_send, tmp_path):
+    runner.invoke(cli.app, ["send"])
+    kwargs = _spy().kwargs
+    assert kwargs["signature"] == "Suryansh"
+    assert kwargs["attachment_path"] == str(tmp_path / "resume.pdf")
+    assert kwargs["pause_between_sends"] is cli._random_pause

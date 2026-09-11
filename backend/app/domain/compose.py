@@ -33,10 +33,11 @@ _FALLBACK_GREETING_NAME = "there"
 
 
 def first_name(full_name: str | None) -> str:
-    """First whitespace-separated token of the founder's full name, or
-    "there" (as in "Hi there,") when the name is blank — a blank greeting
-    ("Hi ,") is worse than a generic one."""
-    tokens = (full_name or "").split()
+    """First whitespace-separated token of the founder's full name that is
+    not an honorific (a token ending in ".", e.g. "Dr.", "Mr.", "Ms." — fix
+    round 1, F9), or "there" (as in "Hi there,") when nothing usable is
+    left — a blank greeting ("Hi ,") is worse than a generic one."""
+    tokens = [t for t in (full_name or "").split() if not t.endswith(".")]
     return tokens[0] if tokens else _FALLBACK_GREETING_NAME
 
 
@@ -45,10 +46,11 @@ def compose_wire_text(
 ) -> str:
     """`Hi {first_name},\\n\\n{body}\\n\\n{signature}\\n\\n{opt_out_line}`.
 
-    `body` and `signature` are stripped of surrounding whitespace only, so
-    a stored body ending in a newline does not produce a triple blank line;
-    their interior is untouched.
+    Each part is stripped of surrounding whitespace (interior untouched)
+    and only non-empty parts are joined, so neither a stored body ending
+    in a newline nor an empty signature (fix round 1, F2 — Task 16's
+    preview may call this before a signature is configured) can produce a
+    triple blank line.
     """
-    return "\n\n".join(
-        (f"Hi {first_name},", body.strip(), signature.strip(), opt_out_line.strip())
-    )
+    parts = (f"Hi {first_name},", body.strip(), signature.strip(), opt_out_line.strip())
+    return "\n\n".join(p for p in parts if p)

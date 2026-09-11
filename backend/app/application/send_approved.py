@@ -1,5 +1,5 @@
 """Task 15: send every `APPROVED` outreach through the `MailSender` port,
-at most `cap` per UTC day, with reserve-before-send double-send protection
+at most `cap` per rolling 24 hours, with reserve-before-send double-send protection
 (spec §13, rulings R1/R2, D5, D10, spec §18).
 
 `SendApproved` is pure application logic: it depends only on the
@@ -18,9 +18,14 @@ not optional:
    still `APPROVED` is the crash-between-reserve-and-record signature: it
    is counted as `needs_manual_check`, logged, and **never re-sent** —
    the operator reconciles it against Gmail by hand (spec §13 "needs
-   verification"). Then the cap: `cap` minus the outbound rows already
-   sent since 00:00 UTC today (per the injected clock), so re-running the
-   CLI cannot exceed `daily_send_cap`.
+   verification"). A row whose `approved_at` is NULL while the outreach
+   says APPROVED is a data inconsistency: counted in `errors`, logged,
+   never reserved (the use case asserts what the DB CHECK asserts, spec
+   §13). `sequence_step != 0` raises `NotImplementedError` — Phase 1 sends
+   the initial email only (ruling R-C). Then the cap: `cap` minus the
+   outbound rows sent in the last 24 hours (a rolling window from the
+   injected clock, ruling R-A), so re-running the CLI cannot exceed
+   `daily_send_cap`.
 2. **Reserve (ruling R1).** The draft-time outbound row IS the
    reservation. `message.reserve_for_send(id, now)` runs a single
    conditional `UPDATE messages SET sent_at = :now WHERE id = :id AND
@@ -49,7 +54,7 @@ real send can follow. Nothing it does is committed.
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Callable, Protocol
 
 from app.domain.compose import compose_wire_text, first_name
@@ -57,7 +62,8 @@ from app.domain.states import OutreachState, assert_transition
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_FOLLOWUP_DAY_1 = 5  # spec §7 settings default
+_DEFAULT_FOLLOWUP_DAY_1 = 5  # spec §7 settings default (no AppSettings reader yet - deferred gap)
+_CAP_WINDOW = timedelta(hours=24)  # ruling R-A: rolling window for the daily cap
 
 
 @dataclass
@@ -119,7 +125,10 @@ class SendApproved:
     def run(self, cap: int, limit: int | None = None) -> SendResult:
         result = SendResult()
         now = self._clock.now()
-        remaining = max(cap - self._repos.message.count_sent_since(_start_of_utc_day(now)), 0)
+        # Ruling R-A (fix round 1): a ROLLING 24-hour window, not a calendar
+        # day — a fixed midnight boundary would let 2x the cap out within a
+        # short span straddling it.
+        remaining = max(cap - self._repos.message.count_sent_since(now - _CAP_WINDOW), 0)
         if limit is not None:
             remaining = min(remaining, limit)
 
@@ -130,10 +139,24 @@ class SendApproved:
             # Sending from anything but APPROVED is impossible: checked
             # before the cap, before the reservation, before the sender.
             assert_transition(OutreachState(outreach.state), OutreachState.SENT)
+            if outreach.sequence_step != 0:
+                # Ruling R-C (fix round 1): Phase 1 sends the initial email
+                # only. Follow-ups (D6, spec §12) schedule relative to the
+                # initial send and need `followup_day_2`; failing loudly here
+                # stops Phase 2's send-worker from silently mis-scheduling.
+                raise NotImplementedError("follow-ups are Phase 2")
 
             row = self._repos.message.get_outbound(outreach.id, outreach.sequence_step)
             if row is None:
                 log.warning("founder %s is APPROVED but has no outbound draft row", founder.id)
+                result.errors += 1
+                continue
+            if row.approved_at is None:
+                # Fix round 1 (F6): the use case asserts what the DB CHECK
+                # asserts (spec §13) instead of letting the reservation's
+                # WHERE clause report this data inconsistency as a lost race.
+                log.warning("founder %s is APPROVED but message %s has no approved_at: "
+                            "not sent; approve the draft again", founder.id, row.id)
                 result.errors += 1
                 continue
             if row.sent_at is not None:
@@ -214,7 +237,3 @@ class SendApproved:
             self._sender.send(address, row.subject or "", wire_text, self._attachment_path)
             sent += 1
         return sent
-
-
-def _start_of_utc_day(now: datetime) -> datetime:
-    return datetime.combine(now.astimezone(timezone.utc).date(), time.min, tzinfo=timezone.utc)

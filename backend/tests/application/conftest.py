@@ -554,12 +554,11 @@ def five_approved(repos: FakeRepos) -> list[FakeFounderRow]:
 
 
 @pytest.fixture
-def sent_today(repos: FakeRepos):
-    """`sent_today(n, at=...)` adds `n` already-sent outbound rows (with
-    Gmail ids) for `SENT` founders, stamped `at` — default 08:00 UTC on the
-    `FrozenClock` default day (2026-09-04, 09:00 UTC)."""
-    def _add(n: int, at: datetime | None = None) -> None:
-        at = at or datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+def sent_earlier(repos: FakeRepos):
+    """`sent_earlier(n, at=...)` adds `n` already-sent outbound rows (with
+    Gmail ids) for `SENT` founders, stamped `at` — for the rolling-window
+    cap tests (ruling R-A)."""
+    def _add(n: int, at: datetime) -> None:
         for i in range(n):
             id = 100 + len(repos.message.rows)
             _add_founder_with_draft(repos, id, f"Sent Earlier{i}", f"earlier{id}@example.com",

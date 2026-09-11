@@ -44,6 +44,16 @@ def test_body_and_signature_surrounding_whitespace_does_not_double_blank_lines()
     assert "\n\n\n" not in out
 
 
+@pytest.mark.parametrize("signature", ["", "   ", "\n\t\n"])
+def test_empty_or_whitespace_signature_drops_the_part_instead_of_a_triple_blank_line(signature):
+    """Fix round 1 (F2): Task 16's preview may compose before SIGNATURE is
+    configured; the CLI guard, not this function, is what makes a real
+    send require one."""
+    out = compose_wire_text("Riya", BODY, signature)
+    assert out == f"Hi Riya,\n\n{BODY}\n\n{OPT_OUT_LINE}"
+    assert "\n\n\n" not in out
+
+
 def test_no_html_and_no_tracking_in_the_wire_text():
     out = compose_wire_text("Riya", BODY, SIGNATURE)
     assert "<" not in out and ">" not in out  # D10: plain text only
@@ -56,12 +66,16 @@ def test_no_html_and_no_tracking_in_the_wire_text():
         ("  Riya   Nair ", "Riya"),
         ("Pratish", "Pratish"),
         ("Jean-Luc Picard", "Jean-Luc"),
+        ("Dr. Asha Rao", "Asha"),          # fix round 1 (F9): honorifics skipped
+        ("Mr. Vikram Shah", "Vikram"),
+        ("Ms. Riya Nair", "Riya"),
+        ("Prof. Dr. Jane Founder", "Jane"),
     ],
 )
-def test_first_name_is_the_first_whitespace_token(full_name, expected):
+def test_first_name_is_the_first_non_honorific_whitespace_token(full_name, expected):
     assert first_name(full_name) == expected
 
 
-@pytest.mark.parametrize("full_name", ["", "   ", None])
+@pytest.mark.parametrize("full_name", ["", "   ", None, "Dr.", "Mr. Dr."])
 def test_first_name_falls_back_to_there_for_a_blank_name(full_name):
     assert first_name(full_name) == "there"

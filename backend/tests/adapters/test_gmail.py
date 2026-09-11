@@ -217,7 +217,21 @@ def test_refresh_failure_raises_gmail_error_without_secrets(resume):
     assert exc.value.status == 400
     assert "invalid_grant" in text                 # the operator needs to know to re-run gmail-auth
     assert REFRESH_TOKEN not in text and CLIENT_SECRET not in text
+    # Fix round 1 (F3): the contract is "short OAuth code only" - never the
+    # free-text description, never the whole body.
+    assert "Token has been expired" not in text
+    assert "error_description" not in text
     assert not send.called
+
+
+def test_refresh_error_code_that_is_not_a_short_string_is_dropped(resume):
+    with respx.mock(assert_all_called=False) as router:
+        router.post(TOKEN_URL).mock(return_value=httpx.Response(
+            400, json={"error": {"code": 400, "message": "nested " + REFRESH_TOKEN}}))
+        router.post(SEND_URL).mock(return_value=send_ok())
+        with pytest.raises(GmailError) as exc:
+            make_sender().send("a@b.com", "s", BODY, str(resume))
+    assert str(exc.value) == "gmail token refresh failed (HTTP 400)"
 
 
 def test_transport_error_raises_gmail_error(resume):
@@ -238,6 +252,11 @@ def test_malformed_send_response_raises_gmail_error(resume):
 
 
 def test_no_secret_reaches_any_log_record(resume, caplog):
+    """Pins this adapter's own log lines and `httpx._client`'s INFO
+    "HTTP Request" line. Fix round 1 (F7): respx intercepts at the httpx
+    transport, so httpcore's DEBUG trace logger is NOT exercised here -
+    the reviewer checked that path separately against a real HTTP server
+    at root DEBUG (no leak)."""
     with caplog.at_level(logging.DEBUG):
         with respx.mock() as router:
             router.post(TOKEN_URL).mock(return_value=token_ok())

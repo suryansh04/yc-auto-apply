@@ -315,27 +315,48 @@ def _random_pause() -> None:
     time.sleep(random.uniform(_MIN_PAUSE_SECONDS, _MAX_PAUSE_SECONDS))
 
 
-def _require_send_config(settings) -> None:
-    """Refuse to build a sender until every send-side setting is present
-    (all default to empty in `app.config`, so a fresh `.env` can never send
-    by accident): a real signature (spec §18), an existing resume PDF, the
-    sending address, and the OAuth client-secrets file."""
+_MAX_TO_SELF = 3  # fix round 1 (F8): `--to-self` copies never count toward the DB cap, but do toward Gmail's
+
+
+def _missing_gmail_config(settings) -> list[str]:
     from pathlib import Path
 
     missing = []
-    if not settings.signature.strip():
-        missing.append("SIGNATURE (your sign-off; every email must carry a real signature)")
-    if not settings.resume_path or not Path(settings.resume_path).is_file():
-        missing.append("RESUME_PATH (must point at an existing PDF)")
     if not settings.gmail_sender_address:
         missing.append("GMAIL_SENDER_ADDRESS (the Gmail account authorised by gmail-auth)")
     if not settings.gmail_client_secrets_path or not Path(settings.gmail_client_secrets_path).is_file():
         missing.append("GMAIL_CLIENT_SECRETS_PATH (must point at the OAuth client JSON)")
+    return missing
+
+
+def _refuse(action: str, missing: list[str]) -> None:
     if missing:
-        typer.echo("refusing to send: missing configuration", err=True)
+        typer.echo(f"refusing to {action}: missing configuration", err=True)
         for m in missing:
             typer.echo(f"  - {m}", err=True)
         raise typer.Exit(code=2)
+
+
+def _require_gmail_config(settings) -> None:
+    """What `gmail-auth` needs (fix round 1, F5): only the sending address
+    and the OAuth client-secrets file — authorising Gmail must not wait on
+    the resume or the signature being in place."""
+    _refuse("authorise gmail", _missing_gmail_config(settings))
+
+
+def _require_send_config(settings) -> None:
+    """Refuse to build a sender until every send-side setting is present
+    (all default to empty in `app.config`, so a fresh `.env` can never send
+    by accident): the Gmail settings above plus a real, non-blank signature
+    (spec §18) and an existing resume PDF."""
+    from pathlib import Path
+
+    missing = _missing_gmail_config(settings)
+    if not settings.signature.strip():
+        missing.append("SIGNATURE (your sign-off; every email must carry a real signature)")
+    if not settings.resume_path or not Path(settings.resume_path).is_file():
+        missing.append("RESUME_PATH (must point at an existing PDF)")
+    _refuse("send", missing)
 
 
 def _load_oauth_client(path: str) -> tuple[str, str]:
@@ -371,7 +392,7 @@ def gmail_auth() -> None:
     from app.adapters.gmail import SCOPES
 
     settings = get_settings()
-    _require_send_config(settings)
+    _require_gmail_config(settings)
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     flow = InstalledAppFlow.from_client_secrets_file(settings.gmail_client_secrets_path, scopes=SCOPES)
@@ -397,7 +418,7 @@ def send(
     to_self: bool = typer.Option(
         False, "--to-self",
         help="Smoke test: send the first approved draft(s) to GMAIL_SENDER_ADDRESS instead of the founders. "
-             "Reserves nothing and changes no state, so the real send can follow.",
+             f"Reserves nothing and changes no state, so the real send can follow. --limit is clamped to {_MAX_TO_SELF}.",
     ),
 ) -> None:
     """Send every APPROVED outreach through Gmail (Task 15, spec §13/§18),
@@ -440,7 +461,8 @@ def send(
         )
         try:
             if to_self:
-                n = use_case.send_to_self(settings.gmail_sender_address, limit=limit or 1)
+                n = use_case.send_to_self(settings.gmail_sender_address,
+                                          limit=min(limit or 1, _MAX_TO_SELF))
                 typer.echo(f"sent {n} test copy/copies to {settings.gmail_sender_address}; "
                            "nothing was reserved or marked sent")
                 return

@@ -126,15 +126,42 @@ def test_rowcount_zero_means_no_send(repos, one_approved):
     assert repos.outreach.get(one_approved.id).state == S.APPROVED
 
 
-def test_unapproved_row_cannot_be_reserved_even_if_outreach_says_approved(repos, one_approved):
-    """Belt and braces with the DB CHECK (spec §13): the reservation
-    predicate itself requires `approved_at IS NOT NULL`."""
+def test_unapproved_row_with_approved_outreach_is_an_error_and_never_reaches_reserve(
+    repos, one_approved, caplog
+):
+    """Fix round 1 (F6): the use case asserts what the DB CHECK asserts
+    (spec §13) - outreach APPROVED but `approved_at` NULL is a data
+    inconsistency reported in `errors`, not a lost race, and the
+    reservation is never even attempted."""
     _outbound(repos, one_approved).approved_at = None
+    reserve_calls = []
+    original = repos.message.reserve_for_send
+    repos.message.reserve_for_send = lambda mid, now: reserve_calls.append(mid) or original(mid, now)
     s = FakeSender()
-    result = SendApproved(s, FrozenClock(), repos).run(cap=10)
+    with caplog.at_level(logging.WARNING):
+        result = SendApproved(s, FrozenClock(), repos).run(cap=10)
+    repos.message.reserve_for_send = original
     assert s.sent == []
-    assert result.skipped_not_reservable == 1
+    assert reserve_calls == []
+    assert result.errors == 1
+    assert result.skipped_not_reservable == 0
     assert _outbound(repos, one_approved).sent_at is None
+    assert repos.outreach.get(one_approved.id).state == S.APPROVED
+    assert any("approved_at" in r.getMessage() for r in caplog.records)
+
+
+def test_follow_up_steps_are_refused_before_reserving(repos, one_approved):
+    """Ruling R-C: Phase 1 sends step 0 only; a step-1 APPROVED row must
+    fail loudly, not be sent and mis-scheduled."""
+    repos.outreach.get(one_approved.id).sequence_step = 1
+    repos.message.upsert(outreach_id=one_approved.id, sequence_step=1, direction="outbound",
+                         subject="s", body="follow-up", approved_at=datetime(2026, 9, 3, tzinfo=timezone.utc))
+    s = FakeSender()
+    with pytest.raises(NotImplementedError, match="Phase 2"):
+        SendApproved(s, FrozenClock(), repos).run(cap=10)
+    assert s.sent == []
+    assert repos.message.get_outbound(one_approved.id, 1).sent_at is None
+    assert repos.session.commit_calls == 0
 
 
 def test_fake_reserve_models_the_conditional_update(repos, one_approved):
@@ -222,32 +249,50 @@ def test_exception_message_is_not_logged(repos, one_approved, caplog):
     assert any("RuntimeError" in r.getMessage() for r in caplog.records)
 
 
-# --- daily cap ---------------------------------------------------------------
+# --- daily cap: rolling 24h window (ruling R-A) --------------------------------
+
+NOW = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)  # FrozenClock's default
 
 
-def test_cap_counts_messages_already_sent_today(repos, five_approved, sent_today):
+def test_cap_counts_messages_sent_in_the_last_24h(repos, five_approved, sent_earlier):
     """Re-running the CLI must not exceed `daily_send_cap`: with 2 already
-    sent today and cap=3, only 1 more goes out."""
-    sent_today(2)
+    sent an hour ago and cap=3, only 1 more goes out."""
+    sent_earlier(2, at=NOW - timedelta(hours=1))
     s = FakeSender()
-    result = SendApproved(s, FrozenClock(), repos).run(cap=3)
+    result = SendApproved(s, FrozenClock(NOW), repos).run(cap=3)
     assert len(s.sent) == 1
     assert result.sent == 1
     assert result.skipped_cap == 4
 
 
-def test_cap_ignores_messages_sent_before_today_utc(repos, five_approved, sent_today):
-    clock = FrozenClock(datetime(2026, 9, 11, 0, 30, tzinfo=timezone.utc))
-    sent_today(2, at=datetime(2026, 9, 10, 23, 59, tzinfo=timezone.utc))
+def test_a_send_23h_ago_counts_toward_the_cap(repos, five_approved, sent_earlier):
+    sent_earlier(2, at=NOW - timedelta(hours=23))
     s = FakeSender()
-    SendApproved(s, clock, repos).run(cap=3)
+    SendApproved(s, FrozenClock(NOW), repos).run(cap=3)
+    assert len(s.sent) == 1
+
+
+def test_a_send_25h_ago_does_not_count_toward_the_cap(repos, five_approved, sent_earlier):
+    sent_earlier(2, at=NOW - timedelta(hours=25))
+    s = FakeSender()
+    SendApproved(s, FrozenClock(NOW), repos).run(cap=3)
     assert len(s.sent) == 3
 
 
-def test_cap_already_reached_sends_nothing_and_reserves_nothing(repos, five_approved, sent_today):
-    sent_today(3)
+def test_the_window_is_rolling_not_a_calendar_day(repos, five_approved, sent_earlier):
+    """Two sends at 23:30 UTC yesterday still count at 00:30 UTC today -
+    a midnight boundary would have let the full cap out again."""
+    clock = FrozenClock(datetime(2026, 9, 11, 0, 30, tzinfo=timezone.utc))
+    sent_earlier(2, at=datetime(2026, 9, 10, 23, 30, tzinfo=timezone.utc))
     s = FakeSender()
-    result = SendApproved(s, FrozenClock(), repos).run(cap=3)
+    SendApproved(s, clock, repos).run(cap=3)
+    assert len(s.sent) == 1
+
+
+def test_cap_already_reached_sends_nothing_and_reserves_nothing(repos, five_approved, sent_earlier):
+    sent_earlier(3, at=NOW - timedelta(hours=2))
+    s = FakeSender()
+    result = SendApproved(s, FrozenClock(NOW), repos).run(cap=3)
     assert s.sent == []
     assert result.skipped_cap == 5
     assert all(_outbound(repos, f).sent_at is None for f in five_approved)

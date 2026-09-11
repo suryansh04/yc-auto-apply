@@ -33,6 +33,21 @@ resetting to NEW on every re-scrape would silently undo real progress).
 A failure reaching or parsing the page is recorded on the returned
 `ScrapeResult` rather than raised, so one bad company doesn't stop a batch
 CLI run over the rest.
+
+Fix round 1 (Critical): a failure raised mid-persist (e.g. a scraped
+founder with a null `yc_user_id` hitting a NOT NULL/unique constraint at
+`flush()`) used to be swallowed into `result.error` without rolling back
+the session. The CLI reuses one `Session` across every company in the
+batch and calls `session.commit()` after every `run()`, including a failed
+one; committing a session SQLAlchemy has already marked
+rollback-required raises `PendingRollbackError`, uncaught, which aborted
+every company after the failing one with a raw traceback — the exact
+"one bad company doesn't stop the rest" guarantee this docstring claims,
+broken for any failure past `fetch_page`. `ScrapeRepos` now carries the
+`session` this use case's repos share, and the persist `except` branch
+rolls it back before returning — the use case owns the transaction
+boundary it just violated, so it's also the one that repairs it, rather
+than pushing that responsibility onto every caller of `run()`.
 """
 
 from dataclasses import dataclass
@@ -68,6 +83,10 @@ class _UpsertRepo(Protocol):
     def upsert(self, **fields): ...
 
 
+class _RollbackCapable(Protocol):
+    def rollback(self) -> None: ...
+
+
 @dataclass
 class ScrapeRepos:
     founder: _UpsertRepo          # + get_by_yc_user_id(yc_user_id)
@@ -75,6 +94,7 @@ class ScrapeRepos:
     news: _UpsertRepo
     launch: _UpsertRepo
     outreach: _UpsertRepo         # + get_by_founder_id(founder_id)
+    session: _RollbackCapable     # the session all five repos above share
 
 
 class ScrapeCompanyPage:
@@ -142,5 +162,6 @@ class ScrapeCompanyPage:
                 result.launches += 1
         except Exception as exc:
             result.error = f"{company.slug}: {exc}"
+            self._repos.session.rollback()
 
         return result

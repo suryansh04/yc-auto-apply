@@ -118,13 +118,39 @@ class RaisingSource:
         raise ValueError(f"boom: could not fetch {slug}")
 
 
-def make_repos():
+class FakeSession:
+    """Stand-in for the real SQLAlchemy `Session` all five real repos share.
+    Only `rollback()` matters here — the fix-round-1 regression test asserts
+    it gets called when a repo raises mid-persist."""
+
+    def __init__(self):
+        self.rollback_calls = 0
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
+
+
+class ConstraintViolatingFounderRepo(FakeFounderRepo):
+    """Simulates the real `FounderRepo` raising at `flush()` time — e.g. a
+    scraped founder with `yc_user_id=None` hitting the real table's NOT
+    NULL/unique constraint on that column. `FakeFounderRepo.upsert` has no
+    such check (a plain dict lookup happily keys on `None`), so this
+    subclass adds the one the real repo effectively has."""
+
+    def upsert(self, **fields):
+        if fields.get("yc_user_id") is None:
+            raise RuntimeError("simulated IntegrityError: yc_user_id may not be NULL")
+        return super().upsert(**fields)
+
+
+def make_repos(founder_repo=None, session=None):
     return ScrapeRepos(
-        founder=FakeFounderRepo(),
+        founder=founder_repo or FakeFounderRepo(),
         job_posting=FakeUpsertOnlyRepo(),
         news=FakeUpsertOnlyRepo(),
         launch=FakeUpsertOnlyRepo(),
         outreach=FakeOutreachRepo(),
+        session=session or FakeSession(),
     )
 
 
@@ -259,3 +285,42 @@ def test_empty_arrays_yield_zero_counts_and_no_error():
 
     assert result.error is None
     assert (result.founders, result.job_postings, result.news, result.launches) == (0, 0, 0, 0)
+
+
+# --- Fix round 1: Critical finding ---
+#
+# A repo raising during the persist loop (realistic: a scraped founder with
+# a null `yc_user_id` hitting the real table's NOT NULL/unique constraint at
+# flush time) used to be caught into `result.error` without rolling back the
+# session. The CLI reuses one `Session` across the whole batch and commits
+# after every `run()`, including a failed one — committing a session
+# SQLAlchemy has already marked rollback-required raises
+# `PendingRollbackError`, uncaught, which would abort every company *after*
+# the failing one with a raw traceback. This is the regression test that
+# would have caught it: two companies share one `ScrapeRepos` (and its one
+# `FakeSession`), company 1's founder violates the (simulated) constraint,
+# and company 2 must still scrape cleanly afterward.
+def test_a_flush_time_failure_for_one_company_does_not_abort_the_batch():
+    session = FakeSession()
+    founder_repo = ConstraintViolatingFounderRepo()
+    repos = make_repos(founder_repo=founder_repo, session=session)
+
+    broken_page = {**PAGE, "founders": [{"yc_user_id": None, "full_name": "Ghost Founder"}]}
+    source = FakeCompanyPageSource({"broken-co": broken_page, "vahan": PAGE})
+    use_case = ScrapeCompanyPage(source, repos)
+
+    company1 = FakeCompany(id=1, slug="broken-co")
+    company2 = FakeCompany(id=2, slug="vahan")
+
+    result1 = use_case.run(company1)
+    result2 = use_case.run(company2)
+
+    assert result1.error is not None
+    assert session.rollback_calls == 1, "run() must roll back after a flush-time failure"
+
+    assert result2.error is None, "company 2 must still be scraped after company 1 failed"
+    assert result2.founders == 1
+    assert result2.job_postings == 1
+    assert result2.news == 1
+    assert result2.launches == 1
+    assert founder_repo.get_by_yc_user_id(1).company_id == 2

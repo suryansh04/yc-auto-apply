@@ -80,20 +80,35 @@ class YCPageSource:
 
     Rate-limited to one request per second (per company page fetched by
     this instance) to stay a polite client against ycombinator.com.
+
+    Fix round 1 (I2): `_now`/`_sleep` are injectable, defaulting to
+    `time.monotonic`/`time.sleep`. Nothing about the throttle logic itself
+    needs a real clock — the tests in `test_yc_page.py` pass a fake pair so
+    `_throttle` can be pinned (does it wait the right amount? does it wait
+    at all once the interval has already elapsed?) without an offline test
+    suite actually sleeping for real.
     """
 
-    def __init__(self, timeout: float = 30, min_interval: float = _REQUEST_INTERVAL_SECONDS):
+    def __init__(
+        self,
+        timeout: float = 30,
+        min_interval: float = _REQUEST_INTERVAL_SECONDS,
+        _now=time.monotonic,
+        _sleep=time.sleep,
+    ):
         self._timeout = timeout
         self._min_interval = min_interval
         self._last_request_at: float | None = None
+        self._now = _now
+        self._sleep = _sleep
 
     def _throttle(self) -> None:
         if self._last_request_at is None:
             return
-        elapsed = time.monotonic() - self._last_request_at
+        elapsed = self._now() - self._last_request_at
         remaining = self._min_interval - elapsed
         if remaining > 0:
-            time.sleep(remaining)
+            self._sleep(remaining)
 
     def fetch_page(self, slug: str) -> dict:
         self._throttle()
@@ -103,6 +118,6 @@ class YCPageSource:
             headers={"User-Agent": "Mozilla/5.0"},
             follow_redirects=True,
         )
-        self._last_request_at = time.monotonic()
+        self._last_request_at = self._now()
         response.raise_for_status()
         return parse_company_page(response.text)

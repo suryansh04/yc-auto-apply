@@ -24,7 +24,12 @@ def derive_domain(website: str | None) -> str | None:
     if not website:
         return None
     netloc = urlparse(website if "//" in website else f"//{website}").netloc
-    return netloc.removeprefix("www.").lower() or None
+    # Fix round 1 (minor): lowercase *then* strip "www." — the reverse
+    # order missed an upper/mixed-case host, since `str.removeprefix` is a
+    # case-sensitive exact match. "https://WWW.getswipe.in" used to survive
+    # as "www.getswipe.in" (the prefix strip ran first, saw "WWW." and left
+    # it, then lowercasing only fixed the case, not the leftover prefix).
+    return netloc.lower().removeprefix("www.") or None
 
 
 class SyncCompanies:

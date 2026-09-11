@@ -1,4 +1,4 @@
-from app.application.sync_companies import SyncCompanies
+from app.application.sync_companies import SyncCompanies, derive_domain
 from app.domain.entities import Company
 from tests.fakes import FakeYCDirectory
 
@@ -53,3 +53,13 @@ def test_rerun_is_idempotent():
     SyncCompanies(d, repo).run()
     SyncCompanies(d, repo).run()
     assert len(repo.rows) == 1
+
+
+# Fix round 1 (minor): `derive_domain` used to strip "www." *before*
+# lowercasing, so an upper/mixed-case host's "WWW." prefix (a case-sensitive
+# exact match, since `str.removeprefix` doesn't fold case) survived the
+# strip and only got lowercased afterward, yielding "www.getswipe.in"
+# instead of "getswipe.in". Lowercasing first fixes it.
+def test_domain_strips_www_regardless_of_its_case():
+    assert derive_domain("https://WWW.getswipe.in") == "getswipe.in"
+    assert derive_domain("https://getswipe.in") == "getswipe.in"

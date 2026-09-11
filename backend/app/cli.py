@@ -71,6 +71,7 @@ def scrape() -> None:
             news=CompanyNewsRepo(session),
             launch=CompanyLaunchRepo(session),
             outreach=OutreachRepo(session),
+            session=session,
         )
         use_case = ScrapeCompanyPage(YCPageSource(), repos)
 

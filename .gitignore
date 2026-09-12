@@ -13,3 +13,8 @@ dist/
 credentials.json
 token.json
 .superpowers/
+
+# operator data — never committed
+resume/
+*.pdf
+gmail_client_secret*.json

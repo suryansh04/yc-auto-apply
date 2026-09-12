@@ -35,6 +35,8 @@ from typing import Any, Callable
 from google.genai import errors as genai_errors
 from google.genai import types
 
+from app.domain.names import company_display_name
+
 logger = logging.getLogger(__name__)
 
 # Live-run fix (2026-09-13): Gemini answered 503 UNAVAILABLE ("high demand")
@@ -171,8 +173,9 @@ specific thing from that source (the product, the mechanism, the problem)
 and give your own honest observation on it. Do not restate the company's
 one-liner or tagline back at them.
 
-Part 2 - why you are worth taking on (one or two sentences): cite at most
-two of the RESUME CLAIMS below, ideally one concrete thing you built. Use
+Part 2 - why you are worth taking on (one or two sentences): pick ONE
+concrete thing you built from the RESUME CLAIMS below and connect it to
+what this company does. Do not list roles, tools or a second project. Use
 ONLY the resume claims listed. Never invent a skill, tool, metric, role or
 institution that is not in the claims. Never imply professional seniority
 (no "years of experience", "my team", "in my current role").
@@ -227,7 +230,7 @@ def build_draft_prompt(context: dict) -> str:
     founder = context.get("founder") or {}
     parts = [
         "COMPANY",
-        f"name: {company.get('name')}",
+        f"name: {company_display_name(company.get('name') or '')}",
         f"one_liner (do NOT restate this): {company.get('one_liner')}",
         "",
         "FOUNDER (the recipient)",

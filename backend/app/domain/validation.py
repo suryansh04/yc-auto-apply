@@ -4,6 +4,8 @@ instructions, precisely so they can be unit-tested and cannot be argued with."""
 import re
 from dataclasses import dataclass
 
+from app.domain.names import company_display_name
+
 MAX_WORDS = 120
 MAX_SENTENCE_WORDS = 25
 MAX_PARAGRAPHS = 3
@@ -176,7 +178,8 @@ def validate_grounding(draft, source, company_name, one_liner, claims,
     if not shared:
         errs.append("hook shares no distinctive term with the cited source")
 
-    if company_name and company_name.lower() not in low:
+    display = company_display_name(company_name) if company_name else ""
+    if display and display.lower() not in low:
         errs.append("does not name the company")
 
     if source.kind == "job_posting" and source.intern_appropriate is False:

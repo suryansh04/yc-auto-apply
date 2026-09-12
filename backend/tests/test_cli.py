@@ -384,7 +384,7 @@ def test_draft_on_sarvam_builds_the_sarvam_drafter_and_ignores_the_gemini_tier(s
     result = runner.invoke(cli.app, ["draft", "--limit", "5"])
     assert "refusing" not in result.output.lower()
     assert isinstance(result.exception, _SarvamBuilt)
-    assert sarvam_env == [("drafter", "sarvam-105b")]
+    assert sarvam_env == [("drafter", "sarvam-105b-conversations")]
     assert env == []                                    # no Gemini client built
 
 
@@ -393,7 +393,7 @@ def test_parse_resume_on_sarvam_builds_the_sarvam_parser(sarvam_env, env, tmp_pa
     p.write_text("resume", encoding="utf-8")
     result = runner.invoke(cli.app, ["parse-resume", str(p)])
     assert isinstance(result.exception, _SarvamBuilt)
-    assert sarvam_env == [("parser", "sarvam-105b")]
+    assert sarvam_env == [("parser", "sarvam-105b-conversations")]
     assert "GEMINI_TIER" not in result.output
     assert env == []
 

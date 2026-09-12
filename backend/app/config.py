@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # so existing configs behave unchanged.
     llm_provider: Literal["gemini", "sarvam"] = "gemini"
     sarvam_api_key: str = ""
-    sarvam_model: str = "sarvam-105b"
+    sarvam_model: str = "sarvam-105b-conversations"
     daily_send_cap: int = 20
 
     # Task 15 (sending). Every default below is EMPTY on purpose: `send`

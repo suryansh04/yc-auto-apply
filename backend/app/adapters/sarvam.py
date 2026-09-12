@@ -47,7 +47,12 @@ from app.adapters.gemini import (
 logger = logging.getLogger(__name__)
 
 CHAT_COMPLETIONS_URL = "https://api.sarvam.ai/v1/chat/completions"
-DEFAULT_MODEL = "sarvam-105b"
+# Live finding (2026-09-13): `sarvam-105b` is a reasoning model and spends
+# thousands of output tokens (and the default 2048 max_tokens) on
+# `reasoning_content` before answering; the `-conversations` variant does not
+# reason, answered the same parser prompt in 177 tokens, and is ~40x cheaper.
+DEFAULT_MODEL = "sarvam-105b-conversations"
+_MAX_TOKENS = 4096
 
 _TRANSIENT_STATUS_CODES = {429, 503}
 _MAX_TRANSIENT_RETRIES = 3
@@ -142,6 +147,8 @@ class _SarvamChat:
             "model": self._model,
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": _MAX_TOKENS,
+            "reasoning_effort": "low",  # no-op on the conversations model; bounds the reasoning one
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {"name": schema_name, "schema": schema, "strict": True},
@@ -170,9 +177,17 @@ class _SarvamChat:
             raise SarvamError(stage, status=status)
 
         try:
-            content = response.json()["choices"][0]["message"]["content"]
+            choice = response.json()["choices"][0]
+            content = choice["message"]["content"]
         except (ValueError, KeyError, IndexError, TypeError):
             raise SarvamError(stage, status=status, detail="unexpected response shape") from None
+        if not content:
+            reason = choice.get("finish_reason")
+            raise SarvamError(
+                stage, status=status,
+                detail=f"empty or truncated reply (finish_reason={reason}); a reasoning model "
+                       f"may have spent max_tokens on reasoning_content — use {DEFAULT_MODEL}",
+            )
         return content
 
 

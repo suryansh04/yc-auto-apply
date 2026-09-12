@@ -180,3 +180,38 @@ def test_adapters_satisfy_the_ports():
     from app.ports import Drafter, ResumeParser
     assert isinstance(_parser(), ResumeParser)
     assert isinstance(_drafter(), Drafter)
+
+
+# --- Live findings (2026-09-13) -------------------------------------------------
+# `sarvam-105b` is a reasoning model: it spends the default 2048 max_tokens on
+# `reasoning_content` and returns `content: null` with finish_reason "length".
+# `sarvam-105b-conversations` does not reason (177 vs ~7000 completion tokens
+# for the same parser prompt) and is the default; the adapter also sends an
+# explicit max_tokens and turns a truncated/empty reply into a clear error.
+
+
+def test_default_model_is_the_non_reasoning_conversations_variant():
+    from app.adapters.sarvam import DEFAULT_MODEL
+    assert DEFAULT_MODEL == "sarvam-105b-conversations"
+
+
+@respx.mock
+def test_request_sets_an_explicit_max_tokens_and_low_reasoning_effort():
+    route = respx.post(URL).mock(return_value=_ok(CLAIMS_JSON))
+    _parser().parse("resume")
+    body = json.loads(route.calls[0].request.content)
+    assert body["max_tokens"] >= 4096
+    assert body["reasoning_effort"] == "low"
+
+
+@respx.mock
+def test_truncated_reply_with_null_content_raises_a_clear_sarvam_error():
+    respx.post(URL).mock(return_value=httpx.Response(200, json={
+        "choices": [{"index": 0, "finish_reason": "length",
+                     "message": {"role": "assistant", "content": None, "reasoning_content": "thinking..."}}],
+        "usage": {"completion_tokens": 2048},
+    }))
+    with pytest.raises(SarvamError) as exc_info:
+        _parser().parse("resume")
+    assert "truncated" in str(exc_info.value)
+    assert API_KEY not in str(exc_info.value)

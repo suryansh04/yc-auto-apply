@@ -349,3 +349,71 @@ def test_send_wires_signature_and_resume_into_the_use_case(wired_send, tmp_path)
     assert kwargs["signature"] == "Suryansh"
     assert kwargs["attachment_path"] == str(tmp_path / "resume.pdf")
     assert kwargs["pause_between_sends"] is cli._random_pause
+
+
+# --- LLM provider switch (2026-09-13): Gemini free tier is 20 req/day -------
+
+
+class _SarvamBuilt(Exception):
+    pass
+
+
+@pytest.fixture
+def sarvam_env(monkeypatch, env):
+    monkeypatch.setenv("LLM_PROVIDER", "sarvam")
+    monkeypatch.setenv("SARVAM_API_KEY", "sk_not_real")
+    monkeypatch.setenv("GEMINI_TIER", "free")   # must be irrelevant on Sarvam
+    get_settings.cache_clear()
+    built = []
+
+    def fake_parser(*a, **kw):
+        built.append(("parser", kw.get("model")))
+        raise _SarvamBuilt()
+
+    def fake_drafter(*a, **kw):
+        built.append(("drafter", kw.get("model")))
+        raise _SarvamBuilt()
+
+    monkeypatch.setattr("app.adapters.sarvam.SarvamResumeParser", fake_parser)
+    monkeypatch.setattr("app.adapters.sarvam.SarvamDrafter", fake_drafter)
+    yield built
+    get_settings.cache_clear()
+
+
+def test_draft_on_sarvam_builds_the_sarvam_drafter_and_ignores_the_gemini_tier(sarvam_env, env):
+    result = runner.invoke(cli.app, ["draft", "--limit", "5"])
+    assert "refusing" not in result.output.lower()
+    assert isinstance(result.exception, _SarvamBuilt)
+    assert sarvam_env == [("drafter", "sarvam-105b")]
+    assert env == []                                    # no Gemini client built
+
+
+def test_parse_resume_on_sarvam_builds_the_sarvam_parser(sarvam_env, env, tmp_path):
+    p = tmp_path / "r.txt"
+    p.write_text("resume", encoding="utf-8")
+    result = runner.invoke(cli.app, ["parse-resume", str(p)])
+    assert isinstance(result.exception, _SarvamBuilt)
+    assert sarvam_env == [("parser", "sarvam-105b")]
+    assert "GEMINI_TIER" not in result.output
+    assert env == []
+
+
+def test_sarvam_provider_refuses_without_a_key(monkeypatch, env):
+    monkeypatch.setenv("LLM_PROVIDER", "sarvam")
+    monkeypatch.delenv("SARVAM_API_KEY", raising=False)
+    get_settings.cache_clear()
+    result = runner.invoke(cli.app, ["draft"])
+    assert result.exit_code != 0
+    assert "SARVAM_API_KEY" in result.output
+    assert env == []
+
+
+def test_sarvam_model_is_taken_from_settings(monkeypatch, sarvam_env, env):
+    monkeypatch.setenv("SARVAM_MODEL", "sarvam-future")
+    get_settings.cache_clear()
+    runner.invoke(cli.app, ["draft"])
+    assert sarvam_env == [("drafter", "sarvam-future")]
+
+
+def test_gemini_remains_the_default_provider(env):
+    assert get_settings().llm_provider == "gemini"

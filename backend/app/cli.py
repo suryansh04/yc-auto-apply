@@ -282,6 +282,39 @@ def _gemini_client():
     return genai.Client(api_key=settings.gemini_api_key)
 
 
+def _resume_parser():
+    """Provider switch: the configured LLM's `ResumeParser` adapter."""
+    settings = get_settings()
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise typer.BadParameter("SARVAM_API_KEY is not set")
+        return sarvam.SarvamResumeParser(settings.sarvam_api_key, model=settings.sarvam_model)
+    from app.adapters.gemini import GeminiResumeParser
+
+    return GeminiResumeParser(_gemini_client(), model=settings.gemini_model)
+
+
+def _drafter():
+    """Provider switch: the configured LLM's `Drafter` adapter."""
+    settings = get_settings()
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise typer.BadParameter("SARVAM_API_KEY is not set")
+        return sarvam.SarvamDrafter(settings.sarvam_api_key, model=settings.sarvam_model)
+    from app.adapters.gemini import GeminiDrafter
+
+    return GeminiDrafter(_gemini_client(), model=settings.gemini_model)
+
+
+def _on_gemini_free_tier() -> bool:
+    s = get_settings()
+    return s.llm_provider == "gemini" and s.gemini_tier == "free"
+
+
 def _refuse_free_tier_for_founder_data(allow_free_tier: bool) -> None:
     """Fix round 1 (F2, ruling R4): `draft` sends founders' names, titles
     and bios to Gemini. On a free-tier key that is third-party personal
@@ -289,7 +322,7 @@ def _refuse_free_tier_for_founder_data(allow_free_tier: bool) -> None:
     loudly"), so the run refuses unless the operator opts in explicitly —
     the intended use being the brief's own 'draft five and read them'
     check (14.6), never a full run."""
-    if get_settings().gemini_tier == "free" and not allow_free_tier:
+    if _on_gemini_free_tier() and not allow_free_tier:
         typer.echo(
             f"refusing to draft: {_FREE_TIER_NOTICE} Founder data would be sent to a "
             "free-tier key. Set GEMINI_TIER=paid, or pass --allow-free-tier for a "
@@ -305,16 +338,15 @@ def parse_resume(path: str = typer.Argument(..., help="Resume file: .pdf, .txt o
     Re-runnable: replaces the single `resume_profile` row. Read every claim
     it prints — these are the only things the drafter may assert about you."""
     from app.adapters.db.repositories import ResumeProfileRepo
-    from app.adapters.gemini import GeminiResumeParser
     from app.application.parse_resume import ParseResume
 
     settings = get_settings()
     raw_text = _read_resume_text(path)
-    if settings.gemini_tier == "free":
+    if _on_gemini_free_tier():
         # Only the user's own resume goes out here (no third-party data), so
         # a warning is enough (ruling R4); `draft` is the hard refusal.
         typer.echo(f"warning: {_FREE_TIER_NOTICE} Your resume text is being sent.", err=True)
-    parser = GeminiResumeParser(_gemini_client(), model=settings.gemini_model)
+    parser = _resume_parser()
     with _session() as session:
         use_case = ParseResume(parser, ResumeProfileRepo(session))
         claims = use_case.run(raw_text)
@@ -374,12 +406,11 @@ def draft(
         OutreachRepo,
         ResumeProfileRepo,
     )
-    from app.adapters.gemini import GeminiDrafter
     from app.application.draft_outreach import DraftOutreach, DraftRepos
 
     settings = get_settings()
     _refuse_free_tier_for_founder_data(allow_free_tier)
-    drafter = GeminiDrafter(_gemini_client(), model=settings.gemini_model)
+    drafter = _drafter()
     with _session() as session:
         repos = DraftRepos(
             founder=FounderRepo(session),

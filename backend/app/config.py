@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
     gemini_tier: Literal["free", "paid"] = "free"
+    # LLM provider switch (2026-09-13): Gemini's free tier is 20 requests/day
+    # per model, unusable at outreach volume; Sarvam (Indian pricing, UPI)
+    # serves the same Drafter/ResumeParser ports. Gemini stays the default
+    # so existing configs behave unchanged.
+    llm_provider: Literal["gemini", "sarvam"] = "gemini"
+    sarvam_api_key: str = ""
+    sarvam_model: str = "sarvam-105b"
     daily_send_cap: int = 20
 
     # Task 15 (sending). Every default below is EMPTY on purpose: `send`

@@ -54,7 +54,7 @@ backend/
     adapters/
       yc_oss.py          YcOssClient
       yc_page.py         YcPageScraper
-      reoon.py           ReoonVerifier
+      email_verifier.py  MyEmailVerifierClient (D30)
       gemini.py          GeminiDrafter, GeminiResumeParser
       gmail.py           GmailSender
       db/models.py       SQLAlchemy models
@@ -80,7 +80,7 @@ Each domain module is one file with one responsibility, small enough to hold in 
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `app.config.Settings` with fields `database_url: str`, `reoon_api_key: str = ""`, `gemini_api_key: str = ""`, `gemini_model: str = "gemini-3-flash"`, `gemini_tier: Literal["free","paid"] = "free"`, `daily_send_cap: int = 20`. `get_settings() -> Settings` is `lru_cache`d.
+- Produces: `app.config.Settings` with fields `database_url: str`, `email_verifier_api_key: str = ""`, `gemini_api_key: str = ""`, `gemini_model: str = "gemini-3-flash"`, `gemini_tier: Literal["free","paid"] = "free"`, `daily_send_cap: int = 20`. `get_settings() -> Settings` is `lru_cache`d.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -141,7 +141,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str
-    reoon_api_key: str = ""
+    email_verifier_api_key: str = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3-flash"
     gemini_tier: Literal["free", "paid"] = "free"
@@ -178,7 +178,7 @@ volumes:
 ```bash
 # backend/.env.example
 DATABASE_URL=postgresql+psycopg://yc:yc@localhost:5432/ycautoapply
-REOON_API_KEY=
+EMAIL_VERIFIER_API_KEY=
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3-flash
 GEMINI_TIER=free
@@ -1559,7 +1559,7 @@ git commit -m "feat: scrape founders, news, launches and postings from one page 
 ## Task 12: Email resolution
 
 **Files:**
-- Create: `backend/app/adapters/reoon.py`, `backend/app/application/resolve_emails.py`
+- Create: `backend/app/adapters/email_verifier.py`, `backend/app/application/resolve_emails.py`
 - Test: `backend/tests/application/test_resolve_emails.py`
 
 **Interfaces:**
@@ -1622,19 +1622,31 @@ Implement the ordering above. Persist every verdict as an `email_candidates` row
 Run: `cd backend && pytest tests/application/test_resolve_emails.py -v`
 Expected: PASS (5 tests)
 
-- [ ] **Step 5: Write the Reoon adapter**
+- [ ] **Step 5: Write the MyEmailVerifier adapter (D30)**
 
-`POST https://emailverifier.reoon.com/api/v1/verify` with `{"email": ..., "key": ..., "mode": "power"}`. Map the response `status` to `valid` / `invalid` / `catch_all` / `unknown`. Raise a distinct `QuotaExhausted` exception on the quota error so the use case can pause.
+`GET https://client.myemailverifier.com/verifier/validate_single/{email}/{apikey}`.
+Verified live 2026-09-04: returns JSON, and an invalid key yields HTTP 401
+`{"status":false,"message":"Invalid API Key"}`. A successful response carries
+`Status` (`Valid` | `Invalid` | `Catch-all` | `Unknown`), plus `catch_all`,
+`Disposable_Domain`, `Role_Based`, `Diagnosis`. Map `Status` case-insensitively
+onto the domain verdicts `valid` / `invalid` / `catch_all` / `unknown`, treating
+any unrecognised value as `unknown` rather than guessing. Raise a distinct
+`QuotaExhausted` exception when the daily 100-credit free allowance is spent so
+the use case can pause rather than record failures. Single-verification rate
+limit is 30/min — sleep between calls to stay under it.
+
+The URL embeds the API key in the path, so it must never be logged. Log the
+address and the verdict, never the full URL.
 
 - [ ] **Step 6: Run a small real batch**
 
 Run: `cd backend && python -m app.cli resolve --limit 20`
-Expected: roughly 14 of 20 resolve to a `valid` address. Check `verifications_used` is close to 2.5 per founder — materially higher means the pattern ordering needs revisiting before spending the rest of the quota.
+Expected: roughly 14 of 20 resolve to a `valid` address. Check `verifications_used` is close to 2.5 per founder — materially higher means the pattern ordering needs revisiting. Note the free tier is 100/day (D30), so a 20-founder batch costs about half a day's allowance.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/app/adapters/reoon.py backend/app/application/resolve_emails.py backend/tests
+git add backend/app/adapters/email_verifier.py backend/app/application/resolve_emails.py backend/tests
 git commit -m "feat: email resolution with published-email short circuit and early exit"
 ```
 

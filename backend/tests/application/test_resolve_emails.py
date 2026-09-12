@@ -270,3 +270,15 @@ def test_needs_email_rows_are_processed_before_new_ones(repos, two_founders):
     assert result.resolved == 1
     assert repos.outreach.get(f2.id).state == S.READY_TO_DRAFT
     assert repos.outreach.get(f1.id).state == S.NEW
+
+
+def test_a_new_founder_hits_the_published_email_short_circuit(repos, founder_with_launch_email):
+    """Task 16 fix round 1 (F5): the NEW -> NEEDS_EMAIL step precedes the
+    D18 short circuit, so `NEEDS_EMAIL -> READY_TO_DRAFT` is legal there
+    too - and no verification is spent."""
+    repos.outreach.get(founder_with_launch_email.id).state = str(S.NEW)
+    v = FakeVerifier({})
+    result = ResolveEmails(v, repos).run()
+    assert v.calls == [] and result.verifications_used == 0
+    o = repos.outreach.get(founder_with_launch_email.id)
+    assert o.state == S.READY_TO_DRAFT and o.resolved_email == "jane@acme.com"

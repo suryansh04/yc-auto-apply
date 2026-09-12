@@ -30,6 +30,7 @@ address the outreach row by the *founder's* id. Matching the two id spaces
 in these fixtures is what makes that call resolve to the right row.
 """
 
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -485,7 +486,9 @@ def repos() -> FakeRepos:
         resume_profile=FakeResumeProfileRepo(),
         session=FakeSession(),
     )
-    bundle.resume_profile.save("Built a scheduler in Python, cut wait 50%", list(RESUME_CLAIMS))
+    # deepcopy (Task 16 fix round 1): a test that flips a claim's `span_verified`
+    # in place must not leak into the module-level RESUME_CLAIMS.
+    bundle.resume_profile.save("Built a scheduler in Python, cut wait 50%", copy.deepcopy(RESUME_CLAIMS))
     return bundle
 
 

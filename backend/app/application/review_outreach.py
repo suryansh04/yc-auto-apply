@@ -14,9 +14,11 @@ What each action guarantees:
   outreach, founder, company, the step's outbound draft row (`None` for a
   row `DraftOutreach` flagged *needs manual write* without ever calling
   the drafter) and the cited source resolved exactly as grounding resolved
-  it (`build_sources`). Ordered by the spec §8 `rank_key`: companies with
-  a news item first, then a launch, then the rest; ties by `team_size`
-  ascending, then founder name - never by postings or `isHiring` (D24).
+  it (`build_sources`). Ordered by the pure `app.domain.ranking.rank_key`
+  (spec §8): companies with a news item first, then a launch, then the
+  rest; ties by `team_size` ascending, then founder name - never by
+  postings or `isHiring` (D24). The has-news / has-launch flags are
+  fetched once per item before sorting.
 - **`approve(outreach_id, now)`** stamps `approved_at = now` on the step's
   outbound row and moves the outreach `PENDING_APPROVAL -> APPROVED`
   through `assert_transition`. That timestamp is what the DB CHECK
@@ -36,8 +38,15 @@ What each action guarantees:
   approval) and clears `last_error` (the flag is discharged). The stored
   citation is kept: the reviewer can rewrite the words, not what they are
   grounded on. When there is no resolvable citation (manual write, no
-  material) the grounding rules cannot apply, so only the style and
-  resume-claims rules run - disclosed in the task report.
+  material, or a citation that no longer resolves) the grounding rules
+  cannot apply, so only the style and resume-claims rules run, and the
+  row's citation is nulled so it never claims a source the text was not
+  checked against (fix round 1, F3).
+- **`redraft(outreach_id)`** (fix round 1, T16-1) moves `PENDING_APPROVAL
+  -> READY_TO_DRAFT` and nothing else: the next `draft` run replaces the
+  existing row in place (`DraftOutreach._finish`). This is the way out for
+  a draft flagged because of its *citation* (e.g. a non-intern posting,
+  D23), which no edit can repair since edits keep the citation.
 - **`reject(outreach_id)`** moves `PENDING_APPROVAL -> DISCARDED` (the
   state machine's only reject target; terminal).
 - **`skip(outreach_id)`** does nothing; it exists so the CLI's dispatch is
@@ -50,6 +59,7 @@ from typing import Protocol
 
 from app.application.draft_outreach import build_sources, load_resume_claims
 from app.domain.entities import Draft
+from app.domain.ranking import rank_key
 from app.domain.states import OutreachState, assert_transition
 from app.domain.validation import SourceRow, validate_claims, validate_draft, validate_style
 
@@ -116,7 +126,8 @@ class ReviewOutreach:
             if outreach is None:
                 continue
             items.append(self._item(outreach, founder))
-        items.sort(key=self._rank_key)
+        keys = {id(item): self._rank_key(item) for item in items}   # repo reads happen here, not in the sort
+        items.sort(key=lambda item: keys[id(item)])
         return items
 
     def load(self, outreach_id: int) -> ReviewItem:
@@ -141,6 +152,11 @@ class ReviewOutreach:
             )
         self._repos.message.upsert(id=row.id, approved_at=now)
         self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.APPROVED))
+
+    def redraft(self, outreach_id: int) -> None:
+        outreach = self._outreach(outreach_id)
+        assert_transition(OutreachState(outreach.state), OutreachState.READY_TO_DRAFT)
+        self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.READY_TO_DRAFT))
 
     def reject(self, outreach_id: int) -> None:
         outreach = self._outreach(outreach_id)
@@ -181,7 +197,9 @@ class ReviewOutreach:
         )
         if row is not None:
             fields["id"] = row.id
-        else:
+        if source is None:
+            # F3: the text was not checked against any source, so the row
+            # must not keep claiming one (a stale `news/9999`, say).
             fields.update(research_source_type=None, research_source_id=None)
         self._repos.message.upsert(**fields)
         self._repos.outreach.upsert(founder_id=outreach.founder_id, last_error=None)
@@ -236,14 +254,12 @@ class ReviewOutreach:
 
     def _rank_key(self, item: ReviewItem):
         company = item.company
+        name = getattr(item.founder, "full_name", None)
         if company is None:
-            return (3, float("inf"), item.founder.full_name or "")
-        if self._repos.news.list_by_company_id(company.id):
-            strength = 0
-        elif self._repos.launch.list_by_company_id(company.id):
-            strength = 1
-        else:
-            strength = 2
-        team_size = getattr(company, "team_size", None)
-        return (strength, team_size if team_size is not None else float("inf"),
-                item.founder.full_name or "")
+            return rank_key(has_news=False, has_launch=False, team_size=None, founder_name=name)
+        return rank_key(
+            has_news=bool(self._repos.news.list_by_company_id(company.id)),
+            has_launch=bool(self._repos.launch.list_by_company_id(company.id)),
+            team_size=getattr(company, "team_size", None),
+            founder_name=name,
+        )

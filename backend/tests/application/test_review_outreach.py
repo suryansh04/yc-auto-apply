@@ -276,3 +276,127 @@ def test_the_use_case_never_commits_itself(repos, one_pending):
     uc.edit(one_pending.id, PENDING_SUBJECT, PENDING_BODY)
     uc.approve(one_pending.id, NOW)
     assert repos.session.commit_calls == 0
+
+
+# --- Fix round 1 ---------------------------------------------------------------
+
+
+def test_redraft_moves_to_ready_to_draft_and_touches_nothing_else(repos, manual_write_pending):
+    """T16-1: the row, its citation, its flag and its approval stay as they
+    are; `DraftOutreach._finish` replaces the row in place next run."""
+    before = repos.message.get_outbound(manual_write_pending.id, 0)
+    snapshot = (before.subject, before.body, before.research_source_type, before.research_source_id,
+                before.approved_at, before.edited_by_user)
+    ReviewOutreach(repos).redraft(manual_write_pending.id)
+    o = repos.outreach.get(manual_write_pending.id)
+    assert o.state == S.READY_TO_DRAFT
+    assert o.last_error == MANUAL_WRITE_ERROR
+    after = repos.message.get_outbound(manual_write_pending.id, 0)
+    assert after is before
+    assert (after.subject, after.body, after.research_source_type, after.research_source_id,
+            after.approved_at, after.edited_by_user) == snapshot
+    assert repos.session.commit_calls == 0
+
+
+def test_redraft_from_a_non_pending_state_is_an_illegal_transition(repos, one_approved):
+    with pytest.raises(IllegalTransition):
+        ReviewOutreach(repos).redraft(one_approved.id)
+    assert repos.outreach.get(one_approved.id).state == S.APPROVED
+
+
+def test_redraft_then_draft_replaces_the_flagged_row_in_place(repos, manual_write_pending):
+    """The round trip the key exists for: a row flagged for its citation
+    goes back, and the next draft run updates the SAME row."""
+    from app.application.draft_outreach import DraftOutreach
+    from tests.fakes import FakeDrafter
+
+    before = repos.message.get_outbound(manual_write_pending.id, 0)
+    ReviewOutreach(repos).redraft(manual_write_pending.id)
+    DraftOutreach(FakeDrafter([{"subject": PENDING_SUBJECT, "body": PENDING_BODY,
+                                "research_source_type": "news",
+                                "research_source_id": manual_write_pending.id}]), repos).run()
+    o = repos.outreach.get(manual_write_pending.id)
+    assert o.state == S.PENDING_APPROVAL and o.last_error is None
+    rows = [r for r in repos.message.rows if r.outreach_id == manual_write_pending.id]
+    assert len(rows) == 1 and rows[0] is before and rows[0].body == PENDING_BODY
+
+
+def test_edit_nulls_a_citation_that_no_longer_resolves(repos, one_pending):
+    """F3: with an existing row whose citation does not resolve, a valid
+    edit must not leave the row claiming a source the text was never
+    checked against."""
+    row = repos.message.get_outbound(one_pending.id, 0)
+    row.research_source_id = 9999
+    body = "You're building Vahan.\n\nI built a scheduler in Python.\n\nWould you take an intern?"
+    assert ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body) == []
+    assert (row.research_source_type, row.research_source_id) == (None, None)
+    assert row.body == body and row.edited_by_user
+    assert ReviewOutreach(repos).load(one_pending.id).source is None
+
+
+def test_edit_keeps_a_citation_that_resolves(repos, one_pending):
+    row = repos.message.get_outbound(one_pending.id, 0)
+    assert ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, PENDING_BODY) == []
+    assert (row.research_source_type, row.research_source_id) == ("news", one_pending.id)
+
+
+def test_edit_allows_the_founder_name_and_long_description_terms_as_the_drafter_did(repos, one_pending):
+    """F6: the F4 allowed-text parity - a capitalised token that is the
+    founder's name or a `long_description` term is not a fabrication."""
+    repos.company.get(one_pending.company_id).long_description = (
+        "Vahan matches blue-collar workers to jobs over voice, screening and placing staff "
+        "for large gig platforms such as Swiggy and Zepto across a dozen Indian languages."
+    )
+    body = ("You're matching blue-collar workers to jobs over voice at Vahan. "
+            "That routing problem is what I keep thinking about.\n\n"
+            "My scheduler in Python handles a similar queue, and placing staff for Swiggy "
+            "is the part Madhav described that I'd like to work on.\n\n"
+            "Would you take an intern?")
+    assert ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body) == []
+
+
+def test_edit_without_the_allowed_text_would_flag_those_same_tokens(repos, one_pending):
+    """Guards the test above: the same tokens ARE flagged when they are
+    neither the founder's name nor in the description."""
+    repos.company.get(one_pending.company_id).long_description = "Too short."
+    repos.founder.get(one_pending.id).full_name = "Someone Else"
+    body = ("You're matching blue-collar workers to jobs over voice at Vahan. "
+            "That routing problem is what I keep thinking about.\n\n"
+            "My scheduler in Python handles a similar queue, and placing staff for Swiggy "
+            "is the part Madhav described that I'd like to work on.\n\n"
+            "Would you take an intern?")
+    errors = ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body)
+    assert any("Madhav" in e and "Swiggy" in e for e in errors)
+
+
+def test_pending_unknown_team_size_sorts_after_known_sizes(repos):
+    """F7: `team_size is None` sorts last, mixed with ints without raising."""
+    unknown = _add_pending_founder(repos, 46, "Al Unknown", "a@example.com")
+    big = _add_pending_founder(repos, 47, "Zed Big", "z@example.com")
+    repos.company.get(47).team_size = 10_000
+    assert [i.founder.id for i in ReviewOutreach(repos).pending()] == [big.id, unknown.id]
+
+
+def test_d24_attaching_job_postings_does_not_change_the_review_order(repos):
+    """Spec §15 regression (D24): job postings and `isHiring` never affect
+    `rank_key`. Rank, attach postings (intern-appropriate and senior) to
+    some companies, rank again: byte-identical order."""
+    ids = []
+    for n, (name, team) in enumerate([("Cal", 30), ("Bea", None), ("Al", 3), ("Dee", 30)], start=50):
+        _add_pending_founder(repos, n, f"{name} Founder", f"{name.lower()}@example.com")
+        repos.company.get(n).team_size = team
+        ids.append(n)
+    repos.news.rows = [r for r in repos.news.rows if r.company_id not in (51, 53)]
+    repos.launch.add(company_id=53, title="Launch", body="Launching")
+    before = [i.founder.id for i in ReviewOutreach(repos).pending()]
+    assert before == [52, 50, 53, 51]          # news by team size, then launch, then the rest
+
+    repos.job_posting.add(id=901, company_id=51, title="Software Engineering Intern",
+                          employment_type="Internship", min_experience="0 years")
+    repos.job_posting.add(id=902, company_id=53, title="Senior Engineer",
+                          employment_type="Full-time", min_experience="6+ years")
+    repos.job_posting.add(id=903, company_id=52, title="Backend Intern", employment_type="Internship")
+    for n in ids:
+        repos.company.get(n).is_hiring = True
+    after = [i.founder.id for i in ReviewOutreach(repos).pending()]
+    assert after == before

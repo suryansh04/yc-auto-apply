@@ -489,7 +489,7 @@ def send(
 # --- Task 16: terminal review loop --------------------------------------------
 
 _SOURCE_PREVIEW_CHARS = 300
-_KEY_LEGEND = "[a]pprove [e]dit [r]eject [s]kip [q]uit"
+_KEY_LEGEND = "[a]pprove [e]dit [d]raft again [r]eject [s]kip [q]uit"
 _RULE = "-" * 72
 
 
@@ -626,7 +626,7 @@ def _review_loop(use_case, *, signature: str, clock, dry_run: bool, commit) -> d
     nothing. `--dry-run` renders every row and never reads a key."""
     from app.domain.states import IllegalTransition
 
-    counts = {"approved": 0, "edited": 0, "rejected": 0, "skipped": 0}
+    counts = {"approved": 0, "edited": 0, "redrafted": 0, "rejected": 0, "skipped": 0}
     items = use_case.pending()
     if not items:
         typer.echo("nothing pending approval")
@@ -652,6 +652,14 @@ def _review_loop(use_case, *, signature: str, clock, dry_run: bool, commit) -> d
                     counts["approved"] += 1
                     typer.echo("approved")
                     break
+                if key == "d":
+                    # Fix round 1 (T16-1): send it back for a fresh draft -
+                    # the only repair for a row flagged for its citation.
+                    use_case.redraft(item.outreach.id)
+                    commit()
+                    counts["redrafted"] += 1
+                    typer.echo("sent back to READY_TO_DRAFT; the next `draft` run replaces this draft")
+                    break
                 if key == "r":
                     use_case.reject(item.outreach.id)
                     commit()
@@ -676,9 +684,9 @@ def _review_loop(use_case, *, signature: str, clock, dry_run: bool, commit) -> d
                         typer.echo("edit aborted; nothing changed")
                         continue
                     subject, body = _split_edit(edited)
+                    pending_text = edited   # F8: re-offered whether edit returns errors or raises
                     errors = use_case.edit(item.outreach.id, subject, body)
                     if errors:
-                        pending_text = edited
                         typer.echo("edit rejected by the validator; nothing saved:", err=True)
                         for e in errors:
                             typer.echo(f"  - {e}", err=True)
@@ -706,15 +714,23 @@ def _summary(counts: dict[str, int]) -> str:
 def review(
     dry_run: bool = typer.Option(False, "--dry-run",
                                  help="Render every pending draft and exit without prompting."),
+    keep_unverified: bool = typer.Option(
+        False, "--keep-unverified",
+        help="Also offer claims whose source_span was not found in the resume (read them with "
+             "show-claims first). Pass it if the drafts were made with `draft --keep-unverified`, "
+             "so an edit is validated against the same claims.",
+    ),
 ) -> None:
     """Review each PENDING_APPROVAL draft in the terminal (Task 16, spec D5):
     the company, the founder, the cited research source and the message as
     it will be sent (greeting, body, signature, opt-out - ruling R2).
     [a]pprove stamps approved_at and makes the draft eligible for `send`;
     [e]dit opens $EDITOR on the subject and body, re-runs the validator and
-    keeps nothing that fails it; [r]eject discards the founder; [s]kip
-    leaves the row for next time; [q]uit stops. Each action is committed on
-    its own, so quitting mid-way loses nothing already decided."""
+    keeps nothing that fails it; [d]raft again sends the row back to
+    READY_TO_DRAFT for the next `draft` run (the fix for a draft flagged
+    for its citation); [r]eject discards the founder; [s]kip leaves the row
+    for next time; [q]uit stops. Each action is committed on its own, so
+    quitting mid-way loses nothing already decided."""
     settings = get_settings()
     from app.application.review_outreach import ReviewOutreach
 
@@ -722,7 +738,7 @@ def review(
         typer.echo("warning: SIGNATURE is not set - the preview below omits it, and `send` "
                    "will refuse until it is configured", err=True)
     with _session() as session:
-        use_case = ReviewOutreach(_review_repos(session))
+        use_case = ReviewOutreach(_review_repos(session), keep_unverified=keep_unverified)
         _review_loop(use_case, signature=settings.signature, clock=_UTCClock(),
                      dry_run=dry_run, commit=session.commit)
 

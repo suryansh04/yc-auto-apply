@@ -112,7 +112,7 @@ def test_screen_handles_a_flagged_row_with_no_draft_at_all(a_news_source):
 def test_screen_shows_the_counter_and_the_key_legend(a_pending_message, a_news_source):
     out = _screen(a_pending_message, a_news_source, index=2, total=7)
     assert "2 of 7" in out
-    assert "[a]pprove [e]dit [r]eject [s]kip [q]uit" in out
+    assert "[a]pprove [e]dit [d]raft again [r]eject [s]kip [q]uit" in out   # T16-1 legend
 
 
 def test_screen_greets_by_first_name_falling_back_to_there(a_pending_message, a_news_source):
@@ -383,3 +383,117 @@ def test_review_summary_counts_each_action(wired_review, repos, two_pending):
     wired_review.keys = ["a", "r"]
     result = runner.invoke(cli.app, ["review"])
     assert "approved 1" in result.output and "rejected 1" in result.output
+
+
+# --- Fix round 1 ---------------------------------------------------------------
+
+
+def test_review_draft_again_sends_the_row_back_and_commits(wired_review, repos, one_pending):
+    """T16-1: `[d]` is `PENDING_APPROVAL -> READY_TO_DRAFT` and nothing else -
+    the row, its citation and its approval stay exactly as they were for
+    `DraftOutreach._finish` to replace in place on the next `draft` run."""
+    wired_review.keys = ["d"]
+    before = repos.message.get_outbound(one_pending.id, 0)
+    snapshot = (before.id, before.subject, before.body, before.research_source_type,
+                before.research_source_id, before.approved_at, before.edited_by_user)
+    result = runner.invoke(cli.app, ["review"])
+    assert result.exit_code == 0, result.output
+    assert repos.outreach.get(one_pending.id).state == S.READY_TO_DRAFT
+    after = repos.message.get_outbound(one_pending.id, 0)
+    assert after is before and (after.id, after.subject, after.body, after.research_source_type,
+                                after.research_source_id, after.approved_at, after.edited_by_user) == snapshot
+    assert repos.session.commit_calls == 1
+    assert "redrafted 1" in result.output and "READY_TO_DRAFT" in result.output
+
+
+def test_review_draft_again_works_for_a_row_flagged_for_its_citation(wired_review, repos, manual_write_pending):
+    wired_review.keys = ["d"]
+    result = runner.invoke(cli.app, ["review"])
+    assert result.exit_code == 0, result.output
+    o = repos.outreach.get(manual_write_pending.id)
+    assert o.state == S.READY_TO_DRAFT
+    assert o.last_error == "contains a banned phrase: 'i hope this email finds you well'"  # cleared by the redraft, not here
+
+
+def test_review_draft_again_is_in_the_legend_of_the_rendered_screen(wired_review, repos, one_pending):
+    wired_review.keys = ["s"]
+    result = runner.invoke(cli.app, ["review"])
+    assert "[d]raft again" in result.output
+
+
+UNVERIFIED_BODY = PENDING_BODY.replace("I built a scheduler in Python.", "I wrote the ingest layer in Rust.")
+
+
+def _mark_every_claim_unverified(repos):
+    profile = repos.resume_profile.profile
+    profile.claims = [{**c, "span_verified": False} for c in profile.claims]   # fresh dicts, no shared state
+
+
+def _add_unverified_rust_claim(repos):
+    repos.resume_profile.profile.claims.append(
+        {"kind": "skill", "text": "wrote an ingest layer in Rust", "source_span": "not in the resume",
+         "span_verified": False},
+    )
+
+
+def test_review_edit_citing_an_unverified_claim_is_rejected_without_keep_unverified(
+    wired_review, repos, one_pending,
+):
+    """F1 / T16-3: mirrors `draft --keep-unverified` (R3) so an edit is held
+    to the same claim set the drafter was."""
+    _add_unverified_rust_claim(repos)
+    wired_review.editor = staticmethod(lambda text: f"{PENDING_SUBJECT}\n\n{UNVERIFIED_BODY}")
+    wired_review.keys = ["e", "s"]
+    result = runner.invoke(cli.app, ["review"])
+    assert result.exit_code == 0, result.output
+    assert "no resume claim" in result.output and "Rust" in result.output
+    assert repos.message.get_outbound(one_pending.id, 0).body == PENDING_BODY
+    assert repos.session.commit_calls == 0
+
+
+def test_review_edit_citing_an_unverified_claim_is_accepted_with_keep_unverified(
+    wired_review, repos, one_pending,
+):
+    _add_unverified_rust_claim(repos)
+    wired_review.editor = staticmethod(lambda text: f"{PENDING_SUBJECT}\n\n{UNVERIFIED_BODY}")
+    wired_review.keys = ["e", "s"]
+    result = runner.invoke(cli.app, ["review", "--keep-unverified"])
+    assert result.exit_code == 0, result.output
+    assert "no resume claim" not in result.output
+    row = repos.message.get_outbound(one_pending.id, 0)
+    assert row.body == UNVERIFIED_BODY and row.edited_by_user
+    assert repos.session.commit_calls == 1
+
+
+def test_review_edit_is_possible_at_all_when_every_claim_is_unverified_only_with_the_flag(
+    wired_review, repos, one_pending,
+):
+    """The reviewer's reproduction (a): resume with only unverified claims,
+    drafted under `--keep-unverified`; without the flag every edit raises
+    the 'run with --keep-unverified' error and nothing can be edited."""
+    _mark_every_claim_unverified(repos)
+    wired_review.editor = staticmethod(lambda text: f"{PENDING_SUBJECT}\n\n{PENDING_BODY}")
+    wired_review.keys = ["e", "s"]
+    result = runner.invoke(cli.app, ["review"])
+    assert "--keep-unverified" in result.output
+    assert repos.message.get_outbound(one_pending.id, 0).edited_by_user is False
+
+    wired_review.keys = ["e", "s"]
+    result = runner.invoke(cli.app, ["review", "--keep-unverified"])
+    assert result.exit_code == 0, result.output
+    assert repos.message.get_outbound(one_pending.id, 0).edited_by_user is True
+
+
+def test_review_after_an_edit_that_raises_the_editor_reopens_on_the_typed_text(
+    wired_review, repos, one_pending,
+):
+    """F8: `use_case.edit` *raising* (not returning errors) used to drop the
+    operator's text - the next `[e]` reopened on the pre-edit draft."""
+    _mark_every_claim_unverified(repos)                # makes `edit` raise ValueError
+    typed = f"{PENDING_SUBJECT}\n\nMy carefully typed text."
+    wired_review.editor = staticmethod(lambda text: typed)
+    wired_review.keys = ["e", "e", "s"]
+    result = runner.invoke(cli.app, ["review"])
+    assert result.exit_code == 0, result.output
+    assert wired_review.editor_calls == [f"{PENDING_SUBJECT}\n\n{PENDING_BODY}", typed]
+    assert repos.session.commit_calls == 0

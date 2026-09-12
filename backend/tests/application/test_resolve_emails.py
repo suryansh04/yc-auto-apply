@@ -236,3 +236,37 @@ def test_attribution_requires_proximity_to_the_address_not_just_presence_in_the_
     ResolveEmails(FakeVerifier({}), repos).run()
 
     assert repos.outreach.get(18).resolved_email is None  # "Priya" is far outside the window
+
+
+# --- Task 16 (offline e2e surfaced it): `ScrapeCompanyPage` creates every
+# new founder's outreach row in `NEW` (spec §8 stage 2), but nothing moved
+# it to `NEEDS_EMAIL`, so `sync -> scrape -> resolve` resolved nobody.
+# `run` now picks `NEW` rows up too, stepping them `NEW -> NEEDS_EMAIL`
+# through the state machine before attempting resolution.
+
+def test_a_new_founder_is_picked_up_and_resolved(repos, a_founder):
+    repos.outreach.get(a_founder.id).state = str(S.NEW)
+    v = FakeVerifier({"pratish@onefin.com": "valid"})
+    result = ResolveEmails(v, repos).run()
+    assert result.resolved == 1
+    o = repos.outreach.get(a_founder.id)
+    assert o.state == S.READY_TO_DRAFT and o.resolved_email == "pratish@onefin.com"
+
+
+def test_a_new_founder_paused_by_quota_is_left_needs_email_not_new(repos, a_founder):
+    """The NEW -> NEEDS_EMAIL step happens before the first verification,
+    so a quota pause leaves the row resumable in NEEDS_EMAIL."""
+    repos.outreach.get(a_founder.id).state = str(S.NEW)
+    result = ResolveEmails(FakeVerifier({}, quota=0), repos).run()
+    assert result.paused_on_quota is True
+    assert repos.outreach.get(a_founder.id).state == S.NEEDS_EMAIL
+
+
+def test_needs_email_rows_are_processed_before_new_ones(repos, two_founders):
+    f1, f2 = two_founders
+    repos.outreach.get(f1.id).state = str(S.NEW)          # f1 NEW, f2 NEEDS_EMAIL
+    v = FakeVerifier({"asha@one.com": "valid", "vikram@two.com": "valid"})
+    result = ResolveEmails(v, repos).run(limit=1)
+    assert result.resolved == 1
+    assert repos.outreach.get(f2.id).state == S.READY_TO_DRAFT
+    assert repos.outreach.get(f1.id).state == S.NEW

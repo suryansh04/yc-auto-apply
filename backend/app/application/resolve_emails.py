@@ -8,6 +8,10 @@ module never imports `app.adapters`. The CLI wires the real
 
 Ordering (spec §9) is load-bearing and each step exists for a reason:
 
+0. **`NEW` rows are picked up too (Task 16).** `ScrapeCompanyPage` creates
+   every new founder in `NEW`; this stage is the first attempt on them, so
+   it steps each `NEW -> NEEDS_EMAIL` (state machine) before resolving.
+   Rows already in `NEEDS_EMAIL` are processed first, then `NEW` ones.
 1. **Published email first (D18).** If a founder's company has a launch
    post with a `published_email`, use it directly — verdict `published`,
    zero API calls. A launch is written by one person, so attributing its
@@ -143,7 +147,15 @@ class ResolveEmails:
 
     def run(self, limit: int | None = None) -> ResolveResult:
         result = ResolveResult()
-        founders = self._repos.founder.list_by_state(state=OutreachState.NEEDS_EMAIL)
+        # Task 16 (the offline end-to-end run surfaced it): `ScrapeCompanyPage`
+        # creates each new founder's outreach row in `NEW` (spec §8 stage 2)
+        # and nothing else performed `NEW -> NEEDS_EMAIL`, so this stage
+        # never saw a freshly scraped founder. `NEW` means "nothing
+        # attempted"; this is the first attempt, so it steps the row into
+        # `NEEDS_EMAIL` (through the state machine) before resolving.
+        # Rows already in `NEEDS_EMAIL` (paused/errored earlier) go first.
+        founders = (self._repos.founder.list_by_state(state=OutreachState.NEEDS_EMAIL)
+                    + self._repos.founder.list_by_state(state=OutreachState.NEW))
         if limit is not None:
             founders = founders[:limit]
 
@@ -151,6 +163,8 @@ class ResolveEmails:
             outreach = self._repos.outreach.get_by_founder_id(founder.id)
             if outreach is None:
                 continue
+            if OutreachState(outreach.state) is OutreachState.NEW:
+                self._transition(outreach, OutreachState.NEEDS_EMAIL)
 
             published = self._attributable_published_email(founder)
             if published is not None:

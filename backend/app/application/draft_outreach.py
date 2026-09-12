@@ -242,26 +242,7 @@ class DraftOutreach:
     # -- helpers ---------------------------------------------------------------
 
     def _load_claims(self) -> list[ResumeClaim]:
-        profile = self._repos.resume_profile.get_current()
-        raw_claims = list(getattr(profile, "claims", None) or []) if profile else []
-        if not raw_claims:
-            raise ValueError("no resume profile with claims — run `parse-resume PATH` first")
-        claims = [
-            ResumeClaim(
-                kind=str(c.get("kind", "")), text=str(c.get("text", "")),
-                source_span=str(c.get("source_span", "")),
-                span_verified=bool(c.get("span_verified", True)),
-            )
-            for c in raw_claims
-        ]
-        if not self._keep_unverified:
-            claims = [c for c in claims if c.span_verified]
-        if not claims:
-            raise ValueError(
-                "every resume claim has an unverified source_span; read them with "
-                "`show-claims` and re-run with --keep-unverified to use them anyway"
-            )
-        return claims
+        return load_resume_claims(self._repos.resume_profile, keep_unverified=self._keep_unverified)
 
     def _previous_body(self, outreach, step: int) -> str | None:
         if step <= 0:
@@ -270,35 +251,7 @@ class DraftOutreach:
         return getattr(previous, "body", None) if previous is not None else None
 
     def _build_sources(self, company) -> _Sources:
-        s = _Sources()
-
-        for n in self._repos.news.list_by_company_id(company.id):
-            publication = getattr(n, "source", None)
-            s.offered.append({"kind": "news", "id": n.id, "text": n.title, "publication": publication})
-            s.resolvable[("news", n.id)] = SourceRow("news", n.title, publication, None)
-
-        for l in self._repos.launch.list_by_company_id(company.id):
-            text = _launch_text(l)
-            s.offered.append({"kind": "launch", "id": l.id, "text": text})
-            s.resolvable[("launch", l.id)] = SourceRow("launch", text, None, None)
-
-        for p in self._repos.job_posting.list_by_company_id(company.id):
-            ok = is_intern_appropriate(
-                getattr(p, "employment_type", None), p.title, getattr(p, "min_experience", None),
-            )
-            text = _posting_text(p)
-            # Always resolvable (so a draft citing an excluded posting gets
-            # the precise D23 error), but only *offered* when appropriate.
-            s.resolvable[("job_posting", p.id)] = SourceRow("job_posting", text, None, ok)
-            if ok:
-                s.offered.append({"kind": "job_posting", "id": p.id, "text": text})
-
-        desc = getattr(company, "long_description", None) or ""
-        if len(desc) >= _MIN_LONG_DESCRIPTION_CHARS:
-            s.offered.append({"kind": "long_description", "id": company.id, "text": desc})
-            s.resolvable[("long_description", company.id)] = SourceRow("long_description", desc, None, None)
-
-        return s
+        return build_sources(self._repos.news, self._repos.launch, self._repos.job_posting, company)
 
     def _finish(self, outreach, step: int, draft: Draft | None, errors: list[str]) -> None:
         # The transition is checked BEFORE anything is written, so an
@@ -325,6 +278,68 @@ class DraftOutreach:
             state=str(OutreachState.PENDING_APPROVAL),
             last_error="; ".join(errors) if errors else None,
         )
+
+
+def load_resume_claims(resume_profile_repo, keep_unverified: bool = False) -> list[ResumeClaim]:
+    """The resume claims a draft may cite, or a `ValueError` naming the fix.
+    Module-level (Task 16) so `ReviewOutreach.edit` holds a human-written
+    body to exactly the claims the drafter was held to."""
+    profile = resume_profile_repo.get_current()
+    raw_claims = list(getattr(profile, "claims", None) or []) if profile else []
+    if not raw_claims:
+        raise ValueError("no resume profile with claims — run `parse-resume PATH` first")
+    claims = [
+        ResumeClaim(
+            kind=str(c.get("kind", "")), text=str(c.get("text", "")),
+            source_span=str(c.get("source_span", "")),
+            span_verified=bool(c.get("span_verified", True)),
+        )
+        for c in raw_claims
+    ]
+    if not keep_unverified:
+        claims = [c for c in claims if c.span_verified]
+    if not claims:
+        raise ValueError(
+            "every resume claim has an unverified source_span; read them with "
+            "`show-claims` and re-run with --keep-unverified to use them anyway"
+        )
+    return claims
+
+
+def build_sources(news_repo, launch_repo, job_posting_repo, company) -> _Sources:
+    """Every research row for `company` as the drafter sees it (`offered`,
+    priority order, D17/D23) and as grounding resolves it (`resolvable`,
+    including excluded postings). Module-level (Task 16) so the review
+    screen resolves a draft's citation exactly as the validator did."""
+    s = _Sources()
+
+    for n in news_repo.list_by_company_id(company.id):
+        publication = getattr(n, "source", None)
+        s.offered.append({"kind": "news", "id": n.id, "text": n.title, "publication": publication})
+        s.resolvable[("news", n.id)] = SourceRow("news", n.title, publication, None)
+
+    for l in launch_repo.list_by_company_id(company.id):
+        text = _launch_text(l)
+        s.offered.append({"kind": "launch", "id": l.id, "text": text})
+        s.resolvable[("launch", l.id)] = SourceRow("launch", text, None, None)
+
+    for p in job_posting_repo.list_by_company_id(company.id):
+        ok = is_intern_appropriate(
+            getattr(p, "employment_type", None), p.title, getattr(p, "min_experience", None),
+        )
+        text = _posting_text(p)
+        # Always resolvable (so a draft citing an excluded posting gets
+        # the precise D23 error), but only *offered* when appropriate.
+        s.resolvable[("job_posting", p.id)] = SourceRow("job_posting", text, None, ok)
+        if ok:
+            s.offered.append({"kind": "job_posting", "id": p.id, "text": text})
+
+    desc = getattr(company, "long_description", None) or ""
+    if len(desc) >= _MIN_LONG_DESCRIPTION_CHARS:
+        s.offered.append({"kind": "long_description", "id": company.id, "text": desc})
+        s.resolvable[("long_description", company.id)] = SourceRow("long_description", desc, None, None)
+
+    return s
 
 
 def _to_draft(raw: dict, step: int) -> Draft:

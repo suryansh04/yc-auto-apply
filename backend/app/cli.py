@@ -97,8 +97,9 @@ def scrape() -> None:
 def resolve(
     limit: Optional[int] = typer.Option(None, "--limit", help="Max founders to resolve this run.")
 ) -> None:
-    """Resolve each NEEDS_EMAIL founder's email address (Task 12, spec §9,
-    D18/D30). Published-email short circuit first, then candidate
+    """Resolve each NEW / NEEDS_EMAIL founder's email address (Task 12, spec
+    §9, D18/D30; NEW rows from `scrape` are stepped to NEEDS_EMAIL first -
+    Task 16). Published-email short circuit first, then candidate
     verification in priority order with early exit on the first `valid`.
     Stops the whole run (without failing anything) the moment the verifier
     signals its quota is exhausted — the free tier renews daily, so a
@@ -483,6 +484,247 @@ def send(
             "outreach state to 'sent' by hand, otherwise clear sent_at to let it send.",
             err=True,
         )
+
+
+# --- Task 16: terminal review loop --------------------------------------------
+
+_SOURCE_PREVIEW_CHARS = 300
+_KEY_LEGEND = "[a]pprove [e]dit [r]eject [s]kip [q]uit"
+_RULE = "-" * 72
+
+
+def render_review_screen(
+    message, source, *, company=None, founder=None, signature: str = "", wire_text: str | None = None,
+    index: int | None = None, total: int | None = None, to: str | None = None,
+    last_error: str | None = None,
+) -> str:
+    """Pure: one draft as the reviewer sees it (spec §16 review queue, D5).
+
+    Shows the company and founder, the CITED SOURCE beside the draft so a
+    claim can be checked at a glance instead of by re-researching the
+    company, and - ruling R2 - the composed wire text (`compose_wire_text`:
+    greeting + body + signature + opt-out), never the bare stored body, so
+    what the human approves is byte-for-byte what `send` will put on the
+    wire. `wire_text` may be passed pre-composed; otherwise it is composed
+    here from `message.body`, `founder.full_name` and `signature`.
+    `message` may be `None` for a row flagged needs-manual-write that was
+    never drafted; `source` accepts either a resolved `SourceRow` (`kind`,
+    `text`) or a raw research row (`title`/`body`)."""
+    from app.domain.compose import compose_wire_text, first_name
+
+    counter = f"Draft {index} of {total}" if index is not None and total is not None else "Draft"
+    lines = [f"==== {counter} ===="]
+
+    if company is not None:
+        one_liner = getattr(company, "one_liner", None)
+        lines.append(f"Company: {getattr(company, 'name', '') or ''}"
+                     + (f" - {one_liner}" if one_liner else ""))
+    if founder is not None:
+        title = getattr(founder, "title", None)
+        lines.append(f"Founder: {getattr(founder, 'full_name', '') or ''}"
+                     + (f" ({title})" if title else ""))
+    if to:
+        lines.append(f"To: {to}")
+
+    kind = (getattr(source, "kind", None)
+            or (getattr(message, "research_source_type", None) if message is not None else None))
+    text = _source_text(source)
+    if source is None or not text:
+        lines.append("SOURCE: (none cited)")
+    else:
+        if len(text) > _SOURCE_PREVIEW_CHARS:
+            text = text[:_SOURCE_PREVIEW_CHARS] + "..."
+        lines.append(f"SOURCE [{kind or '?'}]: {text}")
+
+    lines.append(_RULE)
+    if message is None:
+        lines.append("(no draft yet - press [e] to write one)")
+        body = ""
+    else:
+        body = getattr(message, "body", "") or ""
+        lines.append(f"Subject: {getattr(message, 'subject', '') or ''}")
+        lines.append("--- as it will be sent ---")
+        if wire_text is None:
+            greeting_name = first_name(getattr(founder, "full_name", None) if founder is not None else None)
+            wire_text = compose_wire_text(greeting_name, body, signature)
+        lines.append(wire_text)
+    lines.append(_RULE)
+    lines.append(f"{len(body.split())} words in the body")
+    if last_error:
+        lines.append(f"NEEDS MANUAL WRITE: {last_error}")
+    lines.append(_KEY_LEGEND)
+    return "\n".join(lines) + "\n"
+
+
+def _source_text(source) -> str:
+    if source is None:
+        return ""
+    for attr in ("title", "text", "body"):
+        value = getattr(source, attr, None)
+        if value:
+            return " ".join(str(value).split())
+    return ""
+
+
+def _editor_text(subject: str | None, body: str | None) -> str:
+    return f"{subject or ''}\n\n{body or ''}"
+
+
+def _split_edit(text: str) -> tuple[str, str]:
+    """Inverse of `_editor_text`: first line is the subject, the rest (after
+    an optional blank line) is the body; both stripped."""
+    lines = text.splitlines()
+    if not lines:
+        return "", ""
+    return lines[0].strip(), "\n".join(lines[1:]).strip()
+
+
+def _read_key() -> str:
+    """One keypress, no Enter needed. Monkeypatched in tests."""
+    import click
+
+    return click.getchar()
+
+
+def _edit_text(text: str) -> str | None:
+    """Open `$EDITOR` on `text`; `None` when the editor was closed without
+    saving a change (click's contract). Monkeypatched in tests."""
+    import click
+
+    return click.edit(text, extension=".txt")
+
+
+def _review_repos(session):
+    from app.adapters.db.repositories import (
+        CompanyLaunchRepo,
+        CompanyNewsRepo,
+        CompanyRepo,
+        FounderRepo,
+        JobPostingRepo,
+        MessageRepo,
+        OutreachRepo,
+        ResumeProfileRepo,
+    )
+    from app.application.review_outreach import ReviewRepos
+
+    return ReviewRepos(
+        founder=FounderRepo(session),
+        company=CompanyRepo(session),
+        outreach=OutreachRepo(session),
+        message=MessageRepo(session),
+        news=CompanyNewsRepo(session),
+        launch=CompanyLaunchRepo(session),
+        job_posting=JobPostingRepo(session),
+        resume_profile=ResumeProfileRepo(session),
+    )
+
+
+def _review_loop(use_case, *, signature: str, clock, dry_run: bool, commit) -> dict[str, int]:
+    """The interactive loop over `use_case.pending()`. Every action goes
+    through the use case and is committed right after it succeeds; skip,
+    quit, a refused approve, an aborted editor and a failed edit commit
+    nothing. `--dry-run` renders every row and never reads a key."""
+    from app.domain.states import IllegalTransition
+
+    counts = {"approved": 0, "edited": 0, "rejected": 0, "skipped": 0}
+    items = use_case.pending()
+    if not items:
+        typer.echo("nothing pending approval")
+        return counts
+    total = len(items)
+
+    for index, item in enumerate(items, 1):
+        pending_text: str | None = None  # a rejected edit, re-offered in the editor
+        while True:
+            typer.echo(render_review_screen(
+                item.message, item.source, company=item.company, founder=item.founder,
+                signature=signature, index=index, total=total,
+                to=getattr(item.outreach, "resolved_email", None),
+                last_error=getattr(item.outreach, "last_error", None),
+            ))
+            if dry_run:
+                break
+            key = _read_key().lower()
+            try:
+                if key == "a":
+                    use_case.approve(item.outreach.id, clock.now())
+                    commit()
+                    counts["approved"] += 1
+                    typer.echo("approved")
+                    break
+                if key == "r":
+                    use_case.reject(item.outreach.id)
+                    commit()
+                    counts["rejected"] += 1
+                    typer.echo("rejected (discarded)")
+                    break
+                if key == "s":
+                    use_case.skip(item.outreach.id)
+                    counts["skipped"] += 1
+                    break
+                if key == "q":
+                    typer.echo(_summary(counts))
+                    return counts
+                if key == "e":
+                    if pending_text is None:
+                        pending_text = _editor_text(
+                            getattr(item.message, "subject", None) if item.message is not None else None,
+                            getattr(item.message, "body", None) if item.message is not None else None,
+                        )
+                    edited = _edit_text(pending_text)
+                    if edited is None:
+                        typer.echo("edit aborted; nothing changed")
+                        continue
+                    subject, body = _split_edit(edited)
+                    errors = use_case.edit(item.outreach.id, subject, body)
+                    if errors:
+                        pending_text = edited
+                        typer.echo("edit rejected by the validator; nothing saved:", err=True)
+                        for e in errors:
+                            typer.echo(f"  - {e}", err=True)
+                        continue
+                    commit()
+                    counts["edited"] += 1
+                    pending_text = None
+                    item = use_case.load(item.outreach.id)
+                    typer.echo("saved; preview re-composed from the edited body")
+                    continue
+                typer.echo(f"unknown key {key!r}: {_KEY_LEGEND}", err=True)
+            except (ValueError, IllegalTransition) as exc:
+                typer.echo(str(exc), err=True)
+                continue
+
+    typer.echo(_summary(counts))
+    return counts
+
+
+def _summary(counts: dict[str, int]) -> str:
+    return ", ".join(f"{k} {v}" for k, v in counts.items())
+
+
+@app.command()
+def review(
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Render every pending draft and exit without prompting."),
+) -> None:
+    """Review each PENDING_APPROVAL draft in the terminal (Task 16, spec D5):
+    the company, the founder, the cited research source and the message as
+    it will be sent (greeting, body, signature, opt-out - ruling R2).
+    [a]pprove stamps approved_at and makes the draft eligible for `send`;
+    [e]dit opens $EDITOR on the subject and body, re-runs the validator and
+    keeps nothing that fails it; [r]eject discards the founder; [s]kip
+    leaves the row for next time; [q]uit stops. Each action is committed on
+    its own, so quitting mid-way loses nothing already decided."""
+    settings = get_settings()
+    from app.application.review_outreach import ReviewOutreach
+
+    if not settings.signature.strip():
+        typer.echo("warning: SIGNATURE is not set - the preview below omits it, and `send` "
+                   "will refuse until it is configured", err=True)
+    with _session() as session:
+        use_case = ReviewOutreach(_review_repos(session))
+        _review_loop(use_case, signature=settings.signature, clock=_UTCClock(),
+                     dry_run=dry_run, commit=session.commit)
 
 
 if __name__ == "__main__":

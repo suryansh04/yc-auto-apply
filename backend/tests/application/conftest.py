@@ -45,6 +45,15 @@ class FakeCompanyRow:
     name: str = ""
     one_liner: str | None = None
     long_description: str | None = None
+    # Task 16 (offline e2e): the columns `SyncCompanies.run` writes and
+    # `cli.scrape` / `ScrapeCompanyPage` read.
+    yc_id: int | None = None
+    slug: str = ""
+    website: str | None = None
+    batch: str | None = None
+    team_size: int | None = None
+    status: str | None = None
+    is_hiring: bool = False
 
 
 class FakeCompanyRepo:
@@ -60,6 +69,20 @@ class FakeCompanyRepo:
 
     def get(self, id: int) -> FakeCompanyRow | None:
         return self.rows.get(id)
+
+    def upsert(self, **fields) -> FakeCompanyRow:
+        """Task 16: mirrors `CompanyRepo.upsert` (keyed on `yc_id`)."""
+        existing = next((r for r in self.rows.values() if r.yc_id == fields["yc_id"]), None)
+        if existing is None:
+            existing = FakeCompanyRow(id=len(self.rows) + 1, **fields)
+            self.rows[existing.id] = existing
+        else:
+            for k, v in fields.items():
+                setattr(existing, k, v)
+        return existing
+
+    def list_by_status(self, status: str) -> list[FakeCompanyRow]:
+        return [r for r in self.rows.values() if r.status == status]
 
 
 @dataclass
@@ -81,6 +104,17 @@ class FakeLaunchRepo:
                             id=id if id is not None else len(self.rows) + 1, title=title)
         self.rows.append(row)
         return row
+
+    def upsert(self, **fields) -> FakeLaunchRow:
+        """Task 16: mirrors `CompanyLaunchRepo.upsert` (keyed on `(company_id, title)`)."""
+        existing = next((r for r in self.rows if r.company_id == fields["company_id"]
+                         and r.title == fields.get("title")), None)
+        if existing is None:
+            return self.add(**{k: (v if v is not None else "") if k in ("body", "title") else v
+                               for k, v in fields.items()})
+        for k, v in fields.items():
+            setattr(existing, k, v)
+        return existing
 
     def list_by_company_id(self, company_id: int) -> list[FakeLaunchRow]:
         return [r for r in self.rows if r.company_id == company_id]
@@ -140,6 +174,8 @@ class FakeFounderRow:
     linkedin_url: str | None = None
     title: str | None = None
     bio: str | None = None
+    yc_user_id: int | None = None   # Task 16 (offline e2e): what `ScrapeCompanyPage` keys on
+    twitter_url: str | None = None
 
 
 class FakeFounderRepo:
@@ -160,6 +196,20 @@ class FakeFounderRepo:
 
     def get(self, id: int) -> FakeFounderRow | None:
         return self.rows.get(id)
+
+    def upsert(self, **fields) -> FakeFounderRow:
+        """Task 16: mirrors `FounderRepo.upsert` (keyed on `yc_user_id`)."""
+        existing = self.get_by_yc_user_id(fields["yc_user_id"])
+        if existing is None:
+            existing = FakeFounderRow(id=len(self.rows) + 1, **fields)
+            self.rows[existing.id] = existing
+        else:
+            for k, v in fields.items():
+                setattr(existing, k, v)
+        return existing
+
+    def get_by_yc_user_id(self, yc_user_id: int) -> FakeFounderRow | None:
+        return next((r for r in self.rows.values() if r.yc_user_id == yc_user_id), None)
 
     def list_by_state(self, state) -> list[FakeFounderRow]:
         out = []
@@ -212,6 +262,8 @@ class FakeNewsRow:
     company_id: int
     title: str
     source: str | None = None
+    url: str | None = None          # Task 16 (offline e2e): the real repo's upsert key
+    published_at: object = None
 
 
 class FakeNewsRepo:
@@ -222,6 +274,18 @@ class FakeNewsRepo:
         row = FakeNewsRow(id=id, company_id=company_id, title=title, source=source)
         self.rows.append(row)
         return row
+
+    def upsert(self, **fields) -> FakeNewsRow:
+        """Task 16: mirrors `CompanyNewsRepo.upsert` (keyed on `(company_id, url)`)."""
+        existing = next((r for r in self.rows if r.company_id == fields["company_id"]
+                         and r.url == fields.get("url")), None)
+        if existing is None:
+            existing = FakeNewsRow(id=len(self.rows) + 1, **fields)
+            self.rows.append(existing)
+        else:
+            for k, v in fields.items():
+                setattr(existing, k, v)
+        return existing
 
     def list_by_company_id(self, company_id: int) -> list[FakeNewsRow]:
         return [r for r in self.rows if r.company_id == company_id]
@@ -234,6 +298,8 @@ class FakeJobPostingRow:
     title: str
     employment_type: str | None = None
     min_experience: str | None = None
+    location: str | None = None     # Task 16 (offline e2e)
+    url: str | None = None
 
 
 class FakeJobPostingRepo:
@@ -246,6 +312,18 @@ class FakeJobPostingRepo:
                                 employment_type=employment_type, min_experience=min_experience)
         self.rows.append(row)
         return row
+
+    def upsert(self, **fields) -> FakeJobPostingRow:
+        """Task 16: mirrors `JobPostingRepo.upsert` (keyed on `(company_id, url)`)."""
+        existing = next((r for r in self.rows if r.company_id == fields["company_id"]
+                         and r.url == fields.get("url")), None)
+        if existing is None:
+            existing = FakeJobPostingRow(id=len(self.rows) + 1, **fields)
+            self.rows.append(existing)
+        else:
+            for k, v in fields.items():
+                setattr(existing, k, v)
+        return existing
 
     def list_by_company_id(self, company_id: int) -> list[FakeJobPostingRow]:
         return [r for r in self.rows if r.company_id == company_id]
@@ -371,7 +449,9 @@ class FakeSession:
 @dataclass
 class FakeRepos:
     """Structural superset of `ResolveRepos` (Task 12), `DraftRepos`
-    (Task 14) and `SendRepos` (Task 15) — see the module docstring."""
+    (Task 14), `SendRepos` (Task 15), `ReviewRepos` (Task 16) and — since
+    the Task 16 offline end-to-end test — the `SyncCompanies` company repo
+    and `ScrapeRepos` too; see the module docstring."""
     founder: FakeFounderRepo
     company: FakeCompanyRepo
     launch: FakeLaunchRepo
@@ -568,3 +648,79 @@ def sent_earlier(repos: FakeRepos):
             row.gmail_message_id = f"earlier-{id}"
             row.gmail_thread_id = f"earlier-thread-{id}"
     return _add
+
+
+# --- Task 16 fixtures ---------------------------------------------------------
+
+PENDING_SUBJECT = "Backend intern at Vahan"
+# The task-14 tests' GOOD body: validates against `VAHAN_NEWS` + the one
+# resume claim above, so an edit that keeps it (or changes one word) passes
+# `validate_draft` and an edit that breaks a rule fails it.
+PENDING_BODY = (
+    "You're matching blue-collar workers to jobs over voice at Vahan. "
+    "That routing problem is what I keep thinking about.\n\n"
+    "I built a scheduler in Python.\n\n"
+    "Would you take an intern?"
+)
+MANUAL_WRITE_ERROR = "contains a banned phrase: 'i hope this email finds you well'"
+
+
+def _add_pending_founder(repos: FakeRepos, id: int, full_name: str, email: str, *,
+                         body: str = PENDING_BODY, last_error: str | None = None,
+                         with_row: bool = True) -> FakeFounderRow:
+    """One founder at a Vahan-shaped company (name "Vahan" so `PENDING_BODY`
+    names it; its one news row's id == the company id), `PENDING_APPROVAL`
+    with a resolved address and, unless `with_row=False`, the step-0
+    outbound draft row citing that news item. Outreach id == founder id ==
+    company id == news id (see the module docstring)."""
+    repos.company.add(id=id, domain=f"vahan{id}.ai", name="Vahan",
+                      one_liner="Recruitment over voice", long_description=VAHAN_DESCRIPTION)
+    founder = repos.founder.add(id=id, company_id=id, full_name=full_name, title="Founder")
+    outreach = repos.outreach.add(id=id, founder_id=founder.id,
+                                  state=str(OutreachState.PENDING_APPROVAL))
+    outreach.resolved_email = email
+    outreach.last_error = last_error
+    repos.news.add(id=id, company_id=id, title=VAHAN_NEWS, source="The Economic Times")
+    if with_row:
+        repos.message.upsert(
+            outreach_id=outreach.id, sequence_step=0, direction="outbound",
+            subject=PENDING_SUBJECT, body=body,
+            research_source_type="news", research_source_id=id,
+        )
+    return founder
+
+
+@pytest.fixture
+def one_pending(repos: FakeRepos) -> FakeFounderRow:
+    """Madhav, `PENDING_APPROVAL`, a validating draft, no `last_error`."""
+    return _add_pending_founder(repos, 30, "Madhav Krishna", "madhav@example.com")
+
+
+@pytest.fixture
+def two_pending(repos: FakeRepos) -> tuple[FakeFounderRow, FakeFounderRow]:
+    return (_add_pending_founder(repos, 31, "Madhav Krishna", "madhav@example.com"),
+            _add_pending_founder(repos, 32, "Asha Rao", "asha@example.com"))
+
+
+@pytest.fixture
+def manual_write_pending(repos: FakeRepos) -> FakeFounderRow:
+    """Riya: the drafter failed validation twice, so the rejected draft is
+    stored and `last_error` carries the reasons (needs manual write)."""
+    return _add_pending_founder(
+        repos, 33, "Riya Nair", "riya@example.com",
+        body="I hope this email finds you well. Would you take an intern?",
+        last_error=MANUAL_WRITE_ERROR,
+    )
+
+
+@pytest.fixture
+def no_material_pending(repos: FakeRepos) -> FakeFounderRow:
+    """Vikram: no research material at all, so `DraftOutreach` never
+    called the drafter and wrote NO message row - only the flag."""
+    founder = _add_pending_founder(
+        repos, 34, "Vikram Shah", "vikram@example.com", with_row=False,
+        last_error="needs manual write: no research material",
+    )
+    repos.news.rows = [n for n in repos.news.rows if n.company_id != 34]
+    repos.company.get(34).long_description = "Too short."
+    return founder

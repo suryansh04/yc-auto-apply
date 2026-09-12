@@ -1,0 +1,278 @@
+"""Task 16: `ReviewOutreach` - approve / edit / reject / skip over
+`PENDING_APPROVAL` rows (spec D5, §6 state machine, §13 "approval cannot be
+bypassed", ruling R2).
+
+Every state change goes through `assert_transition`; `approve` stamps
+`approved_at` on the step's outbound row (the DB CHECK `sent_requires_
+approved` and `reserve_for_send`'s `approved_at IS NOT NULL` both key off
+it); `edit` re-runs `validate_draft` and persists nothing on failure; a row
+flagged needs-manual-write cannot be approved until it has been edited.
+"""
+
+from datetime import datetime, timezone
+
+import pytest
+
+from app.application.review_outreach import ReviewOutreach
+from app.domain.states import IllegalTransition
+from app.domain.states import OutreachState as S
+from tests.application.conftest import (
+    MANUAL_WRITE_ERROR,
+    PENDING_BODY,
+    PENDING_SUBJECT,
+    VAHAN_NEWS,
+    _add_pending_founder,
+)
+
+NOW = datetime(2026, 9, 12, 10, 30, tzinfo=timezone.utc)
+
+
+# --- listing -----------------------------------------------------------------
+
+
+def test_pending_lists_only_pending_approval_rows_with_their_context(repos, one_pending, one_approved):
+    items = ReviewOutreach(repos).pending()
+    assert [i.founder.id for i in items] == [one_pending.id]
+    item = items[0]
+    assert item.outreach.state == S.PENDING_APPROVAL
+    assert item.company.name == "Vahan"
+    assert item.message.body == PENDING_BODY
+    assert item.source is not None
+    assert item.source.kind == "news" and item.source.text == VAHAN_NEWS
+    assert item.source.publication == "The Economic Times"
+
+
+def test_pending_item_for_a_row_without_a_draft_has_no_message_and_no_source(repos, no_material_pending):
+    (item,) = ReviewOutreach(repos).pending()
+    assert item.message is None and item.source is None
+    assert item.outreach.last_error.startswith("needs manual write")
+
+
+def test_pending_orders_news_backed_companies_before_the_rest(repos):
+    """Spec §8 `rank_key`: strength of research material first (news >
+    launch > rest), then team_size ascending, then founder name."""
+    # Names and team sizes are chosen so that sorting by EITHER alone gives
+    # a different order from the spec's (strength, team_size, name).
+    desc_only = _add_pending_founder(repos, 40, "Aaron Desc", "z@example.com")
+    repos.news.rows = [n for n in repos.news.rows if n.company_id != 40]
+    repos.company.get(40).team_size = 1
+    launch_backed = _add_pending_founder(repos, 41, "Abe Launch", "y@example.com")
+    repos.news.rows = [n for n in repos.news.rows if n.company_id != 41]
+    repos.launch.add(company_id=41, title="Launch", body="Launching")
+    repos.company.get(41).team_size = 2
+    news_big = _add_pending_founder(repos, 42, "Al News", "b@example.com")
+    repos.company.get(42).team_size = 50
+    news_small = _add_pending_founder(repos, 43, "Bea News", "a@example.com")
+    repos.company.get(43).team_size = 5
+    items = ReviewOutreach(repos).pending()
+    assert [i.founder.id for i in items] == [news_small.id, news_big.id, launch_backed.id, desc_only.id]
+
+
+def test_pending_ties_on_strength_and_team_size_break_on_founder_name(repos):
+    b = _add_pending_founder(repos, 44, "Bea Tie", "b@example.com")
+    a = _add_pending_founder(repos, 45, "Al Tie", "a@example.com")
+    assert [i.founder.id for i in ReviewOutreach(repos).pending()] == [a.id, b.id]
+
+
+def test_load_returns_the_current_row_for_one_outreach(repos, one_pending):
+    item = ReviewOutreach(repos).load(one_pending.id)
+    assert item.founder.id == one_pending.id and item.message.subject == PENDING_SUBJECT
+
+
+def test_load_of_an_unknown_outreach_raises(repos):
+    with pytest.raises(ValueError):
+        ReviewOutreach(repos).load(999)
+
+
+# --- approve -----------------------------------------------------------------
+
+
+def test_approve_stamps_approved_at_with_now_and_moves_to_approved(repos, one_pending):
+    ReviewOutreach(repos).approve(one_pending.id, NOW)
+    assert repos.outreach.get(one_pending.id).state == S.APPROVED
+    assert repos.message.get_outbound(one_pending.id, 0).approved_at == NOW
+
+
+def test_approve_from_a_non_pending_state_is_an_illegal_transition(repos, one_approved):
+    with pytest.raises(IllegalTransition):
+        ReviewOutreach(repos).approve(one_approved.id, NOW)
+
+
+def test_approve_is_refused_for_an_unedited_needs_manual_write_row(repos, manual_write_pending):
+    with pytest.raises(ValueError, match="edit"):
+        ReviewOutreach(repos).approve(manual_write_pending.id, NOW)
+    o = repos.outreach.get(manual_write_pending.id)
+    assert o.state == S.PENDING_APPROVAL and o.last_error == MANUAL_WRITE_ERROR
+    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at is None
+
+
+def test_approve_is_refused_when_there_is_no_draft_row_at_all(repos, no_material_pending):
+    with pytest.raises(ValueError, match="edit"):
+        ReviewOutreach(repos).approve(no_material_pending.id, NOW)
+    assert repos.outreach.get(no_material_pending.id).state == S.PENDING_APPROVAL
+
+
+def test_approve_succeeds_once_a_needs_manual_write_row_has_been_edited(repos, manual_write_pending):
+    uc = ReviewOutreach(repos)
+    assert uc.edit(manual_write_pending.id, PENDING_SUBJECT, PENDING_BODY) == []
+    uc.approve(manual_write_pending.id, NOW)
+    o = repos.outreach.get(manual_write_pending.id)
+    assert o.state == S.APPROVED and o.last_error is None
+    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at == NOW
+
+
+def test_approve_accepts_a_flagged_row_whose_body_was_edited(repos, manual_write_pending):
+    """The guard is "flagged AND unedited": a flag left on an already
+    edited row (edited_by_user=True) must not block the human's own text."""
+    row = repos.message.get_outbound(manual_write_pending.id, 0)
+    row.body, row.edited_by_user = PENDING_BODY, True
+    ReviewOutreach(repos).approve(manual_write_pending.id, NOW)
+    assert repos.outreach.get(manual_write_pending.id).state == S.APPROVED
+    assert row.approved_at == NOW
+
+
+def test_approve_does_not_touch_the_stored_body(repos, one_pending):
+    ReviewOutreach(repos).approve(one_pending.id, NOW)
+    row = repos.message.get_outbound(one_pending.id, 0)
+    assert row.body == PENDING_BODY and row.edited_by_user is False
+
+
+# --- reject ------------------------------------------------------------------
+
+
+def test_reject_moves_to_discarded_and_leaves_the_draft_unapproved(repos, one_pending):
+    ReviewOutreach(repos).reject(one_pending.id)
+    assert repos.outreach.get(one_pending.id).state == S.DISCARDED
+    assert repos.message.get_outbound(one_pending.id, 0).approved_at is None
+
+
+def test_reject_from_a_non_pending_state_is_an_illegal_transition(repos, one_approved):
+    with pytest.raises(IllegalTransition):
+        ReviewOutreach(repos).reject(one_approved.id)
+    assert repos.outreach.get(one_approved.id).state == S.APPROVED
+
+
+def test_reject_of_a_flagged_row_without_a_draft_works(repos, no_material_pending):
+    ReviewOutreach(repos).reject(no_material_pending.id)
+    assert repos.outreach.get(no_material_pending.id).state == S.DISCARDED
+
+
+# --- edit --------------------------------------------------------------------
+
+BANNED_BODY = "I hope this email finds you well. Would you take an intern?"
+
+
+def test_edit_that_fails_validation_returns_the_errors_and_persists_nothing(repos, one_pending):
+    errors = ReviewOutreach(repos).edit(one_pending.id, "New subject", BANNED_BODY)
+    assert errors and any("banned phrase" in e for e in errors)
+    row = repos.message.get_outbound(one_pending.id, 0)
+    assert (row.subject, row.body, row.edited_by_user) == (PENDING_SUBJECT, PENDING_BODY, False)
+    assert repos.outreach.get(one_pending.id).state == S.PENDING_APPROVAL
+
+
+def test_edit_that_validates_persists_and_marks_edited_by_user(repos, one_pending):
+    new_body = PENDING_BODY.replace("Would you take an intern?", "Could you use an intern?")
+    assert ReviewOutreach(repos).edit(one_pending.id, "  Intern at Vahan ", new_body + "\n") == []
+    row = repos.message.get_outbound(one_pending.id, 0)
+    assert (row.subject, row.body, row.edited_by_user) == ("Intern at Vahan", new_body, True)
+    assert row.approved_at is None                       # editing never approves
+    assert repos.outreach.get(one_pending.id).state == S.PENDING_APPROVAL
+
+
+def test_edit_clears_a_stale_approved_at(repos, one_pending):
+    """An edit is never an approval: a `PENDING_APPROVAL` row that somehow
+    carries `approved_at` (data inconsistency) loses it on edit, so the
+    send-side `approved_at IS NOT NULL` predicate can't be satisfied by
+    text the human never approved."""
+    row = repos.message.get_outbound(one_pending.id, 0)
+    row.approved_at = NOW
+    assert ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, PENDING_BODY) == []
+    assert row.approved_at is None
+
+
+def test_edit_clears_the_needs_manual_write_flag(repos, manual_write_pending):
+    ReviewOutreach(repos).edit(manual_write_pending.id, PENDING_SUBJECT, PENDING_BODY)
+    assert repos.outreach.get(manual_write_pending.id).last_error is None
+
+
+def test_a_failed_edit_keeps_the_needs_manual_write_flag(repos, manual_write_pending):
+    errors = ReviewOutreach(repos).edit(manual_write_pending.id, PENDING_SUBJECT, BANNED_BODY)
+    assert errors
+    assert repos.outreach.get(manual_write_pending.id).last_error == MANUAL_WRITE_ERROR
+
+
+def test_edit_revalidates_against_the_cited_source(repos, one_pending):
+    """A body that no longer shares a term with the cited news item fails
+    grounding - the citation stays what the drafter chose."""
+    ungrounded = ("Your company Vahan is interesting to me.\n\n"
+                  "I built a scheduler in Python.\n\nWould you take an intern?")
+    errors = ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, ungrounded)
+    assert any("hook shares no distinctive term" in e for e in errors)
+    assert repos.message.get_outbound(one_pending.id, 0).body == PENDING_BODY
+
+
+def test_edit_applies_the_resume_claims_rule(repos, one_pending):
+    body = PENDING_BODY.replace("I built a scheduler in Python.", "I built a scheduler in Rust.")
+    errors = ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body)
+    assert any("no resume claim" in e for e in errors)
+
+
+@pytest.mark.parametrize("subject, body", [("", PENDING_BODY), ("   ", PENDING_BODY),
+                                           (PENDING_SUBJECT, ""), (PENDING_SUBJECT, "  \n ")])
+def test_edit_rejects_an_empty_subject_or_body(repos, one_pending, subject, body):
+    errors = ReviewOutreach(repos).edit(one_pending.id, subject, body)
+    assert errors and any("empty" in e for e in errors)
+    row = repos.message.get_outbound(one_pending.id, 0)
+    assert (row.subject, row.body) == (PENDING_SUBJECT, PENDING_BODY)
+
+
+def test_edit_creates_the_draft_row_for_a_flagged_row_without_one(repos, no_material_pending):
+    body = "You're building Vahan.\n\nI built a scheduler in Python.\n\nWould you take an intern?"
+    assert ReviewOutreach(repos).edit(no_material_pending.id, "Intern at Vahan", body) == []
+    row = repos.message.get_outbound(no_material_pending.id, 0)
+    assert row is not None
+    assert (row.direction, row.sequence_step, row.body, row.edited_by_user) == ("outbound", 0, body, True)
+    assert row.research_source_type is None and row.research_source_id is None
+    assert row.approved_at is None
+    assert repos.outreach.get(no_material_pending.id).last_error is None
+
+
+def test_edit_without_a_source_still_applies_style_and_claims_rules(repos, no_material_pending):
+    errors = ReviewOutreach(repos).edit(no_material_pending.id, "Subject", BANNED_BODY)
+    assert any("banned phrase" in e for e in errors)
+    assert repos.message.get_outbound(no_material_pending.id, 0) is None
+    errors = ReviewOutreach(repos).edit(no_material_pending.id, "Subject",
+                                        "You're building Vahan.\n\nI built it in Rust.\n\nIntern?")
+    assert any("no resume claim" in e for e in errors)
+    assert repos.message.get_outbound(no_material_pending.id, 0) is None
+
+
+def test_edit_is_refused_outside_pending_approval(repos, one_approved):
+    with pytest.raises(ValueError, match="PENDING_APPROVAL"):
+        ReviewOutreach(repos).edit(one_approved.id, PENDING_SUBJECT, PENDING_BODY)
+    assert repos.message.get_outbound(one_approved.id, 0).edited_by_user is False
+
+
+def test_edit_refuses_without_resume_claims(repos, one_pending):
+    repos.resume_profile.profile = None
+    with pytest.raises(ValueError, match="parse-resume"):
+        ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, PENDING_BODY)
+
+
+# --- skip --------------------------------------------------------------------
+
+
+def test_skip_is_a_no_op(repos, one_pending):
+    ReviewOutreach(repos).skip(one_pending.id)
+    o = repos.outreach.get(one_pending.id)
+    row = repos.message.get_outbound(one_pending.id, 0)
+    assert o.state == S.PENDING_APPROVAL and row.approved_at is None and row.edited_by_user is False
+    assert repos.session.commit_calls == 0
+
+
+def test_the_use_case_never_commits_itself(repos, one_pending):
+    """The CLI owns the transaction boundary (one commit per action)."""
+    uc = ReviewOutreach(repos)
+    uc.edit(one_pending.id, PENDING_SUBJECT, PENDING_BODY)
+    uc.approve(one_pending.id, NOW)
+    assert repos.session.commit_calls == 0

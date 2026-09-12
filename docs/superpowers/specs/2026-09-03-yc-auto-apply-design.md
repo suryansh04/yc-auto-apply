@@ -405,7 +405,8 @@ contend over the same rows, only over the same table.
 
 1. **SyncCompanies** (nightly). Fetch `all.json`; keep companies where
    `regions` or `all_locations` contains "India", `status == "Active"`, and
-   `11 <= team_size <= 200`; upsert. Derive `domain` from `website` by stripping
+   `1 <= team_size <= 200` (D25; corrected from `11 <=` in the final review,
+   ruling FR-7); upsert. Derive `domain` from `website` by stripping
    scheme, `www.` and path.
 2. **ScrapeCompanyPage** (formerly "ScrapeFounders" — one fetch now populates
    founders and all research material, D16). For each company, GET its YC page,
@@ -637,6 +638,11 @@ It runs on every draft and is unit-testable in isolation. A draft is rejected if
 - it does not name the company at least once;
 - it contains no company-specific token — a job title from `job_postings`, or a
   distinctive term from `one_liner` / `long_description`;
+  *(Implementation note, final review ruling FR-8: this rule has no separate
+  check — it is merged into `validate_grounding`'s shared-distinctive-term
+  check, which requires the hook to share a substantive term with the cited
+  row, whose text is exactly a posting title, a launch, a headline or the
+  `long_description`.)*
 - **the hook has more than a 60% word-overlap with `one_liner`** — a
   paraphrase check, so part 1 cannot just quote the tagline back;
 - **`research_source_type` / `research_source_id` do not resolve to a real row**

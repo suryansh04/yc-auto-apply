@@ -91,3 +91,35 @@ def test_second_message_at_different_step_is_accepted(session, an_outreach):
     session.add(Message(outreach_id=an_outreach.id, sequence_step=1,
                         direction="outbound", subject="s2", body="b2"))
     session.commit()  # must not raise
+
+
+# --- Final fix wave (F14): `JobPostingRepo.upsert` keys on `(company_id,
+# title)` when the payload carries no `url`, so url-less postings at one
+# company neither collapse into one row nor duplicate on re-scrape.
+
+def test_url_less_postings_at_one_company_are_kept_apart_by_title(session, an_outreach):
+    from app.adapters.db.models import JobPosting
+    from app.adapters.db.repositories import JobPostingRepo
+    from sqlalchemy import select
+
+    repo = JobPostingRepo(session)
+    company_id = an_outreach.founder.company_id
+    a = repo.upsert(company_id=company_id, title="Backend Intern", url=None, employment_type="Internship")
+    b = repo.upsert(company_id=company_id, title="Data Intern", url=None, employment_type="Internship")
+    assert a.id != b.id
+
+    again = repo.upsert(company_id=company_id, title="Backend Intern", url=None, employment_type="Intern")
+    assert again.id == a.id and again.employment_type == "Intern"
+
+    rows = session.execute(select(JobPosting).where(JobPosting.company_id == company_id)).scalars().all()
+    assert sorted(r.title for r in rows) == ["Backend Intern", "Data Intern"]
+
+
+def test_postings_with_a_url_still_key_on_the_url(session, an_outreach):
+    from app.adapters.db.repositories import JobPostingRepo
+
+    repo = JobPostingRepo(session)
+    company_id = an_outreach.founder.company_id
+    a = repo.upsert(company_id=company_id, title="Backend Intern", url="/jobs/1")
+    b = repo.upsert(company_id=company_id, title="Backend Intern (renamed)", url="/jobs/1")
+    assert b.id == a.id and b.title == "Backend Intern (renamed)"

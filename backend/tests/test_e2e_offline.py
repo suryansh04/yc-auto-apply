@@ -20,7 +20,7 @@ from app.application.send_approved import SendApproved
 from app.application.sync_companies import SyncCompanies
 from app.domain.compose import OPT_OUT_LINE, compose_wire_text, first_name
 from app.domain.states import OutreachState as S
-from tests.application.conftest import VAHAN_DESCRIPTION, VAHAN_NEWS
+from tests.fakes_repos import VAHAN_DESCRIPTION, VAHAN_NEWS
 from tests.fakes import (
     FakeCompanyPageSource,
     FakeDrafter,

@@ -3,6 +3,12 @@
 MIN_TEAM_SIZE = 1
 MAX_TEAM_SIZE = 200
 
+# Final fix wave (F13, ruling FR-9): the `companies.status` value
+# `SyncCompanies` writes on a row that stopped satisfying `is_target_company`
+# (YC's own values are "Active", "Acquired", "Inactive", "Public"). `scrape`
+# lists only "Active"; `DraftOutreach` skips founders at such a company.
+OUT_OF_BAND_STATUS = "out_of_band"
+
 
 def is_target_company(raw: dict) -> bool:
     if (raw.get("status") or "").lower() != "active":

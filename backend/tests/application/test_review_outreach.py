@@ -16,7 +16,7 @@ import pytest
 from app.application.review_outreach import ReviewOutreach
 from app.domain.states import IllegalTransition
 from app.domain.states import OutreachState as S
-from tests.application.conftest import (
+from tests.fakes_repos import (
     MANUAL_WRITE_ERROR,
     PENDING_BODY,
     PENDING_SUBJECT,
@@ -299,9 +299,23 @@ def test_redraft_moves_to_ready_to_draft_and_touches_nothing_else(repos, manual_
 
 
 def test_redraft_from_a_non_pending_state_is_an_illegal_transition(repos, one_approved):
-    with pytest.raises(IllegalTransition):
+    # APPROVED -> READY_TO_DRAFT is illegal in the state machine AND refused
+    # by redraft's own guard (F6); the guard runs first, so it is a ValueError.
+    with pytest.raises((ValueError, IllegalTransition)):
         ReviewOutreach(repos).redraft(one_approved.id)
     assert repos.outreach.get(one_approved.id).state == S.APPROVED
+
+
+@pytest.mark.parametrize("state", [S.NEEDS_EMAIL, S.NEEDS_MANUAL_EMAIL, S.SENT])
+def test_redraft_is_refused_from_states_where_ready_to_draft_is_otherwise_legal(repos, one_pending, state):
+    """Final fix wave (F6): `READY_TO_DRAFT` is a legal target from these
+    three states, so `assert_transition` alone let a use-case caller
+    "redraft" a never-drafted or already-sent row. The explicit guard
+    refuses everything but PENDING_APPROVAL."""
+    repos.outreach.get(one_pending.id).state = str(state)
+    with pytest.raises(ValueError, match="PENDING_APPROVAL"):
+        ReviewOutreach(repos).redraft(one_pending.id)
+    assert repos.outreach.get(one_pending.id).state == str(state)
 
 
 def test_redraft_then_draft_replaces_the_flagged_row_in_place(repos, manual_write_pending):
@@ -400,3 +414,18 @@ def test_d24_attaching_job_postings_does_not_change_the_review_order(repos):
         repos.company.get(n).is_hiring = True
     after = [i.founder.id for i in ReviewOutreach(repos).pending()]
     assert after == before
+
+
+# --- Final fix wave (F16): `edit` validates against every news outlet name
+# for the company, not only the cited row's.
+
+def test_edit_rejects_a_body_naming_a_non_cited_outlet(repos, one_pending):
+    """The cited row is news id == one_pending.id from The Economic Times;
+    a second, uncited news row from Mint exists. Naming Mint verbatim in
+    the edited body must fail grounding."""
+    repos.news.add(id=900, company_id=one_pending.company_id, title="Vahan hires a CFO", source="Mint")
+    body = PENDING_BODY.replace("That routing problem is what I keep thinking about.",
+                                "Mint called that routing problem the one to watch.")
+    errors = ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body)
+    assert any("publication name appears" in e for e in errors)
+    assert repos.message.get_outbound(one_pending.id, 0).body == PENDING_BODY

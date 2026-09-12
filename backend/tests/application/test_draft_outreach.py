@@ -275,7 +275,7 @@ def test_a_drafter_exception_leaves_the_founder_ready_to_draft_and_continues(rep
 import logging
 
 from app.domain.states import IllegalTransition
-from tests.application.conftest import DuplicateOutboundMessage
+from tests.fakes_repos import DuplicateOutboundMessage
 
 
 def _send_back_for_redraft(repos, founder_id):
@@ -476,3 +476,45 @@ def test_m18_a_launch_title_is_part_of_the_grounding_text(repos, ready_founder):
                              "I built a scheduler in Python.\n\nWould you take an intern?")}
     result = DraftOutreach(FakeDrafter([cites_launch]), repos).run(limit=1)
     assert result.drafted == 1
+
+
+# --- Final fix wave (F13, ruling FR-9): a founder whose company has since
+# left the target band is skipped, not drafted.
+
+def test_a_founder_at_an_out_of_band_company_is_skipped_without_calling_the_drafter(repos, ready_founder):
+    from app.domain.targeting import OUT_OF_BAND_STATUS
+
+    repos.company.get(ready_founder.company_id).status = OUT_OF_BAND_STATUS
+    d = FakeDrafter([GOOD])
+    result = DraftOutreach(d, repos).run()
+    assert d.calls == []
+    assert result.drafted == 0 and result.skipped_out_of_band == 1
+    assert repos.outreach.get(ready_founder.id).state == S.READY_TO_DRAFT
+    assert repos.message.get_outbound(ready_founder.id, 0) is None
+
+
+def test_an_active_company_is_still_drafted(repos, ready_founder):
+    repos.company.get(ready_founder.company_id).status = "Active"
+    result = DraftOutreach(FakeDrafter([GOOD]), repos).run()
+    assert result.drafted == 1 and result.skipped_out_of_band == 0
+
+
+# --- Final fix wave (F16): every `company_news.source` for the company is
+# passed to the validator, so a launch-cited hook cannot pass grounding by
+# sharing a term only with a non-cited outlet's name.
+
+def test_hook_sharing_a_term_only_with_a_non_cited_outlet_name_fails_grounding(repos):
+    repos.company.add(id=50, domain="fresh.ai", name="Freshly",
+                      one_liner="Voice hiring", long_description="x" * 100)
+    founder = repos.founder.add(id=50, company_id=50, full_name="Dev Rao")
+    repos.outreach.add(id=50, founder_id=founder.id, state=str(S.READY_TO_DRAFT))
+    repos.news.add(id=50, company_id=50, title="Freshly raises a seed round for warehouse staffing", source="Mint")
+    launch = repos.launch.add(company_id=50, title="Mint condition: voice hiring for warehouses",
+                              body="We match warehouse staff over voice calls.", id=50)
+    draft = {"subject": "Backend intern at Freshly",
+             "body": ("Your Mint play at Freshly caught my eye.\n\n"
+                      "I built a scheduler in Python.\n\nWould you take an intern?"),
+             "research_source_type": "launch", "research_source_id": launch.id}
+    result = DraftOutreach(FakeDrafter([draft, draft]), repos).run()
+    assert result.manual_write == 1 and result.drafted == 0
+    assert "shares no distinctive term" in repos.outreach.get(50).last_error

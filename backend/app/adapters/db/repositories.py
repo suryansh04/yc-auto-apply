@@ -36,10 +36,13 @@ fields as `**fields` and is keyed on that table's natural key — `yc_id`
 outreach per founder). `Message` has no natural key beyond `id`, so
 `MessageRepo.upsert` is keyed on `id` when given (update), or inserts a new
 row otherwise. Note that `MessageRepo.upsert` is NOT the double-send guard:
-the reserve-before-send protocol (spec §13) relies on a plain `INSERT`
-failing the database's unique constraint, which is why the constraint
-tests in `tests/adapters/test_repositories.py` add `Message` rows to the
-session directly rather than going through this repo.
+since ruling R1 the draft-time outbound row is the reservation and the
+guard is `MessageRepo.reserve_for_send` - a single conditional `UPDATE`
+whose rowcount says whether the caller won - backed by the partial unique
+index on outbound `(outreach_id, sequence_step)` and the
+`sent_requires_approved` CHECK. The constraint tests in
+`tests/adapters/test_repositories.py` add `Message` rows to the session
+directly rather than going through this repo.
 
 IMPORTANT — what `list_by_state` is NOT: it is a plain, unordered
 `SELECT ... WHERE state = :state`, with no `next_action_at` filter, no
@@ -290,8 +293,9 @@ class MessageRepo:
 
     def count_sent_since(self, since: datetime) -> int:
         """Task 15: outbound messages with `sent_at >= since`. `SendApproved`
-        subtracts this (from 00:00 UTC today) from `daily_send_cap`, so
-        re-running the CLI never exceeds the cap. Reserved-but-unrecorded
+        subtracts this (with `since` = now minus 24 hours, ruling R-A's
+        rolling window) from `daily_send_cap`, so re-running the CLI never
+        exceeds the cap. Reserved-but-unrecorded
         rows count too — deliberately conservative."""
         return int(
             self.session.execute(
@@ -317,12 +321,19 @@ class JobPostingRepo:
     def upsert(self, **fields) -> JobPosting:
         """Insert or update, keyed on `(company_id, url)` — `JobPosting` has
         no DB-level uniqueness (unlike `CompanyNews`), so this dedup is
-        application-side only, same as every other repo's `upsert`."""
+        application-side only, same as every other repo's `upsert`.
+
+        Final fix wave (F14): when the payload carries no `url`, the key
+        falls back to `(company_id, title)`. `JobPosting.url == None`
+        compiles to `url IS NULL`, so every url-less posting at a company
+        used to collapse into the first one's row - silent data loss."""
+        url = fields.get("url")
+        if url is not None:
+            key = (JobPosting.url == url,)
+        else:
+            key = (JobPosting.url.is_(None), JobPosting.title == fields.get("title"))
         existing = self.session.execute(
-            select(JobPosting).where(
-                JobPosting.company_id == fields["company_id"],
-                JobPosting.url == fields.get("url"),
-            )
+            select(JobPosting).where(JobPosting.company_id == fields["company_id"], *key)
         ).scalar_one_or_none()
         if existing is None:
             existing = JobPosting(**fields)

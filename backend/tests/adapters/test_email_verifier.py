@@ -329,3 +329,61 @@ def test_close_closes_the_held_http_client():
     client = _client()
     client.close()
     assert client._client.is_closed
+
+
+# --- Final fix wave (F7): the redaction filter is attached once per key and
+# detached by `close()`, so a long-lived process never accumulates filters.
+# Each test uses its own key: earlier tests in this module leave un-closed
+# clients behind, whose (shared, reference-counted) filter for API_KEY stays.
+
+def _filters_for(key: str):
+    import logging
+    from app.adapters.email_verifier import _RedactApiKeyFilter
+
+    return [f for f in logging.getLogger("httpx").filters
+            if isinstance(f, _RedactApiKeyFilter) and f._api_key == key]
+
+
+def _keyed(key: str) -> MyEmailVerifierClient:
+    return MyEmailVerifierClient(key, _sleep=lambda seconds: None)
+
+
+def test_three_clients_add_one_filter_and_closing_them_removes_it():
+    key = "f7-three-clients"
+    clients = [_keyed(key) for _ in range(3)]
+    assert len(_filters_for(key)) == 1
+    for c in clients:
+        c.close()
+    assert _filters_for(key) == []
+
+
+def test_sequential_construct_and_close_never_leaves_a_filter_behind():
+    key = "f7-sequential"
+    for _ in range(3):
+        c = _keyed(key)
+        assert len(_filters_for(key)) == 1
+        c.close()
+        assert _filters_for(key) == []
+
+
+def test_closing_one_client_keeps_redaction_for_another_with_the_same_key(caplog):
+    import logging
+
+    key = "f7-shared-redaction"
+    first, second = _keyed(key), _keyed(key)
+    first.close()
+    with caplog.at_level("INFO", logger="httpx"):
+        logging.getLogger("httpx").info("HTTP Request: GET https://x/%s", key)
+    assert key not in "".join(r.getMessage() for r in caplog.records)
+    assert "***REDACTED***" in "".join(r.getMessage() for r in caplog.records)
+    second.close()
+    assert _filters_for(key) == []
+
+
+def test_different_keys_get_their_own_filters():
+    a, b = _keyed("f7-key-a"), _keyed("f7-key-b")
+    assert len(_filters_for("f7-key-a")) == 1 and len(_filters_for("f7-key-b")) == 1
+    a.close()
+    assert _filters_for("f7-key-a") == [] and len(_filters_for("f7-key-b")) == 1
+    b.close()
+    assert _filters_for("f7-key-b") == []

@@ -103,7 +103,9 @@ def resolve(
     verification in priority order with early exit on the first `valid`.
     Stops the whole run (without failing anything) the moment the verifier
     signals its quota is exhausted — the free tier renews daily, so a
-    paused run picks back up on the next invocation."""
+    paused run picks back up on the next invocation. Commits after every
+    founder (ruling FR-3), so interrupting a run keeps every verdict
+    already paid for."""
     from app.adapters.db.repositories import (
         CompanyLaunchRepo,
         CompanyRepo,
@@ -122,13 +124,16 @@ def resolve(
             launch=CompanyLaunchRepo(session),
             outreach=OutreachRepo(session),
             email_candidate=EmailCandidateRepo(session),
+            session=session,
         )
         verifier = MyEmailVerifierClient(settings.email_verifier_api_key)
         try:
+            # Final fix wave (F4, ruling FR-3): the use case commits after
+            # every founder, so a Ctrl-C mid-run keeps every verdict already
+            # paid for out of the 100/day quota.
             result = ResolveEmails(verifier, repos).run(limit=limit)
         finally:
             verifier.close()
-        session.commit()
 
     typer.echo(
         f"resolved {result.resolved}, manual {result.manual}, "
@@ -136,6 +141,107 @@ def resolve(
         f"verifications used {result.verifications_used}, "
         f"paused on quota: {result.paused_on_quota}"
     )
+
+
+# --- Final fix wave (F3, ruling FR-1): the manual-email path --------------------
+
+
+def _manual_repos(session):
+    from app.adapters.db.repositories import (
+        CompanyRepo,
+        EmailCandidateRepo,
+        FounderRepo,
+        OutreachRepo,
+    )
+    from app.application.resolve_manual_email import ManualEmailRepos
+
+    return ManualEmailRepos(
+        founder=FounderRepo(session),
+        company=CompanyRepo(session),
+        outreach=OutreachRepo(session),
+        email_candidate=EmailCandidateRepo(session),
+    )
+
+
+def render_manual_table(items) -> str:
+    """Pure: one block per `NEEDS_MANUAL_EMAIL` founder - the outreach id
+    to pass to `set-email`, founder, company, domain, LinkedIn, then the
+    candidates already tried with their verdicts and, when `resolve`
+    persisted one, the launch address it could not attribute (hint)."""
+    if not items:
+        return "no founders need a manual email\n"
+    header = f"{'ID':>5}  {'FOUNDER':<24} {'COMPANY':<20} {'DOMAIN':<24} LINKEDIN"
+    lines = [header]
+    for item in items:
+        company = item.company
+        lines.append(
+            f"{item.outreach.id:>5}  "
+            f"{(getattr(item.founder, 'full_name', None) or '')[:24]:<24} "
+            f"{(getattr(company, 'name', None) or '')[:20]:<20} "
+            f"{(getattr(company, 'domain', None) or '-')[:24]:<24} "
+            f"{getattr(item.founder, 'linkedin_url', None) or '-'}"
+        )
+        if item.candidates:
+            tried = ", ".join(f"{c.address}={c.verdict or '?'}" for c in item.candidates)
+        else:
+            tried = "(none - no domain)"
+        lines.append(f"       candidates: {tried}")
+        if item.published_hint:
+            lines.append(f"       published hint: {item.published_hint} "
+                         "(from a launch post; could not be attributed to this founder)")
+    lines.append(f"{len(items)} founder(s); resolve one with `set-email ID ADDRESS`, "
+                 "or `set-email ID --unresolved` to give up")
+    return "\n".join(lines) + "\n"
+
+
+@app.command("list-manual")
+def list_manual() -> None:
+    """List every NEEDS_MANUAL_EMAIL founder (spec §9: all candidates
+    invalid, a catch-all domain, no domain, or an unattributable published
+    email) with the candidates already tried, the LinkedIn URL and any
+    published-email hint - what a human works from to pick or find the
+    address, then `set-email ID ADDRESS`."""
+    from app.application.resolve_manual_email import ResolveManualEmail
+
+    with _session() as session:
+        items = ResolveManualEmail(_manual_repos(session)).pending()
+        typer.echo(render_manual_table(items), nl=False)
+
+
+@app.command("set-email")
+def set_email(
+    outreach_id: int = typer.Argument(..., help="The ID column from `list-manual`."),
+    address: Optional[str] = typer.Argument(None, help="The founder's email address."),
+    unresolved: bool = typer.Option(
+        False, "--unresolved",
+        help="Give up on this founder instead: NEEDS_MANUAL_EMAIL -> UNRESOLVED (terminal).",
+    ),
+) -> None:
+    """Resolve one NEEDS_MANUAL_EMAIL founder by hand: store ADDRESS and
+    move the outreach to READY_TO_DRAFT (the next `draft` run picks it
+    up), or with --unresolved mark it UNRESOLVED. Refuses any outreach
+    that is not in NEEDS_MANUAL_EMAIL and any ADDRESS that does not look
+    like local@domain.tld."""
+    from app.application.resolve_manual_email import ResolveManualEmail
+    from app.domain.states import IllegalTransition
+
+    if unresolved == (address is not None):
+        typer.echo("give exactly one of ADDRESS or --unresolved", err=True)
+        raise typer.Exit(code=2)
+    with _session() as session:
+        use_case = ResolveManualEmail(_manual_repos(session))
+        try:
+            if unresolved:
+                use_case.give_up(outreach_id)
+                session.commit()
+                typer.echo(f"outreach {outreach_id} marked unresolved")
+                return
+            stored = use_case.set_email(outreach_id, address)
+        except (ValueError, IllegalTransition) as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1)
+        session.commit()
+    typer.echo(f"outreach {outreach_id}: resolved_email set to {stored}, now ready_to_draft")
 
 
 def _read_resume_text(path: str) -> str:
@@ -423,7 +529,8 @@ def send(
     ),
 ) -> None:
     """Send every APPROVED outreach through Gmail (Task 15, spec §13/§18),
-    at most DAILY_SEND_CAP per UTC day counting what was already sent today.
+    at most DAILY_SEND_CAP per rolling 24-hour window (ruling R-A), counting
+    everything already sent in the 24 hours before this run.
     Reserve-before-send: each message row is claimed by a committed
     conditional UPDATE before Gmail is called, so a crash can never produce
     a second copy - a row left reserved without a Gmail id is reported as

@@ -86,7 +86,8 @@ class _RedactApiKeyFilter(logging.Filter):
     request-URL log (`"HTTP Request: GET <full url> ..."` at INFO), which
     otherwise leaks the key embedded in the URL path regardless of
     anything `MyEmailVerifierClient` logs itself. Attached to the `httpx`
-    logger in `__init__`.
+    logger in `__init__` (de-duplicated per key) and detached again by
+    `close()` once no live client shares it (final fix wave, F7).
 
     Deliberately a filter, not a module-level `logging.getLogger("httpx")
     .setLevel(...)` (fix round 1, minor): a `setLevel` call is a global
@@ -102,12 +103,35 @@ class _RedactApiKeyFilter(logging.Filter):
     def __init__(self, api_key: str):
         super().__init__()
         self._api_key = api_key
+        self.refs = 0  # live `MyEmailVerifierClient`s sharing this filter (final fix wave, F7)
 
     def filter(self, record: logging.LogRecord) -> bool:
         if self._api_key and self._api_key in record.getMessage():
             record.msg = record.getMessage().replace(self._api_key, _REDACTED)
             record.args = ()
         return True
+
+
+def _attach_redaction_filter(api_key: str) -> _RedactApiKeyFilter:
+    """Final fix wave (F7): one filter per distinct key on the `httpx`
+    logger, reference-counted, so a long-lived process constructing many
+    clients neither accumulates filters nor loses redaction while another
+    client with the same key is still alive."""
+    logger = logging.getLogger("httpx")
+    for existing in logger.filters:
+        if isinstance(existing, _RedactApiKeyFilter) and existing._api_key == api_key:
+            existing.refs += 1
+            return existing
+    created = _RedactApiKeyFilter(api_key)
+    created.refs = 1
+    logger.addFilter(created)
+    return created
+
+
+def _detach_redaction_filter(flt: _RedactApiKeyFilter) -> None:
+    flt.refs = max(0, flt.refs - 1)
+    if flt.refs == 0:
+        logging.getLogger("httpx").removeFilter(flt)
 
 
 class MyEmailVerifierClient:
@@ -133,10 +157,11 @@ class MyEmailVerifierClient:
         # tests can supply their own if ever needed, though respx patches
         # the default transport either way.
         self._client = _client if _client is not None else httpx.Client()
-        logging.getLogger("httpx").addFilter(_RedactApiKeyFilter(api_key))
+        self._filter = _attach_redaction_filter(api_key)
 
     def close(self) -> None:
         self._client.close()
+        _detach_redaction_filter(self._filter)
 
     def _throttle(self) -> None:
         if self._last_request_at is None:

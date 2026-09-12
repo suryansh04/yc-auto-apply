@@ -282,3 +282,101 @@ def test_a_new_founder_hits_the_published_email_short_circuit(repos, founder_wit
     assert v.calls == [] and result.verifications_used == 0
     o = repos.outreach.get(founder_with_launch_email.id)
     assert o.state == S.READY_TO_DRAFT and o.resolved_email == "jane@acme.com"
+
+
+# --- Final fix wave (F4, ruling FR-3): one commit per founder, so a Ctrl-C
+# mid-run keeps every verdict already paid for out of the daily quota.
+
+def test_run_commits_once_per_founder_processed(repos, two_founders):
+    v = FakeVerifier({"asha@one.com": "valid", "vikram@two.com": "valid"})
+    result = ResolveEmails(v, repos).run()
+    assert result.resolved == 2
+    assert repos.session.commit_calls == 2
+
+
+def test_a_published_email_and_a_no_domain_founder_each_commit_too(repos, founder_with_launch_email):
+    repos.company.add(id=9, domain=None)
+    f = repos.founder.add(id=9, company_id=9, full_name="No Domain")
+    repos.outreach.add(id=9, founder_id=f.id, state=str(S.NEEDS_EMAIL))
+    ResolveEmails(FakeVerifier({}), repos).run()
+    assert repos.session.commit_calls == 2
+
+
+def test_a_quota_pause_mid_run_has_already_committed_the_earlier_founders(repos, two_founders):
+    f1, f2 = two_founders
+    # Enough credit for f1 (one valid) plus one call for f2, then exhaustion.
+    v = FakeVerifier({"asha@one.com": "valid"}, quota=2)
+    result = ResolveEmails(v, repos).run()
+    assert result.paused_on_quota is True
+    assert repos.outreach.get(f1.id).state == S.READY_TO_DRAFT
+    assert repos.outreach.get(f2.id).state == S.NEEDS_EMAIL
+    # f1 committed after resolution; the pause commits f2's partial verdicts too.
+    assert repos.session.commit_calls == 2
+    assert [c.address for c in repos.email_candidate.list_by_founder_id(f2.id)] == ["vikram@two.com"]
+
+
+def test_a_verifier_error_commits_what_that_founder_already_had(repos, two_founders):
+    f1, f2 = two_founders
+    v = _RaisingOnceVerifier(fail_address="asha@one.com", verdicts={"vikram@two.com": "valid"})
+    result = ResolveEmails(v, repos).run()
+    assert result.errors == 1
+    assert repos.session.commit_calls == 2   # once for the errored founder, once for the resolved one
+
+
+# --- Final fix wave (F8): regression protection for two rulings whose
+# mutations survived the whole-branch review (M24/M25).
+
+def test_a_bare_surname_as_a_whole_word_near_the_address_never_attributes(repos):
+    """M24: adding bare-last-name matching to `_name_near_address` must
+    fail. "Ng" appears as its own word right next to the address and the
+    founder is Riya Ng - still not hers (spec §9 Step 0(b): first name or
+    full name only)."""
+    repos.company.add(id=40, domain="co.com")
+    f1 = repos.founder.add(id=40, company_id=40, full_name="Amit Kumar")
+    f2 = repos.founder.add(id=41, company_id=40, full_name="Riya Ng")
+    repos.outreach.add(id=40, founder_id=f1.id, state=str(S.NEEDS_EMAIL))
+    repos.outreach.add(id=41, founder_id=f2.id, state=str(S.NEEDS_EMAIL))
+    repos.launch.add(company_id=40, body="Ng here - write to amit@co.com any time.",
+                     published_email="amit@co.com")
+
+    ResolveEmails(FakeVerifier({}), repos).run()
+
+    o = repos.outreach.get(41)
+    assert o.resolved_email is None
+    assert o.state == S.NEEDS_MANUAL_EMAIL
+    assert [c.address for c in repos.email_candidate.list_by_founder_id(f2.id) if c.verdict == "published"] == ["amit@co.com"]
+
+
+def test_a_surname_hidden_inside_another_word_near_the_address_never_attributes(repos):
+    repos.company.add(id=42, domain="co.com")
+    f1 = repos.founder.add(id=42, company_id=42, full_name="Amit Kumar")
+    f2 = repos.founder.add(id=43, company_id=42, full_name="Riya Ng")
+    repos.outreach.add(id=42, founder_id=f1.id, state=str(S.NEEDS_EMAIL))
+    repos.outreach.add(id=43, founder_id=f2.id, state=str(S.NEEDS_EMAIL))
+    repos.launch.add(company_id=42, body="We are building something - reach amit@co.com",
+                     published_email="amit@co.com")
+
+    ResolveEmails(FakeVerifier({}), repos).run()
+
+    assert repos.outreach.get(43).resolved_email is None
+
+
+class _BuggyVerifier:
+    """A verifier with a bug of its own: neither `QuotaExhausted` nor
+    `VerifierError`, just a bare `RuntimeError`."""
+
+    def verify(self, address: str) -> str:
+        raise RuntimeError("something unrelated broke")
+
+    def remaining_quota(self):
+        return None
+
+
+def test_a_bare_runtime_error_from_the_verifier_propagates_out_of_run(repos, a_founder):
+    """M25: widening `except QuotaExhausted` to `except (QuotaExhausted,
+    RuntimeError)` would turn a real bug into a silent quota pause."""
+    import pytest
+
+    with pytest.raises(RuntimeError, match="something unrelated broke"):
+        ResolveEmails(_BuggyVerifier(), repos).run()
+    assert repos.outreach.get(a_founder.id).state == S.NEEDS_EMAIL

@@ -103,3 +103,30 @@ def test_hook_one_liner_overlap_ignores_a_later_paragraph():
             + one_liner + " is roughly how I'd describe it. Would you take an intern?")
     errs = validate_grounding(d(body=body), NEWS, "Vahan", one_liner, CLAIMS)
     assert not any("one_liner" in e for e in errs)
+
+
+# --- Final fix wave (F16): `all_publications` - every company_news.source
+# for the company, cited or not (spec section 10: "any value of
+# company_news.source for this company appearing verbatim in the body").
+
+LAUNCH = SourceRow(kind="launch", text="Mint condition: voice hiring for warehouses",
+                   publication=None, intern_appropriate=None)
+
+def test_hook_sharing_a_term_only_with_a_non_cited_outlet_name_fails_grounding():
+    body = "Your Mint play at Vahan caught my eye. Would you take an intern?"
+    # Discriminating: without the outlet list the launch's own "mint" grounds it.
+    assert validate_grounding(d(body=body, stype="launch"), LAUNCH, "Vahan", "x", CLAIMS) == []
+    errs = validate_grounding(d(body=body, stype="launch"), LAUNCH, "Vahan", "x", CLAIMS,
+                              all_publications=["Mint"])
+    assert any("shares no distinctive term" in e for e in errs)
+
+def test_a_non_cited_outlet_name_appearing_verbatim_in_the_body_is_rejected():
+    body = "Your voice hiring for warehouses at Vahan, as The Ken put it. Would you take an intern?"
+    assert validate_grounding(d(body=body, stype="launch"), LAUNCH, "Vahan", "x", CLAIMS) == []
+    errs = validate_grounding(d(body=body, stype="launch"), LAUNCH, "Vahan", "x", CLAIMS,
+                              all_publications=["The Ken", "Mint"])
+    assert any("publication name appears" in e for e in errs)
+
+def test_all_publications_does_not_break_a_grounded_draft():
+    assert validate_grounding(d(), NEWS, "Vahan", "Recruitment over voice", CLAIMS,
+                              all_publications=["The Economic Times", "Mint"]) == []

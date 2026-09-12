@@ -43,6 +43,7 @@ class FakeFounderRow:
     linkedin_url: str | None = None
     twitter_url: str | None = None
     bio: str | None = None
+    scraped_at: object = None   # final fix wave (F12): stamped via the injected Clock port
 
 
 class FakeFounderRepo:
@@ -324,3 +325,26 @@ def test_a_flush_time_failure_for_one_company_does_not_abort_the_batch():
     assert result2.news == 1
     assert result2.launches == 1
     assert founder_repo.get_by_yc_user_id(1).company_id == 2
+
+
+# --- Final fix wave (F12, ruling FR-4): every founder upsert is stamped
+# `scraped_at` from the injected Clock port.
+
+def test_founders_are_stamped_scraped_at_from_the_clock():
+    from tests.fakes import FrozenClock
+
+    repos = make_repos()
+    clock = FrozenClock()
+    ScrapeCompanyPage(FakeCompanyPageSource({"vahan": PAGE}), repos, clock=clock).run(
+        FakeCompany(id=1, slug="vahan"))
+    assert repos.founder.rows[1].scraped_at == clock.now()
+
+
+def test_scraped_at_defaults_to_a_real_utc_time():
+    from datetime import datetime, timezone
+
+    repos = make_repos()
+    ScrapeCompanyPage(FakeCompanyPageSource({"vahan": PAGE}), repos).run(FakeCompany(id=1, slug="vahan"))
+    stamped = repos.founder.rows[1].scraped_at
+    assert isinstance(stamped, datetime) and stamped.tzinfo is not None
+    assert abs((datetime.now(timezone.utc) - stamped).total_seconds()) < 60

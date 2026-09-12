@@ -15,6 +15,7 @@ class Company:
     is_hiring: bool
     one_liner: str | None
     long_description: str | None
+    last_synced_at: datetime | None = None   # final fix wave (F12): stamped by SyncCompanies
 
 
 @dataclass

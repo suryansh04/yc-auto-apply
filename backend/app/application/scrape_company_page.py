@@ -48,6 +48,9 @@ broken for any failure past `fetch_page`. `ScrapeRepos` now carries the
 rolls it back before returning — the use case owns the transaction
 boundary it just violated, so it's also the one that repairs it, rather
 than pushing that responsibility onto every caller of `run()`.
+
+Final fix wave (F12, ruling FR-4): every founder upsert is stamped
+`scraped_at` from the injected `Clock` port (default: real UTC time).
 """
 
 from dataclasses import dataclass
@@ -97,13 +100,20 @@ class ScrapeRepos:
     session: _RollbackCapable     # the session all five repos above share
 
 
+class _UTCClock:
+    def now(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+
 class ScrapeCompanyPage:
-    def __init__(self, source, repos: ScrapeRepos):
+    def __init__(self, source, repos: ScrapeRepos, clock=None):
         self._source = source
         self._repos = repos
+        self._clock = clock or _UTCClock()
 
     def run(self, company) -> ScrapeResult:
         result = ScrapeResult(company_slug=company.slug)
+        scraped_at = self._clock.now()
 
         try:
             parsed = self._source.fetch_page(company.slug)
@@ -122,6 +132,7 @@ class ScrapeCompanyPage:
                     linkedin_url=raw.get("linkedin_url"),
                     twitter_url=raw.get("twitter_url"),
                     bio=raw.get("bio"),
+                    scraped_at=scraped_at,
                 )
                 result.founders += 1
                 if is_new:

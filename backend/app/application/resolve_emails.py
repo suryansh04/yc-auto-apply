@@ -79,6 +79,15 @@ Fix round 1 (review of commit `c6c0e8e`), summary of what changed here:
   required within a fixed window around the address itself;
 - a company with no `domain` used to still generate and verify seven
   garbage `...@` candidates; it now skips the verifier entirely.
+
+Final fix wave (F4, ruling FR-3): **one commit per founder.** `ResolveRepos`
+carries the `session` its repos share (mirroring `ScrapeRepos`/`SendRepos`)
+and `run` commits right after each founder's verdicts and transition are
+persisted - and again on a quota pause or a `VerifierError`, so what was
+persisted for that founder before the exception survives too. The CLI used
+to commit once at the very end, so a Ctrl-C two minutes into a run (2 s of
+throttle per call, ~2.5 calls per founder) threw away every verdict already
+paid for out of the 100/day quota - the one budget that binds (D30).
 """
 
 import re
@@ -130,6 +139,10 @@ class _UpsertRepo(Protocol):
     def upsert(self, **fields): ...
 
 
+class _CommitCapable(Protocol):
+    def commit(self) -> None: ...
+
+
 @dataclass
 class ResolveRepos:
     founder: _ListByState        # + get(id), list_by_company_id(company_id)
@@ -137,6 +150,7 @@ class ResolveRepos:
     launch: _ListByCompany
     outreach: _UpsertRepo        # + get_by_founder_id(founder_id)
     email_candidate: _UpsertRepo  # + list_by_founder_id(founder_id)
+    session: _CommitCapable      # the session all five repos above share (F4: committed per founder)
 
 
 class ResolveEmails:
@@ -171,6 +185,7 @@ class ResolveEmails:
                 self._persist_verdict(founder.id, published, None, 0, "published")
                 self._transition(outreach, OutreachState.READY_TO_DRAFT, resolved_email=published)
                 result.resolved += 1
+                self._repos.session.commit()
                 continue
 
             domain = self._domain_for(founder)
@@ -180,6 +195,7 @@ class ResolveEmails:
                 # credits on `...@` garbage before landing here anyway.
                 self._transition(outreach, OutreachState.NEEDS_MANUAL_EMAIL)
                 result.manual += 1
+                self._repos.session.commit()
                 continue
 
             already = self._already_verified(founder.id)
@@ -223,10 +239,14 @@ class ResolveEmails:
 
             if quota_hit:
                 result.paused_on_quota = True
+                # F4: the NEW -> NEEDS_EMAIL step and any verdicts persisted
+                # for this founder before the quota hit are kept.
+                self._repos.session.commit()
                 break  # stop the whole run; every remaining row stays as-is
 
             if verifier_error:
                 result.errors += 1
+                self._repos.session.commit()
                 continue  # leave this founder NEEDS_EMAIL; move on
 
             if resolved_address is not None:
@@ -235,6 +255,7 @@ class ResolveEmails:
             else:
                 self._transition(outreach, OutreachState.NEEDS_MANUAL_EMAIL)
                 result.manual += 1
+            self._repos.session.commit()  # F4 (ruling FR-3): one commit per founder
 
         return result
 

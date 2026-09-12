@@ -43,7 +43,8 @@ What each action guarantees:
   row's citation is nulled so it never claims a source the text was not
   checked against (fix round 1, F3).
 - **`redraft(outreach_id)`** (fix round 1, T16-1) moves `PENDING_APPROVAL
-  -> READY_TO_DRAFT` and nothing else: the next `draft` run replaces the
+  -> READY_TO_DRAFT` and nothing else (refused with `ValueError` from any
+  other state, F6): the next `draft` run replaces the
   existing row in place (`DraftOutreach._finish`). This is the way out for
   a draft flagged because of its *citation* (e.g. a non-intern posting,
   D23), which no edit can repair since edits keep the citation.
@@ -155,6 +156,12 @@ class ReviewOutreach:
 
     def redraft(self, outreach_id: int) -> None:
         outreach = self._outreach(outreach_id)
+        # Final fix wave (F6): `READY_TO_DRAFT` is a legal target from
+        # NEEDS_EMAIL / NEEDS_MANUAL_EMAIL / SENT too, so the state machine
+        # alone would let a Phase 2 caller "redraft" a row that was never
+        # drafted or is already sent. Same explicit guard `edit` has.
+        if OutreachState(outreach.state) is not OutreachState.PENDING_APPROVAL:
+            raise ValueError(f"only a PENDING_APPROVAL draft can be sent back for redraft (this one is {outreach.state})")
         assert_transition(OutreachState(outreach.state), OutreachState.READY_TO_DRAFT)
         self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.READY_TO_DRAFT))
 
@@ -175,7 +182,8 @@ class ReviewOutreach:
         row = self._repos.message.get_outbound(outreach.id, step)
         source_type = getattr(row, "research_source_type", None) if row is not None else None
         source_id = getattr(row, "research_source_id", None) if row is not None else None
-        source = self._resolve_source(company, source_type, source_id)
+        sources = self._sources(company)
+        source = sources.resolvable.get((source_type, source_id)) if source_type and source_id is not None else None
 
         subject, body = subject.strip(), body.strip()
         errors = []
@@ -187,7 +195,8 @@ class ReviewOutreach:
             return errors
         draft = Draft(subject=subject, body=body, research_source_type=source_type or "",
                       research_source_id=source_id, sequence_step=step)
-        errors = self._validate(draft, source, company, founder, self._previous_body(outreach, step))
+        errors = self._validate(draft, source, company, founder, self._previous_body(outreach, step),
+                                all_publications=sources.publications)
         if errors:
             return errors
 
@@ -224,11 +233,13 @@ class ReviewOutreach:
             source = self._resolve_source(company, message.research_source_type, message.research_source_id)
         return ReviewItem(outreach=outreach, founder=founder, company=company, message=message, source=source)
 
+    def _sources(self, company):
+        return build_sources(self._repos.news, self._repos.launch, self._repos.job_posting, company)
+
     def _resolve_source(self, company, kind: str | None, source_id: int | None) -> SourceRow | None:
         if not kind or source_id is None:
             return None
-        sources = build_sources(self._repos.news, self._repos.launch, self._repos.job_posting, company)
-        return sources.resolvable.get((kind, source_id))
+        return self._sources(company).resolvable.get((kind, source_id))
 
     def _previous_body(self, outreach, step: int) -> str | None:
         if step <= 0:
@@ -237,7 +248,7 @@ class ReviewOutreach:
         return getattr(previous, "body", None) if previous is not None else None
 
     def _validate(self, draft: Draft, source: SourceRow | None, company, founder,
-                  previous_body: str | None) -> list[str]:
+                  previous_body: str | None, all_publications=()) -> list[str]:
         claims = load_resume_claims(self._repos.resume_profile, keep_unverified=self._keep_unverified)
         name = getattr(company, "name", None)
         one_liner = getattr(company, "one_liner", None)
@@ -245,7 +256,8 @@ class ReviewOutreach:
         extra_allowed = [getattr(company, "long_description", None) or "", founder.full_name]
         if source is not None:
             return validate_draft(draft, source, name, one_liner, claims,
-                                  previous_body=previous_body, extra_allowed_text=extra_allowed)
+                                  previous_body=previous_body, extra_allowed_text=extra_allowed,
+                                  all_publications=all_publications)
         # No resolvable citation (a manual write with no research material,
         # or a drafter citation that never resolved): grounding cannot be
         # checked, so the style and resume-claims rules stand alone.

@@ -82,6 +82,7 @@ from typing import Protocol
 from app.domain.entities import Draft, ResumeClaim
 from app.domain.interns import is_intern_appropriate
 from app.domain.states import OutreachState, assert_transition
+from app.domain.targeting import OUT_OF_BAND_STATUS
 from app.domain.validation import SourceRow, validate_draft
 
 log = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ class DraftResult:
     retried: int = 0
     errors: int = 0
     aborted: bool = False  # fix round 1 (F3): stopped after consecutive drafter failures
+    skipped_out_of_band: int = 0  # final fix wave (F13): founders at a company that left the band
 
 
 class _ListByState(Protocol):
@@ -139,6 +141,7 @@ class DraftRepos:
 class _Sources:
     offered: list[dict] = field(default_factory=list)          # what the drafter sees
     resolvable: dict[tuple[str, int], SourceRow] = field(default_factory=dict)  # what grounding checks
+    publications: list[str] = field(default_factory=list)     # every news outlet name (F16, spec §10)
 
 
 class DraftOutreach:
@@ -162,6 +165,12 @@ class DraftOutreach:
                 continue
             company = self._repos.company.get(founder.company_id)
             if company is None:
+                continue
+            if getattr(company, "status", None) == OUT_OF_BAND_STATUS:
+                # Final fix wave (F13, ruling FR-9): the company left the
+                # target band since this founder was resolved; leave the
+                # row READY_TO_DRAFT untouched, draft nothing for it.
+                result.skipped_out_of_band += 1
                 continue
             step = int(getattr(outreach, "sequence_step", 0) or 0)
 
@@ -209,6 +218,7 @@ class DraftOutreach:
                 errors = validate_draft(
                     draft, source, company.name, getattr(company, "one_liner", None), claims,
                     previous_body=previous_body, extra_allowed_text=extra_allowed,
+                    all_publications=sources.publications,
                 )
                 if not errors:
                     break
@@ -317,6 +327,8 @@ def build_sources(news_repo, launch_repo, job_posting_repo, company) -> _Sources
         publication = getattr(n, "source", None)
         s.offered.append({"kind": "news", "id": n.id, "text": n.title, "publication": publication})
         s.resolvable[("news", n.id)] = SourceRow("news", n.title, publication, None)
+        if publication and publication not in s.publications:
+            s.publications.append(publication)
 
     for l in launch_repo.list_by_company_id(company.id):
         text = _launch_text(l)

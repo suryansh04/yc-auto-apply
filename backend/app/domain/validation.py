@@ -137,7 +137,18 @@ def _terms(text: str) -> set[str]:
             if w not in _STOPWORDS and (len(w) > 2 or w in _SHORT_TERM_ALLOWLIST)}
 
 
-def validate_grounding(draft, source, company_name, one_liner, claims) -> list[str]:
+def validate_grounding(draft, source, company_name, one_liner, claims,
+                       all_publications=()) -> list[str]:
+    """Spec §10 grounding rules. `all_publications` (final fix wave, F16)
+    is every `company_news.source` for this company, cited or not: the
+    spec bans any of them appearing verbatim in the body, and none of
+    their words may count as the distinctive term the hook shares with
+    the cited row (D29) - a draft citing a launch must not pass grounding
+    by naming the outlet of a *different* news row.
+
+    The spec's "company-specific token" rule (a job title or a distinctive
+    term from `one_liner`/`long_description`) has no separate check: it is
+    merged into the shared-distinctive-term check below (ruling FR-8)."""
     # `claims` is accepted for signature stability but the resume-claims rule
     # itself lives in `validate_claims` below (Task 14), which `validate_draft`
     # composes in alongside this function.
@@ -152,10 +163,11 @@ def validate_grounding(draft, source, company_name, one_liner, claims) -> list[s
         if phrase in low:
             errs.append(f"refers to the source as a source: {phrase!r}")
 
+    publications = [p for p in (source.publication, *all_publications) if p]
     pub_terms: set[str] = set()
-    if source.publication:
-        pub_terms = _terms(source.publication)
-        if source.publication.lower() in low:
+    for publication in dict.fromkeys(publications):
+        pub_terms |= _terms(publication)
+        if publication.lower() in low:
             errs.append("publication name appears in the body")
 
     hook = _hook(body)
@@ -285,9 +297,10 @@ def validate_claims(draft, claims, allowed_text=()) -> list[str]:
 
 
 def validate_draft(draft, source, company_name, one_liner, claims,
-                   previous_body=None, extra_allowed_text=()) -> list[str]:
+                   previous_body=None, extra_allowed_text=(), all_publications=()) -> list[str]:
     allowed = [company_name or "", one_liner or "", source.text if source else "",
                *extra_allowed_text]
     return (validate_style(draft, previous_body)
-            + validate_grounding(draft, source, company_name, one_liner, claims)
+            + validate_grounding(draft, source, company_name, one_liner, claims,
+                                 all_publications=all_publications)
             + validate_claims(draft, claims, allowed_text=allowed))

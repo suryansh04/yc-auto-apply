@@ -1,40 +1,44 @@
-"""Fixtures for Task 12's `ResolveEmails` tests and Task 14's
-`DraftOutreach` tests (and any other application-layer test that needs
-in-memory repos).
+"""In-memory repo fakes shared by the application-layer tests, the
+review-loop CLI tests and the offline end-to-end test (final fix wave, F9 /
+ruling FR-5).
+
+Plain module, not a conftest: the fixtures that build these live in
+`tests/conftest.py` (the `repos` bundle and the fixtures root-level tests
+share) and `tests/application/conftest.py` (application-only founders).
+Neither conftest imports the other - the old root conftest re-exported
+fixtures by importing `tests.application.conftest` as a module, which is
+what made pytest lose the application fixtures on an interleaved
+invocation such as
+`pytest tests/application/test_resolve_emails.py tests/test_cli.py
+tests/application/test_draft_outreach.py` (`fixture 'repos' not found`).
 
 These fakes are deliberately separate from `tests/fakes.py`: that module
 holds fakes for the *port* Protocols in `app.ports` (`EmailVerifier`,
 `Drafter`, ...), each satisfying a fixed interface pinned by
 `test_fakes_satisfy_ports.py`. The repos bundled into `ResolveRepos` /
-`DraftRepos` are not ports — they are each application module's own
-dependency shape, the same way `ScrapeRepos` got its own local fakes inline
-in `test_scrape_company_page.py`. `founder`/`outreach` are wired to share
-state (a fake join, mirroring the real `FounderRepo.list_by_state`'s SQL
-join to `Outreach.state`) since one `Outreach` row exists per founder.
+`DraftRepos` are not ports - they are each application module's own
+dependency shape. `founder`/`outreach` are wired to share state (a fake
+join, mirroring the real `FounderRepo.list_by_state`'s SQL join to
+`Outreach.state`) since one `Outreach` row exists per founder.
 
-Task 14 extension: the `repos` fixture returns a single `FakeRepos` bundle
-that is a structural superset of both `ResolveRepos` and `DraftRepos` —
-each use case only ever touches the attributes it declares, so one bundle
-serves both test modules without either having to know about the other's
-repos. `ready_founder` / `founder_with_senior_posting` are the Task 14
-fixtures; the `repos` fixture also seeds a resume profile with one claim
-(the one the task-14 brief's `GOOD` draft cites), which the Task 12 tests
-simply ignore.
+`FakeRepos` is a structural superset of `ResolveRepos` (Task 12),
+`DraftRepos` (Task 14), `SendRepos` (Task 15), `ReviewRepos` (Task 16),
+`ManualEmailRepos` (final fix wave) and - since the offline end-to-end
+test - the `SyncCompanies` company repo and `ScrapeRepos` too; each use
+case only ever touches the attributes it declares.
 
 Deliberate fixture choice: each fake `Outreach` row's `id` is set equal to
 its `founder_id` (both come from the same fixture-local counter). Nothing
-in `ResolveEmails` or `DraftOutreach` relies on this — they only ever look
-outreach rows up via `get_by_founder_id`/`upsert(founder_id=...)` — but the
-briefs' own test bodies call `repos.outreach.get(a_founder.id)`, i.e.
-address the outreach row by the *founder's* id. Matching the two id spaces
-in these fixtures is what makes that call resolve to the right row.
+in the use cases relies on this - they only ever look outreach rows up via
+`get_by_founder_id`/`upsert(founder_id=...)` - but the briefs' own test
+bodies call `repos.outreach.get(a_founder.id)`, i.e. address the outreach
+row by the *founder's* id. Matching the two id spaces is what makes that
+call resolve to the right row.
 """
 
-import copy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-import pytest
 
 from app.domain.states import OutreachState
 
@@ -55,6 +59,7 @@ class FakeCompanyRow:
     team_size: int | None = None
     status: str | None = None
     is_hiring: bool = False
+    last_synced_at: object = None   # final fix wave (F12): stamped via the injected Clock port
 
 
 class FakeCompanyRepo:
@@ -177,6 +182,7 @@ class FakeFounderRow:
     bio: str | None = None
     yc_user_id: int | None = None   # Task 16 (offline e2e): what `ScrapeCompanyPage` keys on
     twitter_url: str | None = None
+    scraped_at: object = None       # final fix wave (F12): stamped via the injected Clock port
 
 
 class FakeFounderRepo:
@@ -471,74 +477,8 @@ RESUME_CLAIMS = [
 ]
 
 
-@pytest.fixture
-def repos() -> FakeRepos:
-    outreach = FakeOutreachRepo()
-    bundle = FakeRepos(
-        founder=FakeFounderRepo(outreach),
-        company=FakeCompanyRepo(),
-        launch=FakeLaunchRepo(),
-        outreach=outreach,
-        email_candidate=FakeEmailCandidateRepo(),
-        news=FakeNewsRepo(),
-        job_posting=FakeJobPostingRepo(),
-        message=FakeMessageRepo(),
-        resume_profile=FakeResumeProfileRepo(),
-        session=FakeSession(),
-    )
-    # deepcopy (Task 16 fix round 1): a test that flips a claim's `span_verified`
-    # in place must not leak into the module-level RESUME_CLAIMS.
-    bundle.resume_profile.save("Built a scheduler in Python, cut wait 50%", copy.deepcopy(RESUME_CLAIMS))
-    return bundle
 
-
-# --- Task 12 fixtures ---------------------------------------------------------
-
-
-@pytest.fixture
-def a_founder(repos: FakeRepos) -> FakeFounderRow:
-    """One founder, one-founder company, `NEEDS_EMAIL`. Named/domained to
-    match the brief's own test bodies: `generate_candidates("Pratish
-    Gandhi", "onefin.com")` yields `pratish@onefin.com` before
-    `pratish.gandhi@onefin.com`."""
-    repos.company.add(id=1, domain="onefin.com")
-    founder = repos.founder.add(
-        id=1, company_id=1, full_name="Pratish Gandhi",
-        linkedin_url="https://linkedin.com/in/pratish-gandhi",
-    )
-    repos.outreach.add(id=1, founder_id=founder.id, state=str(OutreachState.NEEDS_EMAIL))
-    return founder
-
-
-@pytest.fixture
-def founder_with_launch_email(repos: FakeRepos) -> FakeFounderRow:
-    """A single-founder company whose launch post carries a
-    `published_email` — the D18 short-circuit applies unconditionally here
-    since there is exactly one founder to attribute it to."""
-    repos.company.add(id=2, domain="acme.com")
-    founder = repos.founder.add(id=2, company_id=2, full_name="Jane Founder")
-    repos.outreach.add(id=2, founder_id=founder.id, state=str(OutreachState.NEEDS_EMAIL))
-    repos.launch.add(company_id=2, body="Reach me at jane@acme.com", published_email="jane@acme.com")
-    return founder
-
-
-@pytest.fixture
-def two_founders(repos: FakeRepos) -> list[FakeFounderRow]:
-    """Two unrelated single-founder companies, both `NEEDS_EMAIL`, no
-    launches — used to exercise a quota that runs out partway through a
-    batch run."""
-    repos.company.add(id=3, domain="one.com")
-    f1 = repos.founder.add(id=3, company_id=3, full_name="Asha Rao")
-    repos.outreach.add(id=3, founder_id=f1.id, state=str(OutreachState.NEEDS_EMAIL))
-
-    repos.company.add(id=4, domain="two.com")
-    f2 = repos.founder.add(id=4, company_id=4, full_name="Vikram Shah")
-    repos.outreach.add(id=4, founder_id=f2.id, state=str(OutreachState.NEEDS_EMAIL))
-
-    return [f1, f2]
-
-
-# --- Task 14 fixtures ---------------------------------------------------------
+# --- Task 14 constants ---------------------------------------------------------
 
 VAHAN_NEWS = "OpenAI backs Indian startup Vahan's tech to automate blue-collar hiring with voice AI"
 VAHAN_DESCRIPTION = (
@@ -547,39 +487,9 @@ VAHAN_DESCRIPTION = (
 )
 
 
-@pytest.fixture
-def ready_founder(repos: FakeRepos) -> FakeFounderRow:
-    """Madhav at Vahan, `READY_TO_DRAFT`, with one news item (id=1 — the id
-    the task-14 brief's `GOOD` draft cites) and a long description over the
-    80-character floor. No launch, no postings, so the default source list
-    is exactly `[news, long_description]`."""
-    repos.company.add(id=5, domain="vahan.ai", name="Vahan",
-                      one_liner="Recruitment over voice", long_description=VAHAN_DESCRIPTION)
-    founder = repos.founder.add(id=5, company_id=5, full_name="Madhav Krishna", title="Founder")
-    repos.outreach.add(id=5, founder_id=founder.id, state=str(OutreachState.READY_TO_DRAFT))
-    repos.news.add(id=1, company_id=5, title=VAHAN_NEWS, source="The Economic Times")
-    return founder
 
 
-@pytest.fixture
-def founder_with_senior_posting(repos: FakeRepos) -> FakeFounderRow:
-    """A `READY_TO_DRAFT` founder whose company has no news and no launch,
-    only a senior (6+ years) posting and a long description — the D23 case:
-    the posting must never be offered, not even as the only alternative to
-    the description."""
-    repos.company.add(
-        id=6, domain="acme.com", name="Acme", one_liner="Payments for fleets",
-        long_description=("Acme builds a payments rail for trucking fleets, settling fuel and toll "
-                          "spend per vehicle with a ledger reconciled nightly against bank feeds."),
-    )
-    founder = repos.founder.add(id=6, company_id=6, full_name="Riya Nair")
-    repos.outreach.add(id=6, founder_id=founder.id, state=str(OutreachState.READY_TO_DRAFT))
-    repos.job_posting.add(id=1, company_id=6, title="Senior Engineer",
-                          employment_type="Full-time", min_experience="6+ years")
-    return founder
-
-
-# --- Task 15 fixtures ---------------------------------------------------------
+# --- Task 15 constants and helpers --------------------------------------------
 
 APPROVED_AT = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
 APPROVED_BODY = (
@@ -608,52 +518,9 @@ def _add_founder_with_draft(repos: FakeRepos, id: int, full_name: str, email: st
     return founder
 
 
-@pytest.fixture
-def one_approved(repos: FakeRepos) -> FakeFounderRow:
-    """Madhav, `APPROVED`, draft approved, address resolved."""
-    return _add_founder_with_draft(repos, 10, "Madhav Krishna", "madhav@example.com",
-                                   OutreachState.APPROVED, approved=True)
 
 
-@pytest.fixture
-def pending_and_approved(repos: FakeRepos) -> tuple[FakeFounderRow, FakeFounderRow]:
-    """One `PENDING_APPROVAL` founder (draft not approved) and one
-    `APPROVED` founder at `approved@example.com` — the brief's own address."""
-    pending = _add_founder_with_draft(repos, 11, "Riya Nair", "pending@example.com",
-                                      OutreachState.PENDING_APPROVAL, approved=False)
-    approved = _add_founder_with_draft(repos, 12, "Asha Rao", "approved@example.com",
-                                       OutreachState.APPROVED, approved=True)
-    return pending, approved
-
-
-@pytest.fixture
-def five_approved(repos: FakeRepos) -> list[FakeFounderRow]:
-    names = ["Asha Rao", "Vikram Shah", "Riya Nair", "Pratish Gandhi", "Jane Founder"]
-    return [
-        _add_founder_with_draft(repos, 20 + i, name, f"founder{i}@example.com",
-                                OutreachState.APPROVED, approved=True)
-        for i, name in enumerate(names)
-    ]
-
-
-@pytest.fixture
-def sent_earlier(repos: FakeRepos):
-    """`sent_earlier(n, at=...)` adds `n` already-sent outbound rows (with
-    Gmail ids) for `SENT` founders, stamped `at` — for the rolling-window
-    cap tests (ruling R-A)."""
-    def _add(n: int, at: datetime) -> None:
-        for i in range(n):
-            id = 100 + len(repos.message.rows)
-            _add_founder_with_draft(repos, id, f"Sent Earlier{i}", f"earlier{id}@example.com",
-                                    OutreachState.SENT, approved=True)
-            row = repos.message.get_outbound(id, 0)
-            row.sent_at = at
-            row.gmail_message_id = f"earlier-{id}"
-            row.gmail_thread_id = f"earlier-thread-{id}"
-    return _add
-
-
-# --- Task 16 fixtures ---------------------------------------------------------
+# --- Task 16 constants and helpers --------------------------------------------
 
 PENDING_SUBJECT = "Backend intern at Vahan"
 # The task-14 tests' GOOD body: validates against `VAHAN_NEWS` + the one
@@ -693,37 +560,3 @@ def _add_pending_founder(repos: FakeRepos, id: int, full_name: str, email: str, 
     return founder
 
 
-@pytest.fixture
-def one_pending(repos: FakeRepos) -> FakeFounderRow:
-    """Madhav, `PENDING_APPROVAL`, a validating draft, no `last_error`."""
-    return _add_pending_founder(repos, 30, "Madhav Krishna", "madhav@example.com")
-
-
-@pytest.fixture
-def two_pending(repos: FakeRepos) -> tuple[FakeFounderRow, FakeFounderRow]:
-    return (_add_pending_founder(repos, 31, "Madhav Krishna", "madhav@example.com"),
-            _add_pending_founder(repos, 32, "Asha Rao", "asha@example.com"))
-
-
-@pytest.fixture
-def manual_write_pending(repos: FakeRepos) -> FakeFounderRow:
-    """Riya: the drafter failed validation twice, so the rejected draft is
-    stored and `last_error` carries the reasons (needs manual write)."""
-    return _add_pending_founder(
-        repos, 33, "Riya Nair", "riya@example.com",
-        body="I hope this email finds you well. Would you take an intern?",
-        last_error=MANUAL_WRITE_ERROR,
-    )
-
-
-@pytest.fixture
-def no_material_pending(repos: FakeRepos) -> FakeFounderRow:
-    """Vikram: no research material at all, so `DraftOutreach` never
-    called the drafter and wrote NO message row - only the flag."""
-    founder = _add_pending_founder(
-        repos, 34, "Vikram Shah", "vikram@example.com", with_row=False,
-        last_error="needs manual write: no research material",
-    )
-    repos.news.rows = [n for n in repos.news.rows if n.company_id != 34]
-    repos.company.get(34).long_description = "Too short."
-    return founder

@@ -21,7 +21,7 @@ from app.cli import render_review_screen
 from app.config import get_settings
 from app.domain.compose import OPT_OUT_LINE, compose_wire_text
 from app.domain.states import OutreachState as S
-from tests.application.conftest import PENDING_BODY, PENDING_SUBJECT, FakeFounderRow, FakeCompanyRow
+from tests.fakes_repos import PENDING_BODY, PENDING_SUBJECT, FakeCompanyRow, FakeFounderRow
 
 runner = CliRunner()
 

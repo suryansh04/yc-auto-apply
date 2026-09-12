@@ -28,9 +28,33 @@ config=types.GenerateContentConfig(...))`, response text on `.text`.
 from __future__ import annotations
 
 import json
-from typing import Any
+import logging
+import time
+from typing import Any, Callable
 
+from google.genai import errors as genai_errors
 from google.genai import types
+
+logger = logging.getLogger(__name__)
+
+# Live-run fix (2026-09-13): Gemini answered 503 UNAVAILABLE ("high demand")
+# on two flash models within minutes. Those and 429 are transient: retry
+# with 5s/10s/20s backoff through an injectable `_sleep`, then re-raise.
+_TRANSIENT_STATUS_CODES = {429, 503}
+_MAX_TRANSIENT_RETRIES = 3
+_BASE_BACKOFF_SECONDS = 5.0
+
+
+def _generate_with_retry(client, _sleep: Callable[[float], None], what: str, **kwargs):
+    for attempt in range(_MAX_TRANSIENT_RETRIES + 1):
+        try:
+            return client.models.generate_content(**kwargs)
+        except genai_errors.APIError as exc:
+            if exc.code not in _TRANSIENT_STATUS_CODES or attempt == _MAX_TRANSIENT_RETRIES:
+                raise
+            delay = _BASE_BACKOFF_SECONDS * (2 ** attempt)
+            logger.warning("%s: Gemini %s, retrying in %.0fs", what, exc.code, delay)
+            _sleep(delay)
 
 CLAIM_KINDS = ["skill", "project", "metric", "role", "education"]
 
@@ -87,12 +111,14 @@ class GeminiResumeParser:
     (`app.application.parse_resume.ParseResume`), not the adapter's — the
     adapter only guarantees the *shape* the schema promised."""
 
-    def __init__(self, client, model: str):
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
         self._client = client
         self._model = model
+        self._sleep = _sleep
 
     def parse(self, raw_text: str) -> list[dict]:
-        response = self._client.models.generate_content(
+        response = _generate_with_retry(
+            self._client, self._sleep, "resume parser",
             model=self._model,
             contents=_PARSER_PROMPT.format(resume=raw_text),
             config=types.GenerateContentConfig(
@@ -239,12 +265,14 @@ class GeminiDrafter:
     use case's job, not this adapter's — the prompt states every rule so
     the model has a fair chance of passing, but nothing here trusts it."""
 
-    def __init__(self, client, model: str):
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
         self._client = client
         self._model = model
+        self._sleep = _sleep
 
     def draft(self, prompt_context: dict) -> dict:
-        response = self._client.models.generate_content(
+        response = _generate_with_retry(
+            self._client, self._sleep, "drafter",
             model=self._model,
             contents=build_draft_prompt(prompt_context),
             config=types.GenerateContentConfig(

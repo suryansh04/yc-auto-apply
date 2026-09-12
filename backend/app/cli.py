@@ -7,6 +7,7 @@ place allowed to import both a concrete adapter and a concrete repo and glue
 them together.
 """
 
+import sys
 from typing import Optional
 
 import typer
@@ -21,6 +22,13 @@ app = typer.Typer(add_completion=False)
 @app.callback()
 def _callback() -> None:
     """YC Auto Apply operator CLI. Run a subcommand, e.g. `sync`."""
+    # Live-run fix (2026-09-13): a Windows console defaults to cp1252 and
+    # crashes `typer.echo` on any character outside it (a resume's "~",
+    # a founder's name, a news headline). Emit UTF-8 regardless; the
+    # `errors="replace"` fallback guarantees output can never crash a run.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     # Present even though empty: without a callback, Typer collapses a
     # single-command app so its one command runs with no subcommand name at
     # all, breaking the documented invocation `python -m app.cli sync`. A

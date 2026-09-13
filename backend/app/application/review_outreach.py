@@ -113,6 +113,18 @@ class ReviewItem:
     source: SourceRow | None      # the cited research row, resolved; None = no citation
 
 
+class OutreachNotFound(ValueError):
+    """Task 4 review, ruling T4-1: raised only by `_outreach()` for an id
+    with no outreach row at all. A `ValueError` subclass on purpose —
+    `app.cli.review`'s dispatch already catches `(ValueError,
+    IllegalTransition)` around every action and just echoes `str(exc)`, so
+    that loop keeps working untouched. A caller that wants to tell "no
+    such row" apart from "this row exists but the action is refused"
+    (`app.api.routers.queue`, mapping the first to 404 and the rest to
+    409) catches this subclass first; nothing else in `ReviewOutreach`
+    raises it."""
+
+
 class ReviewOutreach:
     def __init__(self, repos: ReviewRepos, keep_unverified: bool = False):
         self._repos = repos
@@ -222,7 +234,7 @@ class ReviewOutreach:
     def _outreach(self, outreach_id: int):
         outreach = self._repos.outreach.get(outreach_id)
         if outreach is None:
-            raise ValueError(f"no outreach with id {outreach_id}")
+            raise OutreachNotFound(f"no outreach with id {outreach_id}")
         return outreach
 
     def _item(self, outreach, founder) -> ReviewItem:

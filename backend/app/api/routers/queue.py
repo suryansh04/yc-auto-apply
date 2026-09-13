@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.deps import Repos, get_repos
 from app.api.schemas import EditIn, OkOut, QueueItemOut
-from app.application.review_outreach import ReviewItem, ReviewOutreach, ReviewRepos
+from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
 from app.domain.compose import compose_wire_text, first_name
 from app.domain.states import IllegalTransition
 
@@ -56,18 +56,14 @@ def _use_case(repos: Repos) -> ReviewOutreach:
     return ReviewOutreach(_review_repos(repos))
 
 
-def _not_found_message(exc: Exception) -> bool:
-    # `ReviewOutreach._outreach` is the single place that raises this exact
-    # message for a missing row (`no outreach with id {id}`) - every other
-    # `ValueError`/`IllegalTransition` the use case raises is a refusal of
-    # an otherwise-real row (flagged draft, wrong state), which is a 409,
-    # not a 404.
-    return str(exc).startswith("no outreach with id")
-
-
-def _action_error(exc: Exception) -> HTTPException:
-    if _not_found_message(exc):
-        return HTTPException(404, "no such outreach")
+def _action_error(exc: ValueError | IllegalTransition) -> HTTPException:
+    # T4-1 (fix round 1): `OutreachNotFound` (a `ValueError` subclass,
+    # raised only by `ReviewOutreach._outreach()` for a missing row) is
+    # caught ahead of the generic `ValueError` in every handler below, so
+    # by the time this runs `exc` is always a refusal of an otherwise-real
+    # row (flagged draft, wrong state) - always 409. No string-matching:
+    # the not-found/refused distinction lives in the use case's exception
+    # type, not in the router.
     return HTTPException(409, str(exc))
 
 
@@ -111,7 +107,13 @@ def list_queue(repos: Repos = Depends(get_repos)) -> list[QueueItemOut]:
 def get_queue_item(outreach_id: int, repos: Repos = Depends(get_repos)) -> QueueItemOut:
     try:
         item = _use_case(repos).load(outreach_id)
-    except (KeyError, ValueError):
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except ValueError:
+        # `load()`'s other failure (a resolvable outreach with no founder
+        # row) is also "there is nothing here to show" for a single-item
+        # GET, so it is 404 too - unlike the write routes below, there is
+        # no refused-but-real-row case on a plain read.
         raise HTTPException(404, "no such outreach")
     return _to_out(item)
 
@@ -120,7 +122,7 @@ def get_queue_item(outreach_id: int, repos: Repos = Depends(get_repos)) -> Queue
 def approve(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     try:
         _use_case(repos).approve(outreach_id, _UTCClock().now())
-    except KeyError:
+    except OutreachNotFound:
         raise HTTPException(404, "no such outreach")
     except (ValueError, IllegalTransition) as exc:
         raise _action_error(exc)
@@ -132,7 +134,7 @@ def approve(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
 def reject(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     try:
         _use_case(repos).reject(outreach_id)
-    except KeyError:
+    except OutreachNotFound:
         raise HTTPException(404, "no such outreach")
     except (ValueError, IllegalTransition) as exc:
         raise _action_error(exc)
@@ -144,7 +146,7 @@ def reject(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
 def redraft(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     try:
         _use_case(repos).redraft(outreach_id)
-    except KeyError:
+    except OutreachNotFound:
         raise HTTPException(404, "no such outreach")
     except (ValueError, IllegalTransition) as exc:
         raise _action_error(exc)
@@ -156,7 +158,7 @@ def redraft(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
 def edit(outreach_id: int, payload: EditIn, repos: Repos = Depends(get_repos)):
     try:
         errors = _use_case(repos).edit(outreach_id, payload.subject, payload.body)
-    except KeyError:
+    except OutreachNotFound:
         raise HTTPException(404, "no such outreach")
     except (ValueError, IllegalTransition) as exc:
         raise _action_error(exc)

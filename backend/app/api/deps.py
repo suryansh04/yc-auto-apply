@@ -12,7 +12,7 @@ overrides it in tests so the whole API can run against the in-memory
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -46,10 +46,23 @@ def _session() -> Session:
     return Session(bind=_engine)
 
 
-def real_repos() -> Iterator[Repos]:
+def real_repos(session_factory: Callable[[], Session] = _session) -> Iterator[Repos]:
     """Wires concrete adapters/db repos into a `Repos` bundle for one
     request, exactly the way each `cli.py` command wires its own bundle —
-    then commits and closes the session when the request is done."""
+    then closes the session when the request is done, on both the success
+    and the exception path (a raise inside a route resumes this generator
+    via `.throw()` at the `yield` below, which still reaches `finally`).
+
+    Deliberately does NOT commit (fix round 2, point 3): a GET must not
+    write, and a write route commits explicitly on its own action (Task 4's
+    plan calls `repos.session.commit()` in each handler) rather than
+    relying on an implicit commit here that it can't control the boundary
+    of.
+
+    `session_factory` defaults to the real `_session()` (a live DB
+    connection) but can be swapped for a fake in a test that wants to check
+    the close-on-every-path behaviour without a database — see
+    `backend/tests/api/test_deps.py`."""
     from app.adapters.db.repositories import (
         CompanyLaunchRepo,
         CompanyNewsRepo,
@@ -63,7 +76,7 @@ def real_repos() -> Iterator[Repos]:
         ResumeProfileRepo,
     )
 
-    session = _session()
+    session = session_factory()
     try:
         yield Repos(
             founder=FounderRepo(session),
@@ -78,7 +91,6 @@ def real_repos() -> Iterator[Repos]:
             job=JobRepo(session),
             session=session,
         )
-        session.commit()
     finally:
         session.close()
 

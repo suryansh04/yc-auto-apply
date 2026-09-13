@@ -33,6 +33,13 @@ def test_needs_manual_email_founder_counts_under_its_own_key_not_new(client, rep
     assert body["counts"]["new"] == 0
 
 
+def test_stats_get_issues_no_commit(client, repos):
+    """T3 fix round 2, point 3: `get_repos` must not commit - a GET is a
+    read, and a write route is the one responsible for its own commit."""
+    client.get("/api/stats")
+    assert repos.session.commit_calls == 0
+
+
 def test_stats_is_json_and_has_no_server_header_leak(client):
     r = client.get("/api/stats")
     assert r.status_code == 200

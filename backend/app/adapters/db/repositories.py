@@ -69,6 +69,7 @@ from app.adapters.db.models import (
     EmailCandidate,
     Founder,
     GmailCredential,
+    Job,
     JobPosting,
     Message,
     Outreach,
@@ -555,3 +556,46 @@ class GmailCredentialRepo:
         return self.session.execute(
             select(GmailCredential).where(GmailCredential.account_email == account_email)
         ).scalar_one_or_none()
+
+
+# --- Added in Task 2 (Phase 2, spec §4): bookkeeping for a background stage
+# run, one row per invocation. Same `upsert(**fields)` shape as every repo
+# above, keyed on `id` (like `MessageRepo`) since a job has no natural key
+# beyond it; `RunJob` (app.application.run_job) is the only caller.
+
+
+class JobRepo:
+    """Phase 2 (spec §4). Uniform `upsert(**fields)` like every other repo."""
+
+    def __init__(self, session: Session):
+        self._session = session
+
+    def upsert(self, **fields) -> Job:
+        job_id = fields.pop("id", None)
+        row = self._session.get(Job, job_id) if job_id else None
+        if row is None:
+            row = Job(**fields)
+            self._session.add(row)
+        else:
+            for key, value in fields.items():
+                setattr(row, key, value)
+        self._session.flush()
+        return row
+
+    def get(self, job_id: int) -> Job | None:
+        return self._session.get(Job, job_id)
+
+    def active(self, kind: str) -> Job | None:
+        return self._session.scalars(
+            select(Job).where(Job.kind == kind, Job.status.in_(("queued", "running")))
+        ).first()
+
+    def list_active(self) -> list[Job]:
+        return list(self._session.scalars(
+            select(Job).where(Job.status.in_(("queued", "running")))
+        ))
+
+    def list_recent(self, limit: int = 50) -> list[Job]:
+        return list(self._session.scalars(
+            select(Job).order_by(Job.id.desc()).limit(limit)
+        ))

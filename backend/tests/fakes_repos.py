@@ -453,12 +453,51 @@ class FakeSession:
         self.rollback_calls += 1
 
 
+# --- Phase 2 (Task 2/3): job bookkeeping ---------------------------------------
+
+
+class FakeJobRepo:
+    """Mirrors the real `JobRepo` (app.adapters.db.repositories): uniform
+    `upsert(**fields)` keyed on `id`, plus the read helpers `RunJob` and the
+    stats endpoint use."""
+
+    def __init__(self):
+        self.rows: dict[int, object] = {}
+        self._next = 1
+
+    def upsert(self, **fields) -> object:
+        job_id = fields.pop("id", None) or self._next
+        if job_id == self._next:
+            self._next += 1
+        row = self.rows.get(job_id)
+        if row is None:
+            row = type("FakeJobRow", (), {"id": job_id})()
+            self.rows[job_id] = row
+        for key, value in fields.items():
+            setattr(row, key, value)
+        return row
+
+    def get(self, job_id: int) -> object | None:
+        return self.rows.get(job_id)
+
+    def active(self, kind: str) -> object | None:
+        return next((r for r in self.rows.values()
+                     if r.kind == kind and r.status in ("queued", "running")), None)
+
+    def list_active(self) -> list:
+        return [r for r in self.rows.values() if r.status in ("queued", "running")]
+
+    def list_recent(self, limit: int = 50) -> list:
+        return sorted(self.rows.values(), key=lambda r: r.id, reverse=True)[:limit]
+
+
 @dataclass
 class FakeRepos:
     """Structural superset of `ResolveRepos` (Task 12), `DraftRepos`
     (Task 14), `SendRepos` (Task 15), `ReviewRepos` (Task 16) and — since
     the Task 16 offline end-to-end test — the `SyncCompanies` company repo
-    and `ScrapeRepos` too; see the module docstring."""
+    and `ScrapeRepos` too; see the module docstring. `job` (Phase 2 Task 3)
+    is the FastAPI adapter's addition, for the `/api/stats` router."""
     founder: FakeFounderRepo
     company: FakeCompanyRepo
     launch: FakeLaunchRepo
@@ -468,6 +507,7 @@ class FakeRepos:
     job_posting: FakeJobPostingRepo
     message: FakeMessageRepo
     resume_profile: FakeResumeProfileRepo
+    job: FakeJobRepo
     session: FakeSession
 
 

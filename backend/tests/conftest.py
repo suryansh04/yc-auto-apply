@@ -50,6 +50,7 @@ from tests.fakes_repos import (
     FakeFounderRepo,
     FakeFounderRow,
     FakeJobPostingRepo,
+    FakeJobRepo,
     FakeLaunchRepo,
     FakeMessageRepo,
     FakeMessageRow,
@@ -77,6 +78,7 @@ def repos() -> FakeRepos:
         job_posting=FakeJobPostingRepo(),
         message=FakeMessageRepo(),
         resume_profile=FakeResumeProfileRepo(),
+        job=FakeJobRepo(),
         session=FakeSession(),
     )
     # deepcopy (Task 16 fix round 1): a test that flips a claim's `span_verified`

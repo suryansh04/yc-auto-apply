@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import Repos, get_repos
 from app.api.schemas import JobOut, QuotaOut, StatsOut
-from app.application.stats import funnel_counts
+from app.domain.states import OutreachState
 
 router = APIRouter(tags=["stats"])
 
@@ -23,7 +23,12 @@ EMAIL_VERIFIER_DAILY_LIMIT = 100
 
 @router.get("/stats", response_model=StatsOut)
 def get_stats(repos: Repos = Depends(get_repos)) -> StatsOut:
-    counts = funnel_counts(repos.founder.list_by_state)
+    # T3-1: raw OutreachState keys, every state present (even at zero) so the
+    # frontend never has to guess whether a missing key means zero or an
+    # error. Grouping states for display is the frontend's job, not this
+    # endpoint's — folding e.g. needs_manual_email into a coarser bucket
+    # would hide exactly the action queue the dashboard exists to surface.
+    counts = {state.value: len(repos.founder.list_by_state(state)) for state in OutreachState}
 
     # Read directly from the environment rather than `get_settings()`:
     # `Settings.database_url` has no default, so building a full `Settings`

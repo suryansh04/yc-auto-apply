@@ -387,3 +387,61 @@ def test_different_keys_get_their_own_filters():
     assert _filters_for("f7-key-a") == [] and len(_filters_for("f7-key-b")) == 1
     b.close()
     assert _filters_for("f7-key-b") == []
+
+
+# --- Live-run fix (2026-09-13): HTTP 429 must back off and retry, not fail ---
+# Observed on the first real `resolve` run: MyEmailVerifier returned 429 well
+# inside its documented 30/min, and the adapter raised `VerifierError`, so 8
+# founders were skipped and their earlier credits partly wasted.
+
+
+@respx.mock
+def test_429_is_retried_after_the_retry_after_header_and_then_succeeds():
+    route = respx.get(_URL_PATTERN)
+    route.side_effect = [
+        httpx.Response(429, headers={"Retry-After": "7"}, text="slow down"),
+        httpx.Response(200, json={"Status": "Valid"}),
+    ]
+    sleeps: list[float] = []
+    verdict = _client(_sleep=sleeps.append).verify("a@b.com")
+    assert verdict == "valid"
+    assert route.call_count == 2
+    assert 7.0 in sleeps
+
+
+@respx.mock
+def test_429_without_retry_after_backs_off_exponentially():
+    route = respx.get(_URL_PATTERN)
+    route.side_effect = [
+        httpx.Response(429, text="slow down"),
+        httpx.Response(429, text="slow down"),
+        httpx.Response(200, json={"Status": "Invalid"}),
+    ]
+    sleeps: list[float] = []
+    assert _client(_sleep=sleeps.append).verify("a@b.com") == "invalid"
+    assert route.call_count == 3
+    backoffs = [s for s in sleeps if s >= 5.0]
+    assert backoffs == [5.0, 10.0]
+
+
+@respx.mock
+def test_429_gives_up_after_three_retries_with_a_verifier_error():
+    route = respx.get(_URL_PATTERN)
+    route.mock(return_value=httpx.Response(429, text="slow down"))
+    with pytest.raises(VerifierError) as exc_info:
+        _client().verify("a@b.com")
+    assert route.call_count == 4  # 1 attempt + 3 retries
+    assert exc_info.value.status == 429
+    assert API_KEY not in str(exc_info.value)
+
+
+@respx.mock
+def test_429_retry_after_is_capped_so_a_hostile_header_cannot_hang_the_run():
+    route = respx.get(_URL_PATTERN)
+    route.side_effect = [
+        httpx.Response(429, headers={"Retry-After": "3600"}, text="slow down"),
+        httpx.Response(200, json={"Status": "Valid"}),
+    ]
+    sleeps: list[float] = []
+    _client(_sleep=sleeps.append).verify("a@b.com")
+    assert max(sleeps) <= 60.0

@@ -277,3 +277,69 @@ def test_f17_parser_drops_non_dict_items_from_the_array():
 def test_no_gemini_model_id_is_hardcoded_in_the_adapter_module():
     source = pathlib.Path(inspect.getsourcefile(gemini_module)).read_text(encoding="utf-8")
     assert "gemini-" not in source.lower()
+
+
+# --- Live-run fix (2026-09-13): transient 503/429 from Gemini must be retried --
+# Observed on the first real `parse-resume`: `google.genai.errors.ServerError`
+# 503 UNAVAILABLE ("high demand") on two different flash models within
+# minutes. Both adapters retry with backoff via an injectable `_sleep`.
+
+from google.genai import errors as genai_errors
+
+from app.adapters.gemini import GeminiDrafter, GeminiResumeParser
+
+
+def _server_error(code):
+    return genai_errors.APIError(code, {"error": {"code": code, "message": "high demand", "status": "UNAVAILABLE"}})
+
+
+class FlakyModels(FakeModels):
+    """Raises the queued errors first, then answers like FakeModels."""
+
+    def __init__(self, text, failures):
+        super().__init__(text)
+        self._failures = list(failures)
+
+    def generate_content(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._failures:
+            raise self._failures.pop(0)
+        return _Response(self._text)
+
+
+def _flaky_client(text, failures):
+    c = FakeGenAIClient(text)
+    c.models = FlakyModels(text, failures)
+    return c
+
+
+def test_parser_retries_a_503_with_backoff_then_succeeds():
+    client = _flaky_client(CLAIMS_JSON, [_server_error(503), _server_error(503)])
+    sleeps: list[float] = []
+    claims = GeminiResumeParser(client, MODEL, _sleep=sleeps.append).parse("resume")
+    assert len(claims) == 2
+    assert len(client.models.calls) == 3
+    assert sleeps == [5.0, 10.0]
+
+
+def test_drafter_retries_a_429_then_succeeds():
+    client = _flaky_client(DRAFT_JSON, [_server_error(429)])
+    sleeps: list[float] = []
+    out = GeminiDrafter(client, MODEL, _sleep=sleeps.append).draft(CONTEXT)
+    assert out["subject"]
+    assert len(client.models.calls) == 2
+    assert sleeps == [5.0]
+
+
+def test_parser_gives_up_after_three_retries_and_reraises():
+    client = _flaky_client(CLAIMS_JSON, [_server_error(503)] * 4)
+    with pytest.raises(genai_errors.APIError):
+        GeminiResumeParser(client, MODEL, _sleep=lambda s: None).parse("resume")
+    assert len(client.models.calls) == 4
+
+
+def test_non_transient_errors_are_not_retried():
+    client = _flaky_client(CLAIMS_JSON, [_server_error(404)])
+    with pytest.raises(genai_errors.APIError):
+        GeminiResumeParser(client, MODEL, _sleep=lambda s: None).parse("resume")
+    assert len(client.models.calls) == 1

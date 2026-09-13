@@ -63,6 +63,9 @@ logger = logging.getLogger(__name__)
 _VALIDATE_URL = "https://client.myemailverifier.com/verifier/validate_single/{address}/{api_key}"
 _RATE_LIMIT_PER_MINUTE = 30
 _MIN_INTERVAL_SECONDS = 60.0 / _RATE_LIMIT_PER_MINUTE  # 2.0s
+_MAX_429_RETRIES = 3
+_429_BASE_BACKOFF_SECONDS = 5.0  # 5s, 10s, 20s
+_MAX_RETRY_AFTER_SECONDS = 60.0  # a hostile/huge Retry-After must not hang the run
 _QUOTA_STATUS_CODES = {402, 403}
 _QUOTA_KEYWORDS = ("credit", "quota")
 _QUOTA_SIGNAL_FIELDS = ("message", "error")
@@ -172,21 +175,33 @@ class MyEmailVerifierClient:
             self._sleep(remaining)
 
     def verify(self, address: str) -> str:
-        self._throttle()
         url = _VALIDATE_URL.format(address=address, api_key=self._api_key)
 
-        try:
-            response = self._client.get(url, timeout=self._timeout)
-        except httpx.HTTPError as exc:
-            # Transport-level failure (connect error, timeout, ...): never
-            # let the underlying exception's own message escape, since
-            # httpx transport errors can carry the request (and its URL,
-            # with the key) on `.request`.
-            self._last_request_at = self._now()
-            logger.info("verify %s -> transport error (%s)", address, type(exc).__name__)
-            raise VerifierError(address, detail=type(exc).__name__) from None
+        # Live-run fix (2026-09-13): the provider returns 429 well inside its
+        # documented 30/min. A 429 is "not yet", not "no" — back off (the
+        # `Retry-After` header if sane, else 5s/10s/20s) and retry a bounded
+        # number of times before treating it as a real failure. Backoff goes
+        # through the injected `_sleep`, so tests never actually wait.
+        for attempt in range(_MAX_429_RETRIES + 1):
+            self._throttle()
+            try:
+                response = self._client.get(url, timeout=self._timeout)
+            except httpx.HTTPError as exc:
+                # Transport-level failure (connect error, timeout, ...): never
+                # let the underlying exception's own message escape, since
+                # httpx transport errors can carry the request (and its URL,
+                # with the key) on `.request`.
+                self._last_request_at = self._now()
+                logger.info("verify %s -> transport error (%s)", address, type(exc).__name__)
+                raise VerifierError(address, detail=type(exc).__name__) from None
 
-        self._last_request_at = self._now()
+            self._last_request_at = self._now()
+            if response.status_code != 429 or attempt == _MAX_429_RETRIES:
+                break
+            delay = self._retry_delay(response, attempt)
+            logger.info("verify %s -> rate limited (429), retrying in %.0fs", address, delay)
+            self._sleep(delay)
+
         status = response.status_code
 
         try:
@@ -211,6 +226,16 @@ class MyEmailVerifierClient:
 
         logger.info("verify %s -> error (status %s)", address, status)
         raise VerifierError(address, status=status)
+
+    @staticmethod
+    def _retry_delay(response: httpx.Response, attempt: int) -> float:
+        header = response.headers.get("Retry-After")
+        if header is not None:
+            try:
+                return min(max(float(header), 0.0), _MAX_RETRY_AFTER_SECONDS)
+            except ValueError:
+                pass  # HTTP-date form or garbage: fall through to backoff
+        return min(_429_BASE_BACKOFF_SECONDS * (2 ** attempt), _MAX_RETRY_AFTER_SECONDS)
 
     def _signals_quota_exhaustion(self, status: int, data) -> bool:
         if status in _QUOTA_STATUS_CODES:

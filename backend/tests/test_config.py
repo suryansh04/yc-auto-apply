@@ -1,9 +1,16 @@
-from app.config import Settings
+from app.config import Settings as _Settings
+
+
+def Settings(**kw):
+    # The suite must not depend on whether the operator has a real `.env`
+    # in `backend/` (it did not exist during the build, it does now):
+    # pin defaults by disabling the env file for these tests only.
+    return _Settings(_env_file=None, **kw)
 
 
 def test_settings_reads_defaults_without_env():
     s = Settings(database_url="postgresql://x/y")
-    assert s.gemini_model == "gemini-3-flash"
+    assert s.gemini_model == "gemini-3.8-flash"
     assert s.gemini_tier == "free"
     assert s.daily_send_cap == 20
 

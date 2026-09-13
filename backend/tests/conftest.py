@@ -18,9 +18,24 @@ CLI.
 """
 
 import copy
-from datetime import datetime
 
 import pytest
+
+from app.config import Settings, get_settings
+
+
+@pytest.fixture(autouse=True)
+def _ignore_operator_dotenv(monkeypatch):
+    """The suite must behave identically whether or not the operator has a
+    real `backend/.env` (live run, 2026-09-13: LLM_PROVIDER=sarvam in the
+    real file flipped the Gemini free-tier CLI tests). Disable the env file
+    for every test; tests set what they need via monkeypatch.setenv."""
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+from datetime import datetime
+
 
 from app.domain.states import OutreachState
 from tests.fakes_repos import (

@@ -7,6 +7,10 @@ place allowed to import both a concrete adapter and a concrete repo and glue
 them together.
 """
 
+import os
+import subprocess
+import sys
+import tempfile
 from typing import Optional
 
 import typer
@@ -21,6 +25,13 @@ app = typer.Typer(add_completion=False)
 @app.callback()
 def _callback() -> None:
     """YC Auto Apply operator CLI. Run a subcommand, e.g. `sync`."""
+    # Live-run fix (2026-09-13): a Windows console defaults to cp1252 and
+    # crashes `typer.echo` on any character outside it (a resume's "~",
+    # a founder's name, a news headline). Emit UTF-8 regardless; the
+    # `errors="replace"` fallback guarantees output can never crash a run.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     # Present even though empty: without a callback, Typer collapses a
     # single-command app so its one command runs with no subcommand name at
     # all, breaking the documented invocation `python -m app.cli sync`. A
@@ -274,6 +285,39 @@ def _gemini_client():
     return genai.Client(api_key=settings.gemini_api_key)
 
 
+def _resume_parser():
+    """Provider switch: the configured LLM's `ResumeParser` adapter."""
+    settings = get_settings()
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise typer.BadParameter("SARVAM_API_KEY is not set")
+        return sarvam.SarvamResumeParser(settings.sarvam_api_key, model=settings.sarvam_model)
+    from app.adapters.gemini import GeminiResumeParser
+
+    return GeminiResumeParser(_gemini_client(), model=settings.gemini_model)
+
+
+def _drafter():
+    """Provider switch: the configured LLM's `Drafter` adapter."""
+    settings = get_settings()
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise typer.BadParameter("SARVAM_API_KEY is not set")
+        return sarvam.SarvamDrafter(settings.sarvam_api_key, model=settings.sarvam_model)
+    from app.adapters.gemini import GeminiDrafter
+
+    return GeminiDrafter(_gemini_client(), model=settings.gemini_model)
+
+
+def _on_gemini_free_tier() -> bool:
+    s = get_settings()
+    return s.llm_provider == "gemini" and s.gemini_tier == "free"
+
+
 def _refuse_free_tier_for_founder_data(allow_free_tier: bool) -> None:
     """Fix round 1 (F2, ruling R4): `draft` sends founders' names, titles
     and bios to Gemini. On a free-tier key that is third-party personal
@@ -281,7 +325,7 @@ def _refuse_free_tier_for_founder_data(allow_free_tier: bool) -> None:
     loudly"), so the run refuses unless the operator opts in explicitly —
     the intended use being the brief's own 'draft five and read them'
     check (14.6), never a full run."""
-    if get_settings().gemini_tier == "free" and not allow_free_tier:
+    if _on_gemini_free_tier() and not allow_free_tier:
         typer.echo(
             f"refusing to draft: {_FREE_TIER_NOTICE} Founder data would be sent to a "
             "free-tier key. Set GEMINI_TIER=paid, or pass --allow-free-tier for a "
@@ -297,16 +341,15 @@ def parse_resume(path: str = typer.Argument(..., help="Resume file: .pdf, .txt o
     Re-runnable: replaces the single `resume_profile` row. Read every claim
     it prints — these are the only things the drafter may assert about you."""
     from app.adapters.db.repositories import ResumeProfileRepo
-    from app.adapters.gemini import GeminiResumeParser
     from app.application.parse_resume import ParseResume
 
     settings = get_settings()
     raw_text = _read_resume_text(path)
-    if settings.gemini_tier == "free":
+    if _on_gemini_free_tier():
         # Only the user's own resume goes out here (no third-party data), so
         # a warning is enough (ruling R4); `draft` is the hard refusal.
         typer.echo(f"warning: {_FREE_TIER_NOTICE} Your resume text is being sent.", err=True)
-    parser = GeminiResumeParser(_gemini_client(), model=settings.gemini_model)
+    parser = _resume_parser()
     with _session() as session:
         use_case = ParseResume(parser, ResumeProfileRepo(session))
         claims = use_case.run(raw_text)
@@ -366,12 +409,11 @@ def draft(
         OutreachRepo,
         ResumeProfileRepo,
     )
-    from app.adapters.gemini import GeminiDrafter
     from app.application.draft_outreach import DraftOutreach, DraftRepos
 
     settings = get_settings()
     _refuse_free_tier_for_founder_data(allow_free_tier)
-    drafter = GeminiDrafter(_gemini_client(), model=settings.gemini_model)
+    drafter = _drafter()
     with _session() as session:
         repos = DraftRepos(
             founder=FounderRepo(session),
@@ -688,17 +730,41 @@ def _split_edit(text: str) -> tuple[str, str]:
 
 def _read_key() -> str:
     """One keypress, no Enter needed. Monkeypatched in tests."""
-    import click
-
-    return click.getchar()
+    return typer.getchar()
 
 
 def _edit_text(text: str) -> str | None:
-    """Open `$EDITOR` on `text`; `None` when the editor was closed without
-    saving a change (click's contract). Monkeypatched in tests."""
-    import click
+    """Open `$EDITOR` (or `$VISUAL`, else notepad/vi) on `text` and return
+    what was saved; `None` if the editor failed or nothing changed.
 
-    return click.edit(text, extension=".txt")
+    Live finding (2026-09-13): this used `click.edit`, but click is not a
+    declared dependency and typer 0.27 no longer installs it, so `review`
+    died with ModuleNotFoundError on a clean venv. Self-contained now.
+    Monkeypatched in tests.
+    """
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor:
+        editor = "notepad" if sys.platform == "win32" else "vi"
+
+    fd, path = tempfile.mkstemp(suffix=".txt", prefix="yc-draft-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        before = os.path.getmtime(path)
+        # shell=True so an EDITOR carrying its own arguments ("code -w",
+        # a quoted interpreter path) works the way a shell would run it.
+        if subprocess.call(f'{editor} "{path}"', shell=True) != 0:
+            return None
+        if os.path.getmtime(path) == before:
+            return None
+        with open(path, encoding="utf-8") as fh:
+            edited = fh.read()
+        return None if edited == text else edited
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def _review_repos(session):

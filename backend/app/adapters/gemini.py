@@ -28,9 +28,35 @@ config=types.GenerateContentConfig(...))`, response text on `.text`.
 from __future__ import annotations
 
 import json
-from typing import Any
+import logging
+import time
+from typing import Any, Callable
 
+from google.genai import errors as genai_errors
 from google.genai import types
+
+from app.domain.names import company_display_name
+
+logger = logging.getLogger(__name__)
+
+# Live-run fix (2026-09-13): Gemini answered 503 UNAVAILABLE ("high demand")
+# on two flash models within minutes. Those and 429 are transient: retry
+# with 5s/10s/20s backoff through an injectable `_sleep`, then re-raise.
+_TRANSIENT_STATUS_CODES = {429, 503}
+_MAX_TRANSIENT_RETRIES = 3
+_BASE_BACKOFF_SECONDS = 5.0
+
+
+def _generate_with_retry(client, _sleep: Callable[[float], None], what: str, **kwargs):
+    for attempt in range(_MAX_TRANSIENT_RETRIES + 1):
+        try:
+            return client.models.generate_content(**kwargs)
+        except genai_errors.APIError as exc:
+            if exc.code not in _TRANSIENT_STATUS_CODES or attempt == _MAX_TRANSIENT_RETRIES:
+                raise
+            delay = _BASE_BACKOFF_SECONDS * (2 ** attempt)
+            logger.warning("%s: Gemini %s, retrying in %.0fs", what, exc.code, delay)
+            _sleep(delay)
 
 CLAIM_KINDS = ["skill", "project", "metric", "role", "education"]
 
@@ -87,12 +113,14 @@ class GeminiResumeParser:
     (`app.application.parse_resume.ParseResume`), not the adapter's — the
     adapter only guarantees the *shape* the schema promised."""
 
-    def __init__(self, client, model: str):
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
         self._client = client
         self._model = model
+        self._sleep = _sleep
 
     def parse(self, raw_text: str) -> list[dict]:
-        response = self._client.models.generate_content(
+        response = _generate_with_retry(
+            self._client, self._sleep, "resume parser",
             model=self._model,
             contents=_PARSER_PROMPT.format(resume=raw_text),
             config=types.GenerateContentConfig(
@@ -134,8 +162,10 @@ must read like one specific person wrote it to one specific founder after
 actually understanding what the company builds. It must never read like a
 template, a press summary, or a CV.
 
-STRUCTURE: exactly three parts, each its own paragraph, separated by a blank
-line. Target about 90 words in total; the hard cap is 120. No sentence over
+STRUCTURE: exactly three paragraphs. You MUST put a blank line (two newline
+characters) between them. One paragraph per part - never run the parts
+together into a single block, and never exceed three sentences in any
+paragraph. Target about 90 words in total; the hard cap is 120. No sentence over
 25 words. No paragraph over three sentences. No semicolons. At most two em
 dashes. Not more than half the sentences may begin with "I".
 
@@ -145,14 +175,18 @@ specific thing from that source (the product, the mechanism, the problem)
 and give your own honest observation on it. Do not restate the company's
 one-liner or tagline back at them.
 
-Part 2 - why you are worth taking on (one or two sentences): cite at most
-two of the RESUME CLAIMS below, ideally one concrete thing you built. Use
-ONLY the resume claims listed. Never invent a skill, tool, metric, role or
+Part 2 - why you are worth taking on (one or two sentences): pick ONE
+concrete thing you built from the RESUME CLAIMS below and say what you did
+and what it achieved. Do not list roles, tools, degrees or a second project.
+Never write a sentence whose only content is which technologies you know
+("I know Python and React"), and never claim a skill "maps well" to their
+work. Use ONLY the resume claims listed. Never invent a skill, tool, metric, role or
 institution that is not in the claims. Never imply professional seniority
 (no "years of experience", "my team", "in my current role").
 
-Part 3 - the ask (one plain sentence): ask whether they would take a
-software engineering internship / intern. Speculative, not an application
+Part 3 - the ask (one plain sentence, ALWAYS present, its own final
+paragraph): ask whether they would take a software engineering internship /
+intern. Never end the email without this question. Speculative, not an application
 to an advertised role. The words "intern" or "internship" must appear.
 
 THE SOURCE IS HOW YOU LEARNED IT, NEVER WHAT THE SENTENCE IS ABOUT. The
@@ -201,7 +235,7 @@ def build_draft_prompt(context: dict) -> str:
     founder = context.get("founder") or {}
     parts = [
         "COMPANY",
-        f"name: {company.get('name')}",
+        f"name: {company_display_name(company.get('name') or '')}",
         f"one_liner (do NOT restate this): {company.get('one_liner')}",
         "",
         "FOUNDER (the recipient)",
@@ -239,12 +273,14 @@ class GeminiDrafter:
     use case's job, not this adapter's — the prompt states every rule so
     the model has a fair chance of passing, but nothing here trusts it."""
 
-    def __init__(self, client, model: str):
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
         self._client = client
         self._model = model
+        self._sleep = _sleep
 
     def draft(self, prompt_context: dict) -> dict:
-        response = self._client.models.generate_content(
+        response = _generate_with_retry(
+            self._client, self._sleep, "drafter",
             model=self._model,
             contents=build_draft_prompt(prompt_context),
             config=types.GenerateContentConfig(

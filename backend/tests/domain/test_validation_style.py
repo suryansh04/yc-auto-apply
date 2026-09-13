@@ -95,7 +95,9 @@ def test_rejects_shouting_subject_with_multiple_allcaps_words():
 def test_accepts_a_single_acronym_company_name_in_subject():
     # D-something: a legitimate acronym company name must not read as
     # shouting. One all-caps token alone no longer trips the rule.
-    body = "Would you take an intern? Thanks a lot friend."
+    # Two paragraphs so this subject-focused test is not also asserting the
+    # MIN_PARAGRAPHS rule (live finding 2026-09-13).
+    body = "Thanks a lot friend.\n\nWould you take an intern?"
     assert validate_style(draft(body, subject="Backend intern at ZOKO")) == []
     assert validate_style(draft(body, subject="Backend intern at Coulomb AI")) == []
 

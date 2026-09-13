@@ -80,6 +80,20 @@ def test_progress_committed_by_the_job_thread_is_visible_from_a_separate_session
     original_kinds = dict(jobs_impl.JOB_KINDS)
     job_id = None
     try:
+        # REBINDING `jobs_impl.JOB_KINDS` (not an in-place `["sync"] =
+        # ...` mutation) is safe ONLY here, because this test calls
+        # `jobs_impl.start_job(...)` directly - `start_job` looks up
+        # `JOB_KINDS` by module-global name at call time, so it sees the
+        # new dict. `app/api/routers/jobs.py` imports `JOB_KINDS` BY
+        # VALUE (`from app.api.jobs import JOB_KINDS, ...`), so a test
+        # that goes through the router/HTTP (as every fixture in
+        # `tests/conftest.py` does) would silently desync: the router's
+        # own 404 check would keep checking the ORIGINAL dict while
+        # `start_job` used the new one. Tasks 8/9/11, and any future
+        # test that posts through `client` rather than calling
+        # `start_job` directly, MUST mutate `JOB_KINDS[kind] = ...`
+        # in place instead (as every fixture in `tests/conftest.py`
+        # already does) - do not copy this rebind pattern there.
         jobs_impl.JOB_KINDS = {**original_kinds, "sync": _fake_stage}
 
         job_id = jobs_impl.start_job(

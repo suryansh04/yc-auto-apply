@@ -300,17 +300,19 @@ def _resume_parser():
 
 
 def _drafter():
-    """Provider switch: the configured LLM's `Drafter` adapter."""
-    settings = get_settings()
-    if settings.llm_provider == "sarvam":
-        from app.adapters import sarvam
+    """Provider switch: the configured LLM's `Drafter` adapter. Shared
+    with the UI job runner via `app.api.deps.build_drafter` (fix round 2,
+    ruling T6-6) - one rule, not two that can drift on a new provider or a
+    changed model default. `RuntimeError` (that shared function's only
+    failure mode, since it must stay usable with no CLI dependency) is
+    translated here into `typer.BadParameter` for the CLI's own nice error
+    formatting - unchanged CLI behaviour from before the extraction."""
+    from app.api.deps import build_drafter
 
-        if not settings.sarvam_api_key:
-            raise typer.BadParameter("SARVAM_API_KEY is not set")
-        return sarvam.SarvamDrafter(settings.sarvam_api_key, model=settings.sarvam_model)
-    from app.adapters.gemini import GeminiDrafter
-
-    return GeminiDrafter(_gemini_client(), model=settings.gemini_model)
+    try:
+        return build_drafter(get_settings())
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _on_gemini_free_tier() -> bool:

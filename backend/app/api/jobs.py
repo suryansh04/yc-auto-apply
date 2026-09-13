@@ -131,31 +131,6 @@ def _resolve(session: Session, progress: ProgressFn) -> str:
     )
 
 
-def _build_drafter(settings):
-    """The same provider switch as `app.cli._drafter` (Sarvam or Gemini),
-    duplicated in full rather than imported (fix round 1, ruling T6-3):
-    `app/api/` must not import `app.cli` — `cli.py` is the operator
-    adapter, not a library for the API layer. Only the shared POLICY
-    predicate (`on_gemini_free_tier`, below) is factored out; this bit of
-    adapter-wiring is small enough that duplicating it costs less than the
-    layering violation would."""
-    if settings.llm_provider == "sarvam":
-        from app.adapters import sarvam
-
-        if not settings.sarvam_api_key:
-            raise RuntimeError("SARVAM_API_KEY is not set")
-        return sarvam.SarvamDrafter(settings.sarvam_api_key, model=settings.sarvam_model)
-
-    from google import genai
-
-    from app.adapters.gemini import GeminiDrafter
-
-    if not settings.gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set")
-    client = genai.Client(api_key=settings.gemini_api_key)
-    return GeminiDrafter(client, model=settings.gemini_model)
-
-
 def _draft(session: Session, progress: ProgressFn) -> str:
     from app.adapters.db.repositories import (
         CompanyLaunchRepo,
@@ -167,7 +142,7 @@ def _draft(session: Session, progress: ProgressFn) -> str:
         OutreachRepo,
         ResumeProfileRepo,
     )
-    from app.api.deps import on_gemini_free_tier
+    from app.api.deps import build_drafter, on_gemini_free_tier
     from app.application.draft_outreach import DraftOutreach, DraftRepos
     from app.config import get_settings
 
@@ -182,7 +157,11 @@ def _draft(session: Session, progress: ProgressFn) -> str:
             "refusing to draft on a free-tier Gemini key from the UI job runner"
         )
 
-    drafter = _build_drafter(settings)
+    # Fix round 2 (ruling T6-6): the provider switch itself is shared too,
+    # not just the free-tier predicate - `app.api.deps.build_drafter` is
+    # also what `app.cli._drafter` calls, so a new provider or a changed
+    # model default is written once.
+    drafter = build_drafter(settings)
     repos = DraftRepos(
         founder=FounderRepo(session),
         company=CompanyRepo(session),
@@ -276,7 +255,7 @@ def start_job(
             job_id = runner.start(kind, created_by)
         except IntegrityError:
             sync_session.rollback()
-            winner = runner.repo.active(kind)
+            winner = runner.active(kind)
             if winner is None:
                 # The index rejected the insert but no active row is
                 # visible on re-read - something else is wrong; do not

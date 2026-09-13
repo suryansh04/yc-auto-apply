@@ -30,6 +30,16 @@ class RunJob:
         self._clock = clock
         self._commit = commit
 
+    def active(self, kind: str):
+        """The currently queued/running row for `kind`, or `None`. A
+        read-only accessor for callers that need to re-check state
+        without going through `start` again (fix round 2: `app.api.jobs.
+        start_job` re-reads the winner of a `RunJob.start` race through
+        this instead of reaching into `runner.repo` directly - `repo`
+        stays an implementation detail `RunJob` owns, not part of its
+        public surface)."""
+        return self.repo.active(kind)
+
     def start(self, kind: str, created_by: str = "ui") -> int:
         running = self.repo.active(kind)
         if running is not None:

@@ -28,11 +28,18 @@ def env(monkeypatch, tmp_path):
     get_settings.cache_clear()
     calls = []
 
-    def fake_client():
+    def fake_client(*args, **kwargs):
         calls.append(True)
         raise _ClientBuilt()
 
-    monkeypatch.setattr(cli, "_gemini_client", fake_client)
+    # Fix round 2 (ruling T6-6): `_drafter` now delegates to
+    # `app.api.deps.build_drafter`, which builds its own `genai.Client`
+    # rather than going through `cli._gemini_client` - so the interception
+    # point moves to the actual class both `cli._gemini_client` (still
+    # used by `_resume_parser`) and `build_drafter` construct. Patching
+    # `google.genai.Client` itself catches either caller, same as
+    # patching `cli._gemini_client` did before the extraction.
+    monkeypatch.setattr("google.genai.Client", fake_client)
     yield calls
     get_settings.cache_clear()
 

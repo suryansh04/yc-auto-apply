@@ -123,6 +123,40 @@ def on_gemini_free_tier(settings: Settings) -> bool:
     return settings.llm_provider == "gemini" and settings.gemini_tier == "free"
 
 
+def build_drafter(settings: Settings):
+    """Task 6 fix round 2 (ruling T6-6): the LLM-provider switch for a
+    `Drafter` adapter (Sarvam or Gemini), shared between `app.cli._drafter`
+    (used by `cli.py draft`) and the UI job runner (`app.api.jobs._draft`)
+    so a new provider or a changed model default is written in exactly one
+    place. `real_repos` above already wires concrete adapters into this
+    module for a request's `Repos` bundle; building a drafter is the same
+    kind of adapter-construction, not business logic, so it belongs beside
+    it rather than being duplicated per caller (the same extraction this
+    fix round already did for `on_gemini_free_tier`, and Task 5 did for
+    `require_send_config`/`require_gmail_config`).
+
+    Raises a plain `RuntimeError` (never a `typer`-specific exception —
+    this module must stay usable from the API layer with no CLI
+    dependency) naming the missing setting; `app.cli._drafter` translates
+    that into `typer.BadParameter` for the CLI's own nice error
+    formatting."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamDrafter(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiDrafter
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiDrafter(client, model=settings.gemini_model)
+
+
 def require_send_config(settings: Settings) -> list[str]:
     """Task 5: every `Settings` field `send` needs before it may build a
     real `GmailSender` — the Gmail OAuth client config plus a real,

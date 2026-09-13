@@ -18,6 +18,7 @@ CLI.
 """
 
 import copy
+from types import SimpleNamespace
 
 import pytest
 
@@ -270,3 +271,55 @@ def a_pending_message() -> FakeMessageRow:
         subject=PENDING_SUBJECT, body=PENDING_BODY,
         research_source_type="news", research_source_id=1,
     )
+
+
+# --- Task 4 (API) fixtures ----------------------------------------------------
+
+
+def _draft(repos: FakeRepos, id: int, full_name: str, email: str, **kwargs):
+    """A `pending_draft`-shaped wrapper for the API tests: `.outreach` and
+    `.founder` off one `_add_pending_founder` row. `resolved_email` lives on
+    the outreach row in the real schema, but the brief's own tests read it
+    off `.founder` (`pending_draft.founder.resolved_email`), so it is
+    mirrored onto the founder row here for convenience - nothing in the
+    router or the use case relies on it being there."""
+    founder = _add_pending_founder(repos, id, full_name, email, **kwargs)
+    outreach = repos.outreach.get_by_founder_id(founder.id)
+    founder.resolved_email = outreach.resolved_email
+    return SimpleNamespace(outreach=outreach, founder=founder)
+
+
+@pytest.fixture
+def pending_draft(repos: FakeRepos):
+    """Madhav, `PENDING_APPROVAL`, a validating draft, no `last_error` -
+    the queue's single-item case."""
+    return _draft(repos, 40, "Madhav Krishna", "madhav@example.com")
+
+
+@pytest.fixture
+def two_pending_drafts(repos: FakeRepos):
+    """Two news-backed, team-size-less founders, returned in rank order
+    (tie-break is founder name ascending: Asha before Madhav) so a test can
+    assert the queue's order equals this fixture's order directly."""
+    return (
+        _draft(repos, 41, "Asha Rao", "asha@example.com"),
+        _draft(repos, 42, "Madhav Krishna", "madhav@example.com"),
+    )
+
+
+@pytest.fixture
+def flagged_draft(repos: FakeRepos):
+    """Riya: the drafter's rejected draft is stored and `last_error` is set
+    (needs manual write) - the 409-on-approve case until it is edited."""
+    return _draft(
+        repos, 43, "Riya Nair", "riya@example.com",
+        body="I hope this email finds you well. Would you take an intern?",
+        last_error=MANUAL_WRITE_ERROR,
+    )
+
+
+@pytest.fixture
+def good_body() -> str:
+    """The task-14 GOOD body: validates against `pending_draft`'s cited
+    news item, Vahan's `long_description` and the one resume claim."""
+    return PENDING_BODY

@@ -18,3 +18,4 @@ token.json
 resume/
 *.pdf
 gmail_client_secret*.json
+client_secret*.json

@@ -9,6 +9,12 @@ from app.domain.names import company_display_name, company_name_variants
 MAX_WORDS = 120
 MAX_SENTENCE_WORDS = 25
 MAX_PARAGRAPHS = 3
+# Live finding (2026-09-13): the cap alone let a one-block email through —
+# hook, pitch and ask run together in a single 3-sentence paragraph, which
+# is exactly the wall-of-text the spec's three-part structure exists to
+# prevent. Two is the floor (the ask may share a paragraph with the pitch);
+# the prompt still asks for three.
+MIN_PARAGRAPHS = 2
 MAX_SENTENCES_PER_PARAGRAPH = 3
 MAX_EM_DASHES = 2
 
@@ -65,6 +71,11 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
     paragraphs = _paragraphs(body)
     if len(paragraphs) > MAX_PARAGRAPHS:
         errs.append(f"more than {MAX_PARAGRAPHS} paragraphs")
+    elif len(paragraphs) < MIN_PARAGRAPHS:
+        errs.append(
+            f"fewer than {MIN_PARAGRAPHS} paragraphs - the hook, what you built and "
+            "the ask must not run together in one block (separate them with a blank line)"
+        )
     for p in paragraphs:
         if len(_sentences(p)) > MAX_SENTENCES_PER_PARAGRAPH:
             errs.append("a paragraph exceeds 3 sentences")

@@ -33,11 +33,16 @@ def _python_files(package: str) -> list[Path]:
 
 
 def _imported_modules(path: Path) -> list[str]:
-    """Every dotted module name this file imports - `import a.b.c` and
-    `from a.b.c import d` both contribute `"a.b.c"`; a relative import
-    (`from . import x` / `from .y import z`) is resolved against the
-    file's own package so it cannot silently dodge the check just by
-    using a different import spelling."""
+    """Every dotted module name this file imports - `import a.b.c`
+    contributes `"a.b.c"`; `from a.b.c import d` contributes BOTH
+    `"a.b.c"` and `"a.b.c.d"` (fix round 3: `from app import cli` must
+    be caught too - `node.module` alone is only `"app"`, which is not
+    itself forbidden; it's the imported NAME, `cli`, that makes the full
+    target `app.cli`. `tests/test_cli_editor.py:12` already writes
+    exactly this spelling). A relative import (`from . import x` /
+    `from .y import z`) is resolved against the file's own package so it
+    cannot silently dodge the check just by using a different import
+    spelling."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     # The file's own package, e.g. backend/app/api/routers/jobs.py ->
     # "app.api.routers" (an __init__.py's own package is itself, one
@@ -72,6 +77,12 @@ def _imported_modules(path: Path) -> list[str]:
                 full = node.module or ""
             if full:
                 modules.append(full)
+                for alias in node.names:
+                    # The imported NAME can itself be the forbidden
+                    # module, e.g. `from app import cli` (full="app",
+                    # alias.name="cli") - the offending target is
+                    # "app.cli", never just "app".
+                    modules.append(f"{full}.{alias.name}")
     return modules
 
 
@@ -88,9 +99,12 @@ def _forbidden_imports(files: list[Path], forbidden_prefixes: tuple[str, ...]) -
 
 
 def test_domain_never_imports_adapters_api_or_application():
-    violations = _forbidden_imports(
-        _python_files("domain"), ("app.adapters", "app.api", "app.application")
-    )
+    files = _python_files("domain")
+    # Fix round 3: without this, a renamed/deleted app/domain/ package
+    # would make `_python_files` return [] and this test would pass
+    # vacuously - the guard silently disarmed rather than failing loudly.
+    assert files, "no .py files found under app/domain/ - has the package moved or been renamed?"
+    violations = _forbidden_imports(files, ("app.adapters", "app.api", "app.application"))
     assert violations == [], (
         "app/domain/ must never import app.adapters, app.api or app.application "
         f"(D8 / the project's global constraint) - violations:\n" + "\n".join(violations)
@@ -98,7 +112,9 @@ def test_domain_never_imports_adapters_api_or_application():
 
 
 def test_application_never_imports_adapters_or_api():
-    violations = _forbidden_imports(_python_files("application"), ("app.adapters", "app.api"))
+    files = _python_files("application")
+    assert files, "no .py files found under app/application/ - has the package moved or been renamed?"
+    violations = _forbidden_imports(files, ("app.adapters", "app.api"))
     assert violations == [], (
         "app/application/ must never import app.adapters or app.api "
         f"(D8 / the project's global constraint) - violations:\n" + "\n".join(violations)
@@ -106,7 +122,9 @@ def test_application_never_imports_adapters_or_api():
 
 
 def test_api_never_imports_cli():
-    violations = _forbidden_imports(_python_files("api"), ("app.cli",))
+    files = _python_files("api")
+    assert files, "no .py files found under app/api/ - has the package moved or been renamed?"
+    violations = _forbidden_imports(files, ("app.cli",))
     assert violations == [], (
         "app/api/ must never import app.cli (ruling T6-3: cli.py is the operator "
         "adapter, not a library for the API layer - share policy/adapter-building "

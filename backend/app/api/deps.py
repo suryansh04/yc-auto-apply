@@ -109,6 +109,20 @@ def get_repos() -> Iterator[Repos]:
     yield from real_repos()
 
 
+def on_gemini_free_tier(settings: Settings) -> bool:
+    """Task 6 fix round 1 (ruling T6-3): true when `draft` would send
+    founders' names, titles and bios to a free-tier Gemini key, which
+    Google may use for training (D12). Shared between `app.cli.draft`
+    (which lets an operator opt in for a small deliberate test run via
+    `--allow-free-tier`) and the UI job runner (`app/api/jobs.py`, which
+    has no such opt-in and always refuses) — the same extraction Task 5
+    did for `require_send_config`/`require_gmail_config`, so `app/api/`
+    never has to import `app.cli` (backwards coupling: `cli.py` is the
+    operator adapter, not a library for the API layer) just to share this
+    one predicate."""
+    return settings.llm_provider == "gemini" and settings.gemini_tier == "free"
+
+
 def require_send_config(settings: Settings) -> list[str]:
     """Task 5: every `Settings` field `send` needs before it may build a
     real `GmailSender` — the Gmail OAuth client config plus a real,

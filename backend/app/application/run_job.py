@@ -60,14 +60,23 @@ class RunJob:
                          finished_at=self._clock.now(), error=type(exc).__name__)
         self._commit()
 
-    def recover_stale(self, max_age_seconds: int = 3600) -> int:
-        """A job left `running` by a crashed API holds the partial unique
-        index forever. Called at startup."""
-        cutoff = self._clock.now() - timedelta(seconds=max_age_seconds)
+    def recover_stale(self, max_age_seconds: int | None = 3600) -> int:
+        """A job left `running` (or `queued`) by a crashed API holds the
+        partial unique index forever. Called at startup.
+
+        `max_age_seconds` filters by age as before when given an int. Pass
+        `None` to recover EVERY active row regardless of age — including a
+        `queued` row that never got a `started_at` at all, which an age
+        filter can never match no matter how small (fix round 1, T6-2):
+        a process crash can leave a job active at any age, and a fresh
+        boot is the one moment it is safe to assume nothing is still
+        running it."""
+        cutoff = None if max_age_seconds is None else self._clock.now() - timedelta(seconds=max_age_seconds)
         recovered = 0
         for job in self.repo.list_active():
             started = getattr(job, "started_at", None)
-            if started is not None and started < cutoff:
+            stale = cutoff is None or (started is not None and started < cutoff)
+            if stale:
                 self.repo.upsert(id=job.id, status="failed",
                                  finished_at=self._clock.now(), error="interrupted")
                 recovered += 1

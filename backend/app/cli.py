@@ -314,8 +314,13 @@ def _drafter():
 
 
 def _on_gemini_free_tier() -> bool:
-    s = get_settings()
-    return s.llm_provider == "gemini" and s.gemini_tier == "free"
+    # Task 6 fix round 1 (ruling T6-3): shared with `app.api.jobs`'s UI
+    # job runner via `app.api.deps.on_gemini_free_tier`, the same
+    # extraction Task 5 did for the send guards - one rule, not two that
+    # can drift.
+    from app.api.deps import on_gemini_free_tier
+
+    return on_gemini_free_tier(get_settings())
 
 
 def _refuse_free_tier_for_founder_data(allow_free_tier: bool) -> None:

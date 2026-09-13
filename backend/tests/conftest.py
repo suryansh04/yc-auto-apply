@@ -394,10 +394,16 @@ class _FixedClock:
 
 
 class _FakeJobSession:
-    """The thread's "own session" in tests: just needs `.close()`. The
-    fake stage functions never touch it for real I/O."""
+    """The thread's "own session" in tests: needs `.close()` and (fix
+    round 1) `.rollback()`, since `start_job`'s `IntegrityError` handling
+    calls `sync_session.rollback()` even on the ordinary (non-racing)
+    path's session type. The fake stage functions never touch it for real
+    I/O."""
 
     def close(self) -> None:
+        pass
+
+    def rollback(self) -> None:
         pass
 
 
@@ -443,13 +449,51 @@ def _signalling_runner_factory(repos, event):
     return runner_factory
 
 
+class _TrackedSession:
+    """A `_FakeJobSession` that reports its own identity and close() calls
+    to a shared recorder - fix round 1 (M1/M8/M12): proving "the thread
+    never uses the request's session" and "every session opened is closed
+    on every path" needs sessions a test can actually tell apart, not just
+    a count of how many times a stage ran."""
+
+    def __init__(self, recorder: "_SessionRecorder"):
+        self._recorder = recorder
+        self.id = recorder.next_id()
+        recorder.opened.append(self.id)
+
+    def close(self) -> None:
+        self._recorder.closed.append(self.id)
+
+    def rollback(self) -> None:
+        pass
+
+
+class _SessionRecorder:
+    def __init__(self):
+        self.opened: list[int] = []
+        self.closed: list[int] = []
+        self._counter = 0
+
+    def next_id(self) -> int:
+        self._counter += 1
+        return self._counter
+
+    def session_factory(self):
+        return _TrackedSession(self)
+
+    def all_closed(self) -> bool:
+        return sorted(self.opened) == sorted(self.closed)
+
+
 @pytest.fixture
 def job_probe(client, repos, monkeypatch):
     """Every `JOB_KINDS` stage becomes a fake that records which kind ran
-    and how many sessions it saw - `sessions_opened` is incremented by the
-    fake stage itself, i.e. once per job actually executed in the
-    background thread (never by the request thread, which never runs a
-    stage at all)."""
+    and which SESSION OBJECT it was actually given. `session_factory` is a
+    `_SessionRecorder` that hands out a fresh, distinguishable
+    `_TrackedSession` on every call and records opens/closes, so
+    `job_probe` can assert real session IDENTITY (fix round 1, M1) - not
+    just an invocation count, which a mutant that shares the request's
+    session with the thread would still satisfy."""
     import threading
 
     from app.api import jobs as jobs_impl
@@ -458,7 +502,9 @@ def job_probe(client, repos, monkeypatch):
         def __init__(self):
             self.ran: list[str] = []
             self.sessions_opened = 0
+            self.stage_session_ids: list[int] = []
             self.finished = threading.Event()
+            self.recorder = _SessionRecorder()
 
     probe = Probe()
 
@@ -466,13 +512,14 @@ def job_probe(client, repos, monkeypatch):
         def _stage(session, progress):
             probe.sessions_opened += 1
             probe.ran.append(kind)
+            probe.stage_session_ids.append(session.id)
             progress(1, 1)
             return f"{kind} ran"
         return _stage
 
     monkeypatch.setattr(jobs_impl, "JOB_KINDS", {k: make_stage(k) for k in jobs_impl.JOB_KINDS})
 
-    client.app.state.job_session_factory = _FakeJobSession
+    client.app.state.job_session_factory = probe.recorder.session_factory
     client.app.state.job_runner_factory = _signalling_runner_factory(repos, probe.finished)
     return probe
 
@@ -482,7 +529,10 @@ def blocking_job(client, repos, monkeypatch):
     """A stage that blocks until `.release()` is called and reports
     progress on demand via `.report(done, total)` - used to hold a job in
     `running` long enough to assert on it (the second-start-is-409 and
-    progress-while-running tests)."""
+    progress-while-running tests). Sessions are `_TrackedSession`s too, so
+    the same fixture also proves close-on-every-path for the 409 path
+    (fix round 1, M8/M12): the loser of a double-click never runs a stage
+    at all, but its synchronous bookkeeping session must still be closed."""
     import threading
 
     from app.api import jobs as jobs_impl
@@ -492,6 +542,7 @@ def blocking_job(client, repos, monkeypatch):
             self._release_event = threading.Event()
             self._progress_ready = threading.Event()
             self._progress_fn = None
+            self.recorder = _SessionRecorder()
 
         def release(self) -> None:
             self._release_event.set()
@@ -512,7 +563,7 @@ def blocking_job(client, repos, monkeypatch):
 
     monkeypatch.setattr(jobs_impl, "JOB_KINDS", {k: make_stage(k) for k in jobs_impl.JOB_KINDS})
 
-    client.app.state.job_session_factory = _FakeJobSession
+    client.app.state.job_session_factory = blocker.recorder.session_factory
     client.app.state.job_runner_factory = _signalling_runner_factory(repos, threading.Event())
     yield blocker
     # Safety net: an assertion failure above must not leave the background
@@ -524,7 +575,9 @@ def blocking_job(client, repos, monkeypatch):
 def failing_job(client, repos, monkeypatch):
     """Every `JOB_KINDS` stage raises immediately - proves a failure
     records only `type(exc).__name__` (never the message, which can carry
-    a secret) and frees the kind for a retry."""
+    a secret) and frees the kind for a retry. `_TrackedSession`s again, so
+    this fixture also proves the thread's session is closed on the
+    exception path (M8/M12)."""
     import threading
 
     from app.api import jobs as jobs_impl
@@ -532,6 +585,7 @@ def failing_job(client, repos, monkeypatch):
     class Probe:
         def __init__(self):
             self.finished = threading.Event()
+            self.recorder = _SessionRecorder()
 
     probe = Probe()
 
@@ -542,9 +596,170 @@ def failing_job(client, repos, monkeypatch):
 
     monkeypatch.setattr(jobs_impl, "JOB_KINDS", {k: make_stage(k) for k in jobs_impl.JOB_KINDS})
 
-    client.app.state.job_session_factory = _FakeJobSession
+    client.app.state.job_session_factory = probe.recorder.session_factory
     client.app.state.job_runner_factory = _signalling_runner_factory(repos, probe.finished)
     return probe
+
+
+@pytest.fixture
+def poisoning_job(client, repos, monkeypatch):
+    """Fix round 1 (T6-2, the serious one): a stage that flushes a bad row
+    then raises - simulating SQLAlchemy's real "rollback-required" state
+    after a failed flush, where the NEXT flush on that same session
+    (exactly what `JobRepo.upsert` - and so `fail()` - does) raises
+    `PendingRollbackError` unless something rolls back first.
+
+    `_PoisonableSession.flush()` reproduces that in two parts: the FIRST
+    call (the stage's own "bad row" write) poisons the session; every
+    call after that raises, until `rollback()` clears it.
+    `_SessionBoundJobRepo` mirrors the real `app.adapters.db.repositories.
+    JobRepo.upsert`, which calls `session.flush()` before its write takes
+    effect — so if `fail()` runs on a still-poisoned session, the
+    in-memory row is never actually updated to `failed`, the same as a
+    real DB row whose UPDATE never durably lands. Without
+    `own_session.rollback()` ahead of `fail()` (the fix), that flush call
+    raises, escapes `own_runner.fail(...)`, and — pre-fix — would have
+    escaped `_run` entirely, carrying this stage's secret-bearing message.
+    """
+    import threading
+
+    from app.api import jobs as jobs_impl
+    from app.application.run_job import RunJob
+
+    class Probe:
+        def __init__(self):
+            self.finished = threading.Event()
+
+    probe = Probe()
+
+    class _PoisonableSession:
+        def __init__(self):
+            self.poisoned = False
+
+        def flush(self) -> None:
+            # A NORMAL flush: raises only while already poisoned (this is
+            # what `_SessionBoundJobRepo.upsert` calls during `fail()`'s
+            # write - it must succeed cleanly once `rollback()` has run,
+            # not poison the session all over again).
+            if self.poisoned:
+                raise RuntimeError(
+                    "This Session's transaction has been rolled back due to a "
+                    "previous exception during flush (simulated PendingRollbackError)"
+                )
+
+        def simulate_bad_row(self) -> None:
+            # What the STAGE calls: a real bad-row flush both raises
+            # AND leaves the session poisoned. Kept separate from the
+            # generic `flush()` above so `fail()`'s own later, legitimate
+            # flush (once rolled back) does not re-poison itself.
+            self.poisoned = True
+
+        def commit(self) -> None:
+            if self.poisoned:
+                raise RuntimeError(
+                    "This Session's transaction has been rolled back due to a "
+                    "previous exception during flush (simulated PendingRollbackError)"
+                )
+
+        def rollback(self) -> None:
+            self.poisoned = False
+
+        def close(self) -> None:
+            pass
+
+    class _SessionBoundJobRepo:
+        """Delegates every read/write to the shared `repos.job`
+        (`FakeJobRepo`), but gates `upsert` on `session.flush()` first -
+        exactly where the real `JobRepo.upsert` flushes, and exactly
+        where a still-poisoned session raises."""
+
+        def __init__(self, session, real_repo):
+            self._session = session
+            self._real = real_repo
+
+        def upsert(self, **fields):
+            self._session.flush()
+            return self._real.upsert(**fields)
+
+        def get(self, job_id):
+            return self._real.get(job_id)
+
+        def active(self, kind):
+            return self._real.active(kind)
+
+        def list_active(self):
+            return self._real.list_active()
+
+    def make_stage(kind):
+        def _stage(session, progress):
+            session.simulate_bad_row()  # a bad row's flush fails -> poisons the session
+            raise RuntimeError("boom while drafting api_key=sk-fake-secret-token")
+        return _stage
+
+    monkeypatch.setattr(jobs_impl, "JOB_KINDS", {k: make_stage(k) for k in jobs_impl.JOB_KINDS})
+
+    class _SignallingRunJob(RunJob):
+        def fail(self, job_id, exc: BaseException) -> None:
+            super().fail(job_id, exc)
+            probe.finished.set()
+
+    def runner_factory(session):
+        return _SignallingRunJob(_SessionBoundJobRepo(session, repos.job), _FixedClock(),
+                                 commit=session.commit)
+
+    client.app.state.job_session_factory = _PoisonableSession
+    client.app.state.job_runner_factory = runner_factory
+    return probe
+
+
+@pytest.fixture
+def racing_job(client):
+    """Fix round 1 (ruling T6-4): simulates the check-then-insert race
+    `RunJob.start` cannot close by itself - two requests both see
+    `active(kind) is None`, both try to insert, and the database's
+    partial unique index rejects the loser with `IntegrityError`. This
+    fake repo's `active()` reports free on the first call (both "requests"
+    pass the guarded check) and reports the winner from then on
+    (`start_job`'s post-`IntegrityError` re-read); `upsert()` raises on
+    the first attempt to write a `running` row, exactly where a real
+    unique-index violation would surface."""
+    from sqlalchemy.exc import IntegrityError
+
+    class _Row:
+        def __init__(self, id, kind):
+            self.id = id
+            self.kind = kind
+            self.status = "running"
+
+    winner = _Row(id=42, kind="scrape")
+
+    class _RacyJobRepo:
+        def __init__(self):
+            self.raised = False
+
+        def active(self, kind):
+            return winner if self.raised else None
+
+        def upsert(self, **fields):
+            if not self.raised and fields.get("status") == "running":
+                self.raised = True
+                raise IntegrityError("insert into jobs ...", {}, Exception("uq_jobs_kind_active"))
+            return winner
+
+        def get(self, job_id):
+            return winner if job_id == winner.id else None
+
+        def list_active(self):
+            return [winner]
+
+    def runner_factory(session):
+        from app.application.run_job import RunJob
+
+        return RunJob(_RacyJobRepo(), _FixedClock(), commit=lambda: None)
+
+    client.app.state.job_session_factory = _FakeJobSession
+    client.app.state.job_runner_factory = runner_factory
+    return winner
 
 
 @pytest.fixture
@@ -564,6 +779,44 @@ def stale_job_client(repos):
         kind="scrape", status="running", created_by="ui",
         started_at=datetime.now(timezone.utc) - timedelta(hours=2),
         done=0, total=None, summary=None, error=None, finished_at=None,
+    )
+
+    def runner_factory(session):
+        from app.application.run_job import RunJob
+
+        return RunJob(repos.job, _FixedClock(), commit=lambda: None)
+
+    app = create_app(
+        repos_factory=lambda: repos,
+        job_session_factory=_FakeJobSession,
+        job_runner_factory=runner_factory,
+    )
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture
+def all_active_jobs_client(repos):
+    """Fix round 1 (T6-1): a `queued` row with NO `started_at` at all, and
+    a `running` row started only an instant ago - the two shapes the old
+    age-gated `recover_stale` could never touch (a `None` `started_at`
+    fails any age comparison; a fresh `running` row is never "old"). Both
+    must come back `failed`/`interrupted` after boot now that startup
+    recovery is unconditional."""
+    from datetime import datetime, timezone
+
+    from fastapi.testclient import TestClient
+
+    from app.api.main import create_app
+
+    repos.job.upsert(
+        kind="draft", status="queued", created_by="ui",
+        started_at=None, done=0, total=None, summary=None, error=None, finished_at=None,
+    )
+    repos.job.upsert(
+        kind="scrape", status="running", created_by="ui",
+        started_at=datetime.now(timezone.utc), done=0, total=None,
+        summary=None, error=None, finished_at=None,
     )
 
     def runner_factory(session):

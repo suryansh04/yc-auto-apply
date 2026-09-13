@@ -24,9 +24,10 @@ import threading
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.application.run_job import RunJob
+from app.application.run_job import JobAlreadyRunning, RunJob
 
 log = logging.getLogger(__name__)
 
@@ -130,6 +131,31 @@ def _resolve(session: Session, progress: ProgressFn) -> str:
     )
 
 
+def _build_drafter(settings):
+    """The same provider switch as `app.cli._drafter` (Sarvam or Gemini),
+    duplicated in full rather than imported (fix round 1, ruling T6-3):
+    `app/api/` must not import `app.cli` — `cli.py` is the operator
+    adapter, not a library for the API layer. Only the shared POLICY
+    predicate (`on_gemini_free_tier`, below) is factored out; this bit of
+    adapter-wiring is small enough that duplicating it costs less than the
+    layering violation would."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamDrafter(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiDrafter
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiDrafter(client, model=settings.gemini_model)
+
+
 def _draft(session: Session, progress: ProgressFn) -> str:
     from app.adapters.db.repositories import (
         CompanyLaunchRepo,
@@ -141,19 +167,22 @@ def _draft(session: Session, progress: ProgressFn) -> str:
         OutreachRepo,
         ResumeProfileRepo,
     )
+    from app.api.deps import on_gemini_free_tier
     from app.application.draft_outreach import DraftOutreach, DraftRepos
-    from app.cli import _drafter, _on_gemini_free_tier
+    from app.config import get_settings
 
-    if _on_gemini_free_tier():
+    settings = get_settings()
+    if on_gemini_free_tier(settings):
         # `cli.py draft` refuses the same way unless --allow-free-tier is
         # passed; the UI has no such flag, so it always refuses (fails the
         # job cleanly rather than silently sending founder data to a
-        # free-tier key that may train on it, D12).
+        # free-tier key that may train on it, D12). Shared predicate:
+        # `app.api.deps.on_gemini_free_tier` (fix round 1, ruling T6-3).
         raise RuntimeError(
             "refusing to draft on a free-tier Gemini key from the UI job runner"
         )
 
-    drafter = _drafter()
+    drafter = _build_drafter(settings)
     repos = DraftRepos(
         founder=FounderRepo(session),
         company=CompanyRepo(session),
@@ -225,16 +254,35 @@ def start_job(
     opens for itself and holds for the whole stage run. Raises `KeyError`
     for an unknown kind (the router turns that into 404) and
     `JobAlreadyRunning` when that kind is already queued/running (the
-    router turns that into 409 with the running job's id) - the database's
-    partial unique index is still the real backstop; this is only the
-    inline fast path.
+    router turns that into 409 with the running job's id).
+
+    The database's partial unique index (`uq_jobs_kind_active`) is the
+    real backstop, not `RunJob.start`'s own check-then-insert (fix round
+    1, ruling T6-4): two concurrent requests can both pass `active(kind)
+    is None` before either commits, and the loser's insert then raises
+    `IntegrityError` against that index. That race is caught here and
+    translated into the same `JobAlreadyRunning` the guarded path raises,
+    re-reading whichever row actually won, so the router only ever has one
+    exception type to map to 409 regardless of which of the two paths
+    produced it.
     """
     if kind not in JOB_KINDS:
         raise KeyError(kind)
 
     sync_session = session_factory()
     try:
-        job_id = runner_factory(sync_session).start(kind, created_by)
+        runner = runner_factory(sync_session)
+        try:
+            job_id = runner.start(kind, created_by)
+        except IntegrityError:
+            sync_session.rollback()
+            winner = runner.repo.active(kind)
+            if winner is None:
+                # The index rejected the insert but no active row is
+                # visible on re-read - something else is wrong; do not
+                # mask it as a false "already running".
+                raise
+            raise JobAlreadyRunning(kind, winner.id) from None
     finally:
         sync_session.close()
 
@@ -248,10 +296,33 @@ def start_job(
             )
             own_runner.finish(job_id, summary)
         except BaseException as exc:
-            # Type name only (never str(exc)): an exception message can
-            # carry an API key or other secret.
+            # Type name only (never str(exc), which can carry an API key
+            # or other secret embedded in the message or bound SQL
+            # parameters).
             log.warning("job %s (%s) failed: %s", job_id, kind, type(exc).__name__)
-            own_runner.fail(job_id, exc)
+            # Fix round 1 (T6-2, the serious one): a stage that fails
+            # AFTER a flush leaves `own_session` in SQLAlchemy's
+            # rollback-required state - the next flush/commit on it (which
+            # is exactly what `fail()` below does) raises
+            # `PendingRollbackError`, escaping this `except` block with the
+            # ORIGINAL exception's message and bound parameters attached,
+            # and leaving the row `running` forever (permanently 409-
+            # blocking that kind). `scrape_company_page.py` already rolls
+            # back for the same reason - mirrored here.
+            try:
+                own_session.rollback()
+            except BaseException as rollback_exc:
+                log.warning("job %s (%s) rollback failed: %s", job_id, kind, type(rollback_exc).__name__)
+            try:
+                own_runner.fail(job_id, exc)
+            except BaseException as record_exc:
+                # Even after rollback, recording the failure could itself
+                # raise (a dropped connection, say) - guarded so THAT
+                # exception can never carry the original message out of
+                # this thread either. The row is left `running`; the next
+                # boot's `recover_stale_jobs` still frees the kind.
+                log.warning("job %s (%s) could not record its own failure: %s",
+                           job_id, kind, type(record_exc).__name__)
         finally:
             own_session.close()
 
@@ -259,11 +330,18 @@ def start_job(
     return job_id
 
 
-def recover_stale_jobs(app, max_age_seconds: int = 3600) -> int:
-    """Startup hook (called from `app.api.main.create_app`): a job left
-    `running` by a crashed process holds the partial unique index forever,
-    so every stale `queued`/`running` row older than `max_age_seconds` is
-    marked `failed`/`interrupted` once at boot, freeing its kind."""
+def recover_stale_jobs(app, max_age_seconds: int | None = None) -> int:
+    """Startup hook (called from `app.api.main.create_app`'s lifespan): a
+    job left `running` (or `queued`) by a crashed process holds the
+    partial unique index forever, so it is marked `failed`/`interrupted`
+    once at boot, freeing its kind.
+
+    T6-1 (fix round 1): the default is `None` - EVERY active row is
+    recovered at boot regardless of age, not just ones older than some
+    cutoff. A crash-and-restart within an age window used to leave the
+    kind 409-blocked for the rest of that window; at boot, "nothing is
+    still running it" is always a safe assumption. Pass an int only to
+    restore the old age-gated behaviour (not used in production)."""
     session_factory = app.state.job_session_factory
     runner_factory = app.state.job_runner_factory
     session = session_factory()

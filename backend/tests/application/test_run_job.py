@@ -116,3 +116,32 @@ def test_recover_stale_leaves_a_young_job_alone():
     r = _runner()
     r.start("scrape")
     assert r.recover_stale(max_age_seconds=3600) == 0
+
+
+# --- Fix round 1 (T6-2 / review Q5): recover_stale(None) -----------------
+#
+# Task 6's startup hook needs every active row interrupted, not just old
+# ones (a crash-and-restart within the age window used to leave the kind
+# 409-blocked for the rest of that window). `max_age_seconds=None` recovers
+# unconditionally; `getattr(job, "started_at", None)` alone would not be
+# enough since a `queued` row (never `started_at`-stamped) can't match ANY
+# age filter, however small — it needs its own "no age filter at all" path.
+
+
+def test_recover_stale_none_recovers_a_just_started_running_job():
+    r = _runner()
+    job_id = r.start("scrape")           # started_at = NOW, not stale by any age cutoff
+    assert r.recover_stale(max_age_seconds=None) == 1
+    job = r.repo.get(job_id)
+    assert job.status == "failed" and job.error == "interrupted"
+    assert r.start("scrape")             # the index is released
+
+
+def test_recover_stale_none_recovers_a_queued_job_with_no_started_at():
+    r = _runner()
+    job_id = r.repo.upsert(kind="draft", status="queued", created_by="ui",
+                           started_at=None, done=0, total=None,
+                           summary=None, error=None, finished_at=None).id
+    assert r.recover_stale(max_age_seconds=None) == 1
+    job = r.repo.get(job_id)
+    assert job.status == "failed" and job.error == "interrupted"

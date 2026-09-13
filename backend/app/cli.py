@@ -7,7 +7,10 @@ place allowed to import both a concrete adapter and a concrete repo and glue
 them together.
 """
 
+import os
+import subprocess
 import sys
+import tempfile
 from typing import Optional
 
 import typer
@@ -727,17 +730,41 @@ def _split_edit(text: str) -> tuple[str, str]:
 
 def _read_key() -> str:
     """One keypress, no Enter needed. Monkeypatched in tests."""
-    import click
-
-    return click.getchar()
+    return typer.getchar()
 
 
 def _edit_text(text: str) -> str | None:
-    """Open `$EDITOR` on `text`; `None` when the editor was closed without
-    saving a change (click's contract). Monkeypatched in tests."""
-    import click
+    """Open `$EDITOR` (or `$VISUAL`, else notepad/vi) on `text` and return
+    what was saved; `None` if the editor failed or nothing changed.
 
-    return click.edit(text, extension=".txt")
+    Live finding (2026-09-13): this used `click.edit`, but click is not a
+    declared dependency and typer 0.27 no longer installs it, so `review`
+    died with ModuleNotFoundError on a clean venv. Self-contained now.
+    Monkeypatched in tests.
+    """
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor:
+        editor = "notepad" if sys.platform == "win32" else "vi"
+
+    fd, path = tempfile.mkstemp(suffix=".txt", prefix="yc-draft-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        before = os.path.getmtime(path)
+        # shell=True so an EDITOR carrying its own arguments ("code -w",
+        # a quoted interpreter path) works the way a shell would run it.
+        if subprocess.call(f'{editor} "{path}"', shell=True) != 0:
+            return None
+        if os.path.getmtime(path) == before:
+            return None
+        with open(path, encoding="utf-8") as fh:
+            edited = fh.read()
+        return None if edited == text else edited
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def _review_repos(session):

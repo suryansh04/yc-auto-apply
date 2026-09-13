@@ -205,6 +205,13 @@ class OutreachRepo:
             ).scalars()
         )
 
+    def all(self) -> list[Outreach]:
+        """Task 5: every outreach row, unfiltered - the contacts list's
+        base query (`GET /api/contacts` applies its own filters after this,
+        the same shape as every `list_by_state`/`list_by_status` above:
+        no ordering, no limit)."""
+        return list(self.session.execute(select(Outreach)).scalars())
+
 
 class MessageRepo:
     def __init__(self, session: Session):

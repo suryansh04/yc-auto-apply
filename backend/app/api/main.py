@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.deps import get_repos, real_repos
-from app.api.routers import queue, stats
+from app.api.routers import contacts, manual, queue, send, stats
 
 ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
@@ -26,6 +26,9 @@ def create_app(repos_factory=None) -> FastAPI:
         app.dependency_overrides[get_repos] = repos_factory
     app.include_router(stats.router, prefix="/api")
     app.include_router(queue.router, prefix="/api")
+    app.include_router(manual.router, prefix="/api")
+    app.include_router(send.router, prefix="/api")
+    app.include_router(contacts.router, prefix="/api")
 
     @app.exception_handler(Exception)
     async def _unhandled_exception(request: Request, exc: Exception) -> JSONResponse:

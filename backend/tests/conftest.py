@@ -319,6 +319,47 @@ def flagged_draft(repos: FakeRepos):
 
 
 @pytest.fixture
+def approved_draft(repos: FakeRepos):
+    """Madhav, `APPROVED` with an approved draft and a resolved address -
+    the send API's single-item case. `.outreach`/`.founder`, matching the
+    `pending_draft`/`flagged_draft` shape above."""
+    founder = _add_founder_with_draft(repos, 60, "Madhav Krishna", "madhav@example.com",
+                                      OutreachState.APPROVED, approved=True)
+    outreach = repos.outreach.get_by_founder_id(founder.id)
+    return SimpleNamespace(outreach=outreach, founder=founder)
+
+
+@pytest.fixture
+def fake_sender(repos: FakeRepos):
+    """Task 5: the ONLY way `POST /api/send` is ever reached with
+    something other than a real Gmail client - see `app/api/routers/send.py`'s
+    module docstring. `Repos.sender` (`app/api/deps.py`) defaults to `None`;
+    this fixture sets it directly on the `FakeRepos` instance the `client`
+    fixture is built from (a plain object, so this attribute assignment
+    needs no change to `FakeRepos` itself)."""
+    from tests.fakes import FakeSender
+
+    sender = FakeSender()
+    repos.sender = sender
+    return sender
+
+
+@pytest.fixture
+def manual_founder(repos: FakeRepos):
+    """Pratish at OneFin, `NEEDS_MANUAL_EMAIL`, with one already-judged
+    candidate (`catch_all` - the domain's verdict, so no address could be
+    guessed) - the manual queue's single-item case. `.outreach`/`.founder`."""
+    repos.company.add(id=70, domain="onefin.in", name="OneFin")
+    founder = repos.founder.add(id=70, company_id=70, full_name="Pratish Gandhi",
+                                linkedin_url="https://linkedin.com/in/pratish-gandhi")
+    outreach = repos.outreach.add(id=70, founder_id=founder.id,
+                                  state=str(OutreachState.NEEDS_MANUAL_EMAIL))
+    repos.email_candidate.upsert(founder_id=founder.id, address="pratish@onefin.in",
+                                 priority=1, verdict="catch_all")
+    return SimpleNamespace(outreach=outreach, founder=founder)
+
+
+@pytest.fixture
 def good_body() -> str:
     """The task-14 GOOD body: validates against `pending_draft`'s cited
     news item, Vahan's `long_description` and the one resume claim."""

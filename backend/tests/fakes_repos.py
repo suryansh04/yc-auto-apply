@@ -130,11 +130,26 @@ class FakeLaunchRepo:
 class FakeOutreachRow:
     id: int
     founder_id: int
-    state: str = str(OutreachState.NEEDS_EMAIL)
+    state: OutreachState = OutreachState.NEEDS_EMAIL
     resolved_email: str | None = None
     last_error: str | None = None
     sequence_step: int = 0
     next_action_at: object = None  # Task 15: stamped via the injected Clock port
+
+    def __setattr__(self, name, value):
+        # Task 5: every use case assigns `state` as a plain `str` (e.g.
+        # `state=str(OutreachState.READY_TO_DRAFT)`, since `OutreachState`
+        # is a `StrEnum` and `str()` on one yields its bare value) - but the
+        # brief's own API tests read it back as `row.state.value`, which
+        # only a real `OutreachState` member has. Coerce on every set
+        # (`__init__` included, since dataclass-generated `__init__` also
+        # goes through normal attribute assignment) so `.state` is always
+        # an `OutreachState`, while every existing `row.state == "..."` /
+        # `row.state == OutreachState.X` comparison still works unchanged
+        # (`OutreachState` IS a `str` subclass).
+        if name == "state" and value is not None:
+            value = OutreachState(value)
+        object.__setattr__(self, name, value)
 
 
 class FakeOutreachRepo:

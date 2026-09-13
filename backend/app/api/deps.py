@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 
 _engine = None
 
@@ -37,6 +37,13 @@ class Repos:
     resume_profile: Any
     job: Any
     session: Any
+    # Task 5: a pre-built `MailSender`, present only when a caller injected
+    # one (the test harness's `fake_sender` fixture). `None` in production -
+    # `app.api.routers.send` builds a real `GmailSender` itself, gated by
+    # `require_send_config` below, the one time it is actually needed. This
+    # is the seam that makes a real Gmail send structurally impossible from
+    # the offline test suite: nothing here ever builds a real sender.
+    sender: Any = None
 
 
 def _session() -> Session:
@@ -100,3 +107,46 @@ def get_repos() -> Iterator[Repos]:
     name in `app.dependency_overrides` — that override is the whole test
     seam (see `backend/tests/api/conftest.py`)."""
     yield from real_repos()
+
+
+def require_send_config(settings: Settings) -> list[str]:
+    """Task 5: every `Settings` field `send` needs before it may build a
+    real `GmailSender` — the Gmail OAuth client config plus a real,
+    non-blank signature (spec §18) and an existing resume PDF. Every one
+    of these defaults to empty in `app.config` (so a fresh `.env` can
+    never send by accident); this returns the NAMES of whichever are
+    still missing/invalid, never their values, and an empty list means
+    "go ahead". `app.cli.send`/`gmail-auth` and
+    `app.api.routers.send` both call this — it used to be duplicated as
+    `app.cli._missing_gmail_config` / `_require_send_config`; now there is
+    exactly one rule for "configured enough to send" and the two callers
+    cannot drift on it. Storing a refresh token is checked separately by
+    each caller (a DB row via `GmailCredentialRepo`, not a `Settings`
+    field)."""
+    from pathlib import Path
+
+    missing = []
+    if not settings.gmail_sender_address:
+        missing.append("GMAIL_SENDER_ADDRESS (the Gmail account authorised by gmail-auth)")
+    if not settings.gmail_client_secrets_path or not Path(settings.gmail_client_secrets_path).is_file():
+        missing.append("GMAIL_CLIENT_SECRETS_PATH (must point at the OAuth client JSON)")
+    if not settings.signature.strip():
+        missing.append("SIGNATURE (your sign-off; every email must carry a real signature)")
+    if not settings.resume_path or not Path(settings.resume_path).is_file():
+        missing.append("RESUME_PATH (must point at an existing PDF)")
+    return missing
+
+
+def require_gmail_config(settings: Settings) -> list[str]:
+    """The subset `gmail-auth` needs (fix round 1, F5, preserved from
+    `app.cli`): only the sending address and the OAuth client-secrets file
+    — authorising Gmail must not wait on the resume or the signature being
+    in place."""
+    from pathlib import Path
+
+    missing = []
+    if not settings.gmail_sender_address:
+        missing.append("GMAIL_SENDER_ADDRESS (the Gmail account authorised by gmail-auth)")
+    if not settings.gmail_client_secrets_path or not Path(settings.gmail_client_secrets_path).is_file():
+        missing.append("GMAIL_CLIENT_SECRETS_PATH (must point at the OAuth client JSON)")
+    return missing

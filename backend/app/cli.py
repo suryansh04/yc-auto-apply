@@ -467,17 +467,6 @@ def _random_pause() -> None:
 _MAX_TO_SELF = 3  # fix round 1 (F8): `--to-self` copies never count toward the DB cap, but do toward Gmail's
 
 
-def _missing_gmail_config(settings) -> list[str]:
-    from pathlib import Path
-
-    missing = []
-    if not settings.gmail_sender_address:
-        missing.append("GMAIL_SENDER_ADDRESS (the Gmail account authorised by gmail-auth)")
-    if not settings.gmail_client_secrets_path or not Path(settings.gmail_client_secrets_path).is_file():
-        missing.append("GMAIL_CLIENT_SECRETS_PATH (must point at the OAuth client JSON)")
-    return missing
-
-
 def _refuse(action: str, missing: list[str]) -> None:
     if missing:
         typer.echo(f"refusing to {action}: missing configuration", err=True)
@@ -489,23 +478,23 @@ def _refuse(action: str, missing: list[str]) -> None:
 def _require_gmail_config(settings) -> None:
     """What `gmail-auth` needs (fix round 1, F5): only the sending address
     and the OAuth client-secrets file — authorising Gmail must not wait on
-    the resume or the signature being in place."""
-    _refuse("authorise gmail", _missing_gmail_config(settings))
+    the resume or the signature being in place. Shared with
+    `app.api.deps.require_gmail_config` so this rule lives in one place."""
+    from app.api.deps import require_gmail_config
+
+    _refuse("authorise gmail", require_gmail_config(settings))
 
 
 def _require_send_config(settings) -> None:
     """Refuse to build a sender until every send-side setting is present
     (all default to empty in `app.config`, so a fresh `.env` can never send
-    by accident): the Gmail settings above plus a real, non-blank signature
-    (spec §18) and an existing resume PDF."""
-    from pathlib import Path
+    by accident): the Gmail settings plus a real, non-blank signature
+    (spec §18) and an existing resume PDF. Shared with
+    `app.api.deps.require_send_config` (Task 5) so the CLI and the browser
+    send route cannot drift on what "configured enough to send" means."""
+    from app.api.deps import require_send_config
 
-    missing = _missing_gmail_config(settings)
-    if not settings.signature.strip():
-        missing.append("SIGNATURE (your sign-off; every email must carry a real signature)")
-    if not settings.resume_path or not Path(settings.resume_path).is_file():
-        missing.append("RESUME_PATH (must point at an existing PDF)")
-    _refuse("send", missing)
+    _refuse("send", require_send_config(settings))
 
 
 def _load_oauth_client(path: str) -> tuple[str, str]:

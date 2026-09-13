@@ -3,32 +3,62 @@ DTO -> use case -> DTO and hold no business logic."""
 
 import logging
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api import jobs as jobs_module
 from app.api.deps import get_repos, real_repos
-from app.api.routers import contacts, manual, queue, send, stats
+from app.api.routers import contacts, jobs, manual, queue, send, stats
 
 ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 logger = logging.getLogger("app.api")
 
 
-def create_app(repos_factory=None) -> FastAPI:
-    app = FastAPI(title="YC Auto Apply", docs_url="/api/docs", openapi_url="/api/openapi.json")
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Task 6: a job left `running` by a crashed process would hold the
+    # partial unique index forever otherwise - recovered once at boot,
+    # through whichever job factories this app was built with (never a
+    # real database in the offline test suite).
+    jobs_module.recover_stale_jobs(app)
+    yield
+
+
+def create_app(repos_factory=None, job_session_factory=None, job_runner_factory=None) -> FastAPI:
+    app = FastAPI(
+        title="YC Auto Apply", docs_url="/api/docs", openapi_url="/api/openapi.json",
+        lifespan=_lifespan,
+    )
     app.add_middleware(
         CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
         allow_methods=["*"], allow_headers=["*"],
     )
     if repos_factory is not None:
         app.dependency_overrides[get_repos] = repos_factory
+
+    # Task 6: the job thread's own session/runner factories - a seam
+    # separate from `get_repos` (never the request's session). Production
+    # defaults come from `app.api.jobs`; tests override both here the same
+    # way `repos_factory` overrides `get_repos` above. Stored on
+    # `app.state` (not baked into the `dependency_overrides` lambdas
+    # directly) so a fixture can swap them again on an already-created
+    # `app` just by reassigning the attribute - see `job_probe` /
+    # `blocking_job` / `failing_job` in `backend/tests/conftest.py`.
+    app.state.job_session_factory = job_session_factory or jobs_module._default_session_factory
+    app.state.job_runner_factory = job_runner_factory or jobs_module._default_runner_factory
+    app.dependency_overrides[jobs.get_job_session_factory] = lambda: app.state.job_session_factory
+    app.dependency_overrides[jobs.get_job_runner_factory] = lambda: app.state.job_runner_factory
+
     app.include_router(stats.router, prefix="/api")
     app.include_router(queue.router, prefix="/api")
     app.include_router(manual.router, prefix="/api")
     app.include_router(send.router, prefix="/api")
     app.include_router(contacts.router, prefix="/api")
+    app.include_router(jobs.router, prefix="/api")
 
     @app.exception_handler(Exception)
     async def _unhandled_exception(request: Request, exc: Exception) -> JSONResponse:

@@ -5,6 +5,7 @@ rows into these; nothing here decides anything — that stays in
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -26,6 +27,20 @@ class JobOut(BaseModel):
     total: int | None = None
     summary: str | None = None
     error: str | None = None
+
+
+class JobStartIn(BaseModel):
+    """Body of `POST /api/jobs/{kind}` (Task 6, ruling PF-2). Optional -
+    a bare POST with no body defaults to `created_by="ui"`, the browser's
+    own case; `"schedule"` is exercised by Task 19's scheduler and `"cli"`
+    is reserved for completeness (the `jobs.created_by` CHECK constraint
+    allows exactly these three)."""
+
+    created_by: Literal["ui", "schedule", "cli"] = "ui"
+
+
+class JobStartOut(BaseModel):
+    job_id: int
 
 
 class StatsOut(BaseModel):

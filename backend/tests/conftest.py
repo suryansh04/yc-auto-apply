@@ -364,3 +364,217 @@ def good_body() -> str:
     """The task-14 GOOD body: validates against `pending_draft`'s cited
     news item, Vahan's `long_description` and the one resume claim."""
     return PENDING_BODY
+
+
+# --- Task 6 fixtures: the background job runner -------------------------------
+#
+# These build fakes for the TWO seams `app/api/jobs.py` exposes -
+# `job_session_factory` (opens the thread's own "session") and
+# `job_runner_factory` (builds the `RunJob` bookkeeping object for a given
+# session) - both stored on `app.state` by `create_app` and read fresh on
+# every call, so a fixture can swap them on an already-created `client`
+# simply by assigning `client.app.state.job_session_factory` /
+# `job_runner_factory` after the fact. The runner side always goes through
+# the SAME `repos.job` (`FakeJobRepo`) the `GET /api/jobs` route reads via
+# `get_repos`, regardless of which fake "session" object it was called
+# with - that is what makes the background thread's writes visible to the
+# request thread's reads in these tests, with no real database involved.
+#
+# Threads are real; only the stage bodies (`JOB_KINDS` entries) and the
+# session/runner objects are faked - `monkeypatch.setattr` rebinds
+# `app.api.jobs.JOB_KINDS` itself, which `start_job` (defined in that same
+# module) looks up by module-global name, so the swap is visible to it.
+
+
+class _FixedClock:
+    def now(self):
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc)
+
+
+class _FakeJobSession:
+    """The thread's "own session" in tests: just needs `.close()`. The
+    fake stage functions never touch it for real I/O."""
+
+    def close(self) -> None:
+        pass
+
+
+def default_test_job_factories(repos):
+    """The `client` fixture's default `job_session_factory` /
+    `job_runner_factory` - used by EVERY API test (Task 6 fixtures below
+    layer stage-specific fakes over these on `client.app.state`
+    afterward). Without this, `create_app`'s startup hook
+    (`recover_stale_jobs`) would fall back to the production defaults,
+    which call `get_settings().database_url` - a required field with no
+    default - and blow up every API test under the offline suite's `env
+    -i` (global constraint: no env vars, no DB, no network)."""
+    from app.application.run_job import RunJob
+
+    def session_factory():
+        return _FakeJobSession()
+
+    def runner_factory(session):
+        return RunJob(repos.job, _FixedClock(), commit=lambda: None)
+
+    return session_factory, runner_factory
+
+
+def _signalling_runner_factory(repos, event):
+    """A `RunJob` bound to the shared `FakeJobRepo`, whose `finish`/`fail`
+    also set `event` - AFTER the row is actually updated, so a test that
+    does `event.wait()` then reads `GET /api/jobs` never races the
+    background thread's own write."""
+    from app.application.run_job import RunJob
+
+    class _SignallingRunJob(RunJob):
+        def finish(self, job_id, summary: str = "") -> None:
+            super().finish(job_id, summary)
+            event.set()
+
+        def fail(self, job_id, exc: BaseException) -> None:
+            super().fail(job_id, exc)
+            event.set()
+
+    def runner_factory(session):
+        return _SignallingRunJob(repos.job, _FixedClock(), commit=lambda: None)
+
+    return runner_factory
+
+
+@pytest.fixture
+def job_probe(client, repos, monkeypatch):
+    """Every `JOB_KINDS` stage becomes a fake that records which kind ran
+    and how many sessions it saw - `sessions_opened` is incremented by the
+    fake stage itself, i.e. once per job actually executed in the
+    background thread (never by the request thread, which never runs a
+    stage at all)."""
+    import threading
+
+    from app.api import jobs as jobs_impl
+
+    class Probe:
+        def __init__(self):
+            self.ran: list[str] = []
+            self.sessions_opened = 0
+            self.finished = threading.Event()
+
+    probe = Probe()
+
+    def make_stage(kind):
+        def _stage(session, progress):
+            probe.sessions_opened += 1
+            probe.ran.append(kind)
+            progress(1, 1)
+            return f"{kind} ran"
+        return _stage
+
+    monkeypatch.setattr(jobs_impl, "JOB_KINDS", {k: make_stage(k) for k in jobs_impl.JOB_KINDS})
+
+    client.app.state.job_session_factory = _FakeJobSession
+    client.app.state.job_runner_factory = _signalling_runner_factory(repos, probe.finished)
+    return probe
+
+
+@pytest.fixture
+def blocking_job(client, repos, monkeypatch):
+    """A stage that blocks until `.release()` is called and reports
+    progress on demand via `.report(done, total)` - used to hold a job in
+    `running` long enough to assert on it (the second-start-is-409 and
+    progress-while-running tests)."""
+    import threading
+
+    from app.api import jobs as jobs_impl
+
+    class Blocker:
+        def __init__(self):
+            self._release_event = threading.Event()
+            self._progress_ready = threading.Event()
+            self._progress_fn = None
+
+        def release(self) -> None:
+            self._release_event.set()
+
+        def report(self, done: int, total: int | None = None) -> None:
+            assert self._progress_ready.wait(timeout=5), "stage never started"
+            self._progress_fn(done, total)
+
+    blocker = Blocker()
+
+    def make_stage(kind):
+        def _stage(session, progress):
+            blocker._progress_fn = progress
+            blocker._progress_ready.set()
+            assert blocker._release_event.wait(timeout=5), "blocking_job was never released"
+            return f"{kind} ran"
+        return _stage
+
+    monkeypatch.setattr(jobs_impl, "JOB_KINDS", {k: make_stage(k) for k in jobs_impl.JOB_KINDS})
+
+    client.app.state.job_session_factory = _FakeJobSession
+    client.app.state.job_runner_factory = _signalling_runner_factory(repos, threading.Event())
+    yield blocker
+    # Safety net: an assertion failure above must not leave the background
+    # thread parked forever and hang the test run.
+    blocker.release()
+
+
+@pytest.fixture
+def failing_job(client, repos, monkeypatch):
+    """Every `JOB_KINDS` stage raises immediately - proves a failure
+    records only `type(exc).__name__` (never the message, which can carry
+    a secret) and frees the kind for a retry."""
+    import threading
+
+    from app.api import jobs as jobs_impl
+
+    class Probe:
+        def __init__(self):
+            self.finished = threading.Event()
+
+    probe = Probe()
+
+    def make_stage(kind):
+        def _stage(session, progress):
+            raise RuntimeError("simulated failure containing a fake api_key=secret-token")
+        return _stage
+
+    monkeypatch.setattr(jobs_impl, "JOB_KINDS", {k: make_stage(k) for k in jobs_impl.JOB_KINDS})
+
+    client.app.state.job_session_factory = _FakeJobSession
+    client.app.state.job_runner_factory = _signalling_runner_factory(repos, probe.finished)
+    return probe
+
+
+@pytest.fixture
+def stale_job_client(repos):
+    """A `scrape` job left `running` by a "crash" two hours ago, then a
+    fresh app booted against the SAME `repos` - `create_app`'s startup
+    hook (`recover_stale_jobs`) must mark it `failed`/`interrupted` before
+    the app starts serving, using the job factories passed in here (never
+    a real database)."""
+    from datetime import datetime, timedelta, timezone
+
+    from fastapi.testclient import TestClient
+
+    from app.api.main import create_app
+
+    repos.job.upsert(
+        kind="scrape", status="running", created_by="ui",
+        started_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        done=0, total=None, summary=None, error=None, finished_at=None,
+    )
+
+    def runner_factory(session):
+        from app.application.run_job import RunJob
+
+        return RunJob(repos.job, _FixedClock(), commit=lambda: None)
+
+    app = create_app(
+        repos_factory=lambda: repos,
+        job_session_factory=_FakeJobSession,
+        job_runner_factory=runner_factory,
+    )
+    with TestClient(app) as c:
+        yield c

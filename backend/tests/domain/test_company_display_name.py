@@ -37,3 +37,44 @@ def test_validator_accepts_the_display_name_in_the_body():
         research_source_type="long_description", research_source_id=1)
     errs = validate_grounding(draft, src, "Wifi Dabba, Inc.", "Decentralised broadband.", [])
     assert "does not name the company" not in errs
+
+
+# --- Live finding 2 (2026-09-13): the naming check was too literal ------------
+# Sarvam wrote a good Cashfree email saying "Cashfree" throughout and was
+# rejected with "does not name the company" because the stored name is
+# "Cashfree Payments". A reader would say the email names the company. The
+# check now accepts the distinctive leading part of the name.
+
+import pytest as _pytest
+
+from app.domain.names import company_name_variants
+
+
+@_pytest.mark.parametrize("stored, written, ok", [
+    ("Cashfree Payments", "Cashfree ships virtual accounts.", True),
+    ("Wifi Dabba, Inc.", "Wifi Dabba beams internet.", True),
+    ("Dost Education", "Dost Education calls parents.", True),
+    ("Dost Education", "Dost reaches parents by phone.", True),
+    ("AlgoSurg Inc", "AlgoSurg plans surgeries.", True),
+    ("OkCredit", "OkCredit tracks ledgers.", True),
+    ("Orangewood Labs", "Orangewood arms are programmable.", True),
+    # a generic leading word must NOT count on its own
+    ("The Better Company", "Better things happen.", False),
+    ("Cashfree Payments", "Payments are hard.", False),
+    ("Mudrex", "Crypto bots are neat.", False),
+])
+def test_naming_accepts_the_distinctive_part_of_the_name(stored, written, ok):
+    from app.domain.entities import Draft
+    from app.domain.validation import SourceRow, validate_grounding
+
+    src = SourceRow(kind="long_description", text=written, publication=None, intern_appropriate=True)
+    draft = Draft(subject="x y z", body=f"{written}\n\nI built a scheduler.\n\nWould you take an intern?",
+                  research_source_type="long_description", research_source_id=1)
+    errs = validate_grounding(draft, src, stored, "one liner", [])
+    assert ("does not name the company" in errs) is (not ok)
+
+
+def test_company_name_variants_are_ordered_longest_first():
+    assert company_name_variants("Cashfree Payments") == ["Cashfree Payments", "Cashfree"]
+    assert company_name_variants("Mudrex") == ["Mudrex"]
+    assert company_name_variants("The Better Company") == ["The Better Company"]

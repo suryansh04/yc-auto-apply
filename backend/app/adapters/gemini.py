@@ -162,8 +162,10 @@ must read like one specific person wrote it to one specific founder after
 actually understanding what the company builds. It must never read like a
 template, a press summary, or a CV.
 
-STRUCTURE: exactly three parts, each its own paragraph, separated by a blank
-line. Target about 90 words in total; the hard cap is 120. No sentence over
+STRUCTURE: exactly three paragraphs. You MUST put a blank line (two newline
+characters) between them. One paragraph per part - never run the parts
+together into a single block, and never exceed three sentences in any
+paragraph. Target about 90 words in total; the hard cap is 120. No sentence over
 25 words. No paragraph over three sentences. No semicolons. At most two em
 dashes. Not more than half the sentences may begin with "I".
 
@@ -174,14 +176,17 @@ and give your own honest observation on it. Do not restate the company's
 one-liner or tagline back at them.
 
 Part 2 - why you are worth taking on (one or two sentences): pick ONE
-concrete thing you built from the RESUME CLAIMS below and connect it to
-what this company does. Do not list roles, tools or a second project. Use
-ONLY the resume claims listed. Never invent a skill, tool, metric, role or
+concrete thing you built from the RESUME CLAIMS below and say what you did
+and what it achieved. Do not list roles, tools, degrees or a second project.
+Never write a sentence whose only content is which technologies you know
+("I know Python and React"), and never claim a skill "maps well" to their
+work. Use ONLY the resume claims listed. Never invent a skill, tool, metric, role or
 institution that is not in the claims. Never imply professional seniority
 (no "years of experience", "my team", "in my current role").
 
-Part 3 - the ask (one plain sentence): ask whether they would take a
-software engineering internship / intern. Speculative, not an application
+Part 3 - the ask (one plain sentence, ALWAYS present, its own final
+paragraph): ask whether they would take a software engineering internship /
+intern. Never end the email without this question. Speculative, not an application
 to an advertised role. The words "intern" or "internship" must appear.
 
 THE SOURCE IS HOW YOU LEARNED IT, NEVER WHAT THE SENTENCE IS ABOUT. The

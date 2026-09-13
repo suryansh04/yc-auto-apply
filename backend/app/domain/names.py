@@ -32,3 +32,34 @@ def company_display_name(name: str) -> str:
     cleaned = (name or "").strip()
     stripped = _LEGAL_SUFFIX.sub("", cleaned).strip(" ,")
     return stripped or cleaned
+
+
+# Live finding (2026-09-13): the "names the company" rule compared against the
+# whole stored name, so a good Cashfree email saying "Cashfree" was rejected
+# because YC stores "Cashfree Payments". A reader would say it names the
+# company. Accept the distinctive leading part too — but only when it is
+# distinctive: a generic word like "The", "Payments" or "Better" must not
+# stand in for the company on its own.
+_GENERIC_NAME_WORDS = {
+    "the", "a", "an", "and", "payments", "technologies", "technology", "labs",
+    "systems", "solutions", "services", "software", "digital", "group",
+    "global", "india", "better", "health", "care", "app", "ai", "data",
+    "cloud", "works", "studio", "studios", "company", "ventures", "capital",
+    "network", "networks", "media", "tech",
+}
+_MIN_DISTINCTIVE_LEN = 4
+
+
+def company_name_variants(name: str) -> list[str]:
+    """Ways a person might write this company mid-sentence, longest first:
+    the display name, then its distinctive leading word if there is one."""
+    display = company_display_name(name)
+    if not display:
+        return []
+    variants = [display]
+    words = display.split()
+    if len(words) > 1:
+        head = words[0].strip(",.&")
+        if len(head) >= _MIN_DISTINCTIVE_LEN and head.lower() not in _GENERIC_NAME_WORDS:
+            variants.append(head)
+    return variants

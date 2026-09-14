@@ -229,6 +229,29 @@ class OutreachRepo:
         no ordering, no limit)."""
         return list(self.session.execute(select(Outreach)).scalars())
 
+    def list_due(self, now: datetime) -> list[Outreach]:
+        """Task 11 (spec §6): the candidate set `ScheduleFollowUps` walks —
+        `SENT` rows whose `next_action_at` is not NULL and has passed. This
+        IS the `next_action_at <= now()` claim query the module docstring
+        above flagged as a future need (no locking, no limit yet — Phase
+        2's single job runner has no concurrent contention on this table
+        any more than `list_by_state` does). A NULL `next_action_at` (an
+        outreach with no further sequence step defined) is excluded
+        outright, not treated as immediately due — `ScheduleFollowUps`
+        re-checks each candidate against the LIVE configured interval on
+        top of this, so a row can still come back not-actually-due if the
+        `settings` row changed since it was sent; this query is only the
+        first, cheap filter."""
+        return list(
+            self.session.execute(
+                select(Outreach).where(
+                    Outreach.state == str(OutreachState.SENT),
+                    Outreach.next_action_at.is_not(None),
+                    Outreach.next_action_at <= now,
+                )
+            ).scalars()
+        )
+
 
 class MessageRepo:
     def __init__(self, session: Session):

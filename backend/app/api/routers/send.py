@@ -59,7 +59,8 @@ class _UTCClock:
 
 def _send_repos(repos: Repos) -> SendRepos:
     return SendRepos(founder=repos.founder, outreach=repos.outreach,
-                     message=repos.message, session=repos.session)
+                     message=repos.message, session=repos.session,
+                     settings=getattr(repos, "settings", None))
 
 
 def _load_oauth_client(path: str) -> tuple[str, str]:

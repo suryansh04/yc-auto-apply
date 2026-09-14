@@ -35,7 +35,7 @@ def _ignore_operator_dotenv(monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 from app.domain.states import OutreachState
@@ -1066,3 +1066,155 @@ def all_active_jobs_client(repos):
     )
     with TestClient(app) as c:
         yield c
+
+
+# --- Task 11 fixtures: ScheduleFollowUps / SendApproved's lifted R-C guard ----
+
+
+@pytest.fixture
+def clock():
+    """The shared `FrozenClock` — "now" is 2026-09-04 09:00 UTC (`tests.
+    fakes.FrozenClock`'s own default), so every Task 11 fixture below
+    anchors its `sent_at`/`next_action_at` timestamps to that same instant."""
+    from tests.fakes import FrozenClock
+
+    return FrozenClock()
+
+
+_NOW = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
+
+
+def _sent_row(repos: FakeRepos, id: int, state: OutreachState, sequence_step: int,
+             sent_at, next_action_at, day_1: int = 5, day_2: int = 12):
+    """A `SENT`-shaped founder with the given `sequence_step`'s outbound
+    row already sent at `sent_at`, `next_action_at` stamped directly
+    (mirrors what `SendApproved` would have written at send time, using
+    `day_1`/`day_2` as the interval baked in then — deliberately separate
+    from whatever interval a test later asks `ScheduleFollowUps` to use,
+    so passing a different `day_1`/`day_2` to the use case is what proves
+    it re-reads the interval instead of trusting this stale snapshot)."""
+    repos.company.add(id=id, domain=f"co{id}.example.com", name=f"Company {id}")
+    founder = repos.founder.add(id=id, company_id=id, full_name=f"Founder {id}")
+    outreach = repos.outreach.add(id=id, founder_id=founder.id, state=str(state))
+    outreach.resolved_email = f"founder{id}@example.com"
+    outreach.sequence_step = sequence_step
+    outreach.next_action_at = next_action_at
+    repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=sequence_step, direction="outbound",
+        subject=f"step {sequence_step}", body="body", approved_at=sent_at, sent_at=sent_at,
+        gmail_message_id=f"sent-{id}", gmail_thread_id=f"thread-{id}",
+    )
+    return SimpleNamespace(outreach=outreach, founder=founder)
+
+
+@pytest.fixture
+def sent_five_days_ago(repos: FakeRepos):
+    """A `SENT`, step-0 row sent exactly 5 days before `clock`'s "now" —
+    `next_action_at` baked at the default `followup_day_1=5`, so it lands
+    exactly on "now" (due). `test_the_intervals_come_from_settings_not_
+    constants` overrides `day_1=30` on `ScheduleFollowUps` itself, which
+    must re-anchor to this row's `sent_at` and find `sent_at + 30 > now` —
+    NOT due — even though this stored `next_action_at` says otherwise."""
+    sent_at = _NOW - timedelta(days=5)
+    return _sent_row(repos, 500, OutreachState.SENT, 0, sent_at, sent_at + timedelta(days=5))
+
+
+@pytest.fixture
+def sent_two_days_ago(repos: FakeRepos):
+    """A `SENT`, step-0 row sent only 2 days ago — `next_action_at`
+    (sent_at + 5 days) is still 3 days in the future, so even the repo's
+    own coarse `next_action_at <= now` filter excludes it; `ScheduleFollowUps`
+    never sees it as a candidate at all."""
+    sent_at = _NOW - timedelta(days=2)
+    return _sent_row(repos, 501, OutreachState.SENT, 0, sent_at, sent_at + timedelta(days=5))
+
+
+@pytest.fixture
+def sent_step_two_due(repos: FakeRepos):
+    """A `SENT` row already at `sequence_step=2` (the second follow-up
+    already went out), sent 15 days ago — past the `followup_day_2=12`
+    wait `ScheduleFollowUps` reuses as the close-out interval (spec §6
+    defines no third one). Due for `SENT -> CLOSED`, not a third follow-up."""
+    sent_at = _NOW - timedelta(days=15)
+    return _sent_row(repos, 502, OutreachState.SENT, 2, sent_at, sent_at + timedelta(days=12))
+
+
+@pytest.fixture
+def sent_with_no_next_action_at(repos: FakeRepos):
+    """A `SENT`, step-0 row whose `next_action_at` was never set (`None`)
+    — an outreach with no scheduled next action must never be treated as
+    "immediately due" just because `None <= now` would otherwise be a
+    trap for a careless comparison."""
+    sent_at = _NOW - timedelta(days=30)
+    return _sent_row(repos, 503, OutreachState.SENT, 0, sent_at, None)
+
+
+@pytest.fixture
+def replied_outreach(repos: FakeRepos):
+    """A `REPLIED` row (follow-ups already cancelled, Task 9) — even one
+    stamped with a past `next_action_at` (simulating a state left over
+    from before the reply landed) must never be picked up; the state
+    filter, not just the `next_action_at` clearing classify_reply already
+    does, is what has to hold here."""
+    sent_at = _NOW - timedelta(days=20)
+    return _sent_row(repos, 504, OutreachState.REPLIED, 0, sent_at, sent_at + timedelta(days=5))
+
+
+@pytest.fixture
+def bounced_outreach(repos: FakeRepos):
+    """A `BOUNCED` row with a past `next_action_at` — same reasoning as
+    `replied_outreach`: the state filter must exclude it regardless of
+    what `next_action_at` says."""
+    sent_at = _NOW - timedelta(days=20)
+    return _sent_row(repos, 505, OutreachState.BOUNCED, 0, sent_at, sent_at + timedelta(days=5))
+
+
+@pytest.fixture
+def closed_outreach(repos: FakeRepos):
+    """A `CLOSED` row with a past `next_action_at` — a row that already
+    closed must never be reopened by a later run."""
+    sent_at = _NOW - timedelta(days=20)
+    return _sent_row(repos, 506, OutreachState.CLOSED, 2, sent_at, sent_at + timedelta(days=12))
+
+
+@pytest.fixture
+def discarded_outreach(repos: FakeRepos):
+    """A `DISCARDED` row (rejected before ever sending) with a past
+    `next_action_at` — must never be picked up."""
+    sent_at = _NOW - timedelta(days=20)
+    return _sent_row(repos, 507, OutreachState.DISCARDED, 0, sent_at, sent_at + timedelta(days=5))
+
+
+@pytest.fixture
+def unresolved_outreach(repos: FakeRepos):
+    """An `UNRESOLVED` row (no email ever found) with a past
+    `next_action_at` — must never be picked up."""
+    sent_at = _NOW - timedelta(days=20)
+    return _sent_row(repos, 508, OutreachState.UNRESOLVED, 0, sent_at, sent_at + timedelta(days=5))
+
+
+@pytest.fixture
+def approved_follow_up(repos: FakeRepos):
+    """Task 11's replacement for the lifted R-C guard test: a founder
+    whose step-0 email already went out (`SENT`'s usual shape) and whose
+    step-1 follow-up draft is now `APPROVED` — the exact row
+    `SendApproved` must now be able to send, and the `.message` (the
+    step-1 draft) `reserve_for_send` must guard independently of step-0's
+    already-sent row. `.outreach` / `.founder` / `.message`."""
+    id = 510
+    repos.company.add(id=id, domain=f"co{id}.example.com", name=f"Company {id}")
+    founder = repos.founder.add(id=id, company_id=id, full_name=f"Founder {id}")
+    outreach = repos.outreach.add(id=id, founder_id=founder.id, state=str(OutreachState.APPROVED))
+    outreach.resolved_email = f"founder{id}@example.com"
+    outreach.sequence_step = 1
+    step_0_sent_at = _NOW - timedelta(days=5)
+    repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="outbound",
+        subject="step 0", body="initial body", approved_at=step_0_sent_at, sent_at=step_0_sent_at,
+        gmail_message_id=f"sent-{id}-0", gmail_thread_id=f"thread-{id}",
+    )
+    message = repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=1, direction="outbound",
+        subject="step 1 follow-up", body="follow-up body", approved_at=_NOW,
+    )
+    return SimpleNamespace(outreach=outreach, founder=founder, message=message)

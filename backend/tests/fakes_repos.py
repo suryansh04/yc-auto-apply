@@ -205,6 +205,14 @@ class FakeOutreachRepo:
     def all(self) -> list[FakeOutreachRow]:
         return list(self.rows.values())
 
+    def list_due(self, now) -> list[FakeOutreachRow]:
+        """Task 11: mirrors the real `OutreachRepo.list_due` — `SENT` rows
+        whose `next_action_at` is not `None` and has passed."""
+        return [
+            r for r in self.rows.values()
+            if r.state == OutreachState.SENT and r.next_action_at is not None and r.next_action_at <= now
+        ]
+
 
 @dataclass
 class FakeFounderRow:

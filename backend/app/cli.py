@@ -598,6 +598,7 @@ def send(
         GmailCredentialRepo,
         MessageRepo,
         OutreachRepo,
+        SettingsRepo,
     )
     from app.application.send_approved import SendApproved, SendRepos
 
@@ -616,6 +617,7 @@ def send(
             outreach=OutreachRepo(session),
             message=MessageRepo(session),
             session=session,
+            settings=SettingsRepo(session),
         )
         use_case = SendApproved(
             sender, _UTCClock(), repos,

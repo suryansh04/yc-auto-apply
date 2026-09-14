@@ -93,6 +93,38 @@ def test_a_live_settings_row_also_governs_the_step_two_close_check(repos, sent_s
     assert repos.outreach.get(sent_step_two_due.outreach.id).state == S.SENT
 
 
+# --- beyond the brief: SHORTENING an interval must also accelerate a row -------
+#
+# T11-3 (review fix round 2): the two tests above only ever LENGTHEN the
+# interval — a direction fix round 1's design already handled correctly,
+# because a repo-level `next_action_at <= now` pre-filter only ever needs
+# to become MORE permissive to admit a row whose live interval grew. The
+# reverse direction was the actual gap: `sent_two_days_ago`'s stored
+# `next_action_at` (baked at the default day_1=5) is still 3 days in the
+# future, so under fix round 1's `list_due` — which filtered on
+# `next_action_at <= now` at the SQL layer — this row was excluded before
+# the live settings recompute ever ran, no matter how far an operator
+# shrank `followup_day_1`. Verified BEFORE the fix (per the review's own
+# instruction) that this test fails against fix round 1: it does — the
+# repo-level filter drops the row outright and `scheduled` stays 0
+# regardless of the settings write. Passes now that `list_due` filters
+# only on `state` and leaves due-ness to this live recompute.
+
+
+def test_a_live_settings_row_can_accelerate_a_row_past_its_stale_future_next_action_at(
+    repos, sent_two_days_ago, clock
+):
+    # sent 2 days ago; stored next_action_at (day_1=5) is still 3 days
+    # away. Shrinking the configured interval to 1 day must pull it
+    # forward into "due" territory THIS run, not wait for the stale
+    # next_action_at to catch up.
+    repos.settings.set(followup_day_1=1)
+    result = ScheduleFollowUps(_repos(repos), clock).run()
+    assert result.scheduled == 1
+    outreach = repos.outreach.get(sent_two_days_ago.outreach.id)
+    assert outreach.state == S.READY_TO_DRAFT and outreach.sequence_step == 1
+
+
 # --- beyond the brief: the sequence_step < 2 cap --------------------------------
 
 
@@ -128,15 +160,32 @@ def test_an_unresolved_row_is_never_followed_up(repos, unresolved_outreach, cloc
 # --- beyond the brief: NULL next_action_at is never due -------------------------
 
 
-def test_a_null_next_action_at_is_never_due(repos, sent_with_no_next_action_at, clock):
-    """A mutant that compared `next_action_at <= now` without first
-    excluding `None` would crash outright on a real database (NULL
-    comparisons never satisfy `<=`) but a naive Python fake could silently
-    treat `None` as "always due" — this pins the correct behaviour either
-    way."""
+def test_a_null_next_action_at_is_still_evaluated_via_sent_at(repos, sent_with_no_next_action_at, clock):
+    """Review fix round 2 (ruling T11-3): `next_action_at` is no longer
+    read for due-ness at all — a NULL one no longer means "never due", it
+    means due-ness is decided purely from the outbound row's `sent_at`
+    plus the live interval, same as any other `SENT` row. This fixture's
+    `sent_at` is 30 days in the past (well past the default 5-day
+    interval), so it IS due despite `next_action_at` being `None` — the
+    opposite of what this test asserted before fix round 2."""
+    result = ScheduleFollowUps(_repos(repos), clock).run()
+    assert result.scheduled == 1
+    outreach = repos.outreach.get(sent_with_no_next_action_at.outreach.id)
+    assert outreach.state == S.READY_TO_DRAFT and outreach.sequence_step == 1
+
+
+def test_a_row_with_no_outbound_message_at_all_does_not_crash_the_recompute(
+    repos, sent_with_no_outbound_row, clock
+):
+    """The genuine "no anchor" edge case (ruling T11-3's point 4): since
+    `list_due` no longer filters by `next_action_at`, EVERY `SENT` row —
+    including a data-inconsistent one with no outbound message row for
+    its current step at all — reaches the live recompute. Must not raise,
+    must not schedule or close, must leave the row visible for a human to
+    investigate."""
     result = ScheduleFollowUps(_repos(repos), clock).run()
     assert result.scheduled == 0 and result.closed == 0
-    assert repos.outreach.get(sent_with_no_next_action_at.outreach.id).state == S.SENT
+    assert repos.outreach.get(sent_with_no_outbound_row.outreach.id).state == S.SENT
 
 
 # --- beyond the brief: transitions go through assert_transition, not a raw write --

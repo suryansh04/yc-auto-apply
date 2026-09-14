@@ -1141,12 +1141,36 @@ def sent_step_two_due(repos: FakeRepos):
 
 @pytest.fixture
 def sent_with_no_next_action_at(repos: FakeRepos):
-    """A `SENT`, step-0 row whose `next_action_at` was never set (`None`)
-    — an outreach with no scheduled next action must never be treated as
-    "immediately due" just because `None <= now` would otherwise be a
-    trap for a careless comparison."""
+    """A `SENT`, step-0 row whose `next_action_at` column was never set
+    (`None`) but whose step-0 outbound row has a real `sent_at` 30 days in
+    the past. Since review fix round 2 (ruling T11-3), `next_action_at` is
+    no longer read for due-ness at all — `list_due` no longer filters on
+    it and `ScheduleFollowUps` decides due-ness purely from the outbound
+    row's `sent_at` plus the live interval — so this row IS due despite
+    its `next_action_at` being `None`. This fixture now pins that a `None`
+    `next_action_at` is handled gracefully (no crash, still evaluated via
+    `sent_at`), the opposite of what it pinned before fix round 2."""
     sent_at = _NOW - timedelta(days=30)
     return _sent_row(repos, 503, OutreachState.SENT, 0, sent_at, None)
+
+
+@pytest.fixture
+def sent_with_no_outbound_row(repos: FakeRepos):
+    """A `SENT` outreach with NO outbound message row at all for its
+    current `sequence_step` — a data inconsistency (how would it be
+    `SENT` with nothing sent?), but exactly the shape `ScheduleFollowUps`
+    must not crash on: with the review fix round 2 `list_due` no longer
+    filtering by `next_action_at`, EVERY `SENT` row reaches the
+    application layer, including one with nothing to anchor a due-check
+    to. `.outreach` / `.founder`."""
+    id = 511
+    repos.company.add(id=id, domain=f"co{id}.example.com", name=f"Company {id}")
+    founder = repos.founder.add(id=id, company_id=id, full_name=f"Founder {id}")
+    outreach = repos.outreach.add(id=id, founder_id=founder.id, state=str(OutreachState.SENT))
+    outreach.resolved_email = f"founder{id}@example.com"
+    outreach.sequence_step = 0
+    outreach.next_action_at = None
+    return SimpleNamespace(outreach=outreach, founder=founder)
 
 
 @pytest.fixture

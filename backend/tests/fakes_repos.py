@@ -205,13 +205,13 @@ class FakeOutreachRepo:
     def all(self) -> list[FakeOutreachRow]:
         return list(self.rows.values())
 
-    def list_due(self, now) -> list[FakeOutreachRow]:
-        """Task 11: mirrors the real `OutreachRepo.list_due` — `SENT` rows
-        whose `next_action_at` is not `None` and has passed."""
-        return [
-            r for r in self.rows.values()
-            if r.state == OutreachState.SENT and r.next_action_at is not None and r.next_action_at <= now
-        ]
+    def list_due(self) -> list[FakeOutreachRow]:
+        """Task 11 review fix round 2 (ruling T11-3): mirrors the real
+        `OutreachRepo.list_due` — every `SENT` row, full stop. No
+        `next_action_at`/`sequence_step` filter here any more; due-ness
+        (and the schedule-vs-close branch) is entirely the application
+        layer's call."""
+        return [r for r in self.rows.values() if r.state == OutreachState.SENT]
 
 
 @dataclass

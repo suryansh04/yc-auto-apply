@@ -20,27 +20,34 @@ this module's to relax).
 
 Order of operations per run:
 
-1. **Candidates.** `OutreachRepo.list_due(now)` — `SENT` rows whose
-   `next_action_at` is not `NULL` and has passed (spec §6). Every other
-   state (`REPLIED`, `BOUNCED`, `CLOSED`, `DISCARDED`, `UNRESOLVED`, and
-   anything still upstream of `SENT`) is excluded by the state filter
-   alone; a `NULL` `next_action_at` (an outreach with no further sequence
-   step defined — e.g. `ClassifyReply._restore_sent` when there is no
-   next interval, Task 10) is excluded outright, never treated as
-   "immediately due".
-2. **Re-check against the LIVE interval, not the stale stored one.**
-   `next_action_at` on the row was baked in by `SendApproved` using
-   whatever `followup_day_1`/`followup_day_2` were configured *at send
-   time*. An operator can edit the `settings` row at any time afterward
-   (spec §7); this run must honour the CURRENT configured interval, not
-   the snapshot that happened to be true when the message went out. So
-   each candidate is re-anchored to its last outbound message's
-   `sent_at` and re-compared against `sent_at + <live interval>`. A row
+1. **Candidates.** `OutreachRepo.list_due()` — every `SENT` row, full
+   stop (review fix round 2, ruling T11-3). Every other state (`REPLIED`,
+   `BOUNCED`, `CLOSED`, `DISCARDED`, `UNRESOLVED`, and anything still
+   upstream of `SENT`) is excluded by the state filter alone.
+   `next_action_at` is NOT filtered on here any more — see point 2 for
+   why — so a row with `next_action_at = NULL` (e.g. one
+   `ClassifyReply._restore_sent` could never schedule, before Task 11's
+   own review fix round 1 closed that particular gap) still reaches this
+   run and is evaluated the same as every other `SENT` row, entirely from
+   its last outbound message's `sent_at`.
+2. **Due-ness is decided ENTIRELY here, live, from `sent_at` — never from
+   the stored `next_action_at`.** `next_action_at` on the row is written
+   by `SendApproved` using whatever `followup_day_1`/`followup_day_2`
+   were configured *at send time*; it is kept purely for display/audit,
+   never read for gating. An operator can edit the `settings` row at any
+   time afterward (spec §7), and this run must honour the CURRENT
+   configured interval in BOTH directions — a shortened interval must be
+   able to pull a row forward, not just a lengthened one push it back.
+   Fix round 1 shipped a repo-level `next_action_at <= now` pre-filter
+   that broke the "shorten" direction (the SQL excluded a row before the
+   live recompute ever ran); fix round 2 removed it for exactly this
+   reason. Each candidate is anchored to its last outbound message's
+   `sent_at` and compared against `sent_at + <live interval>`. A row
    whose live interval has since grown past `now` (e.g. an operator bumps
-   `followup_day_1` from 5 to 30, or a test passes a larger `day_1` to
-   prove the value is actually read — see
-   `test_the_intervals_come_from_settings_not_constants`) is left alone
-   this run, not force-scheduled off a stale timestamp.
+   `followup_day_1` from 5 to 30) is left alone this run, not
+   force-scheduled off a stale timestamp; a row whose interval has
+   SHRUNK past `now` is now correctly picked up even though its stale
+   `next_action_at` (or a `NULL` one) would have said otherwise.
 3. **Branch on `sequence_step`.** Below 2 (steps 0 or 1 just sent): bump
    `sequence_step` by one and send the row back to `READY_TO_DRAFT`
    through `assert_transition` — never by writing `outreach.state`
@@ -62,7 +69,7 @@ future job runner) can log/report identically.
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Protocol
 
 from app.domain.states import OutreachState, assert_transition
@@ -80,7 +87,7 @@ class FollowUpResult:
 
 
 class _OutreachRepo(Protocol):
-    def list_due(self, now: datetime): ...
+    def list_due(self): ...
     def upsert(self, **fields): ...
 
 
@@ -115,7 +122,7 @@ class ScheduleFollowUps:
         result = FollowUpResult()
         now = self._clock.now()
 
-        for outreach in self._repos.outreach.list_due(now):
+        for outreach in self._repos.outreach.list_due():
             last_sent = self._repos.message.get_outbound(outreach.id, outreach.sequence_step)
             if last_sent is None or last_sent.sent_at is None:
                 # Nothing to anchor a live due-check to (data inconsistency:

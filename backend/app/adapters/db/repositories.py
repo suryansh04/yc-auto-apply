@@ -229,26 +229,41 @@ class OutreachRepo:
         no ordering, no limit)."""
         return list(self.session.execute(select(Outreach)).scalars())
 
-    def list_due(self, now: datetime) -> list[Outreach]:
-        """Task 11 (spec §6): the candidate set `ScheduleFollowUps` walks —
-        `SENT` rows whose `next_action_at` is not NULL and has passed. This
-        IS the `next_action_at <= now()` claim query the module docstring
-        above flagged as a future need (no locking, no limit yet — Phase
-        2's single job runner has no concurrent contention on this table
-        any more than `list_by_state` does). A NULL `next_action_at` (an
-        outreach with no further sequence step defined) is excluded
-        outright, not treated as immediately due — `ScheduleFollowUps`
-        re-checks each candidate against the LIVE configured interval on
-        top of this, so a row can still come back not-actually-due if the
-        `settings` row changed since it was sent; this query is only the
-        first, cheap filter."""
+    def list_due(self) -> list[Outreach]:
+        """Task 11 (spec §6), narrowed in review fix round 2 (ruling
+        T11-3): every `SENT` row, full stop. Filters only on `state` —
+        `sequence_step` and `next_action_at` are both left to the
+        application layer.
+
+        Fix round 1 shipped this filtered on `next_action_at IS NOT NULL
+        AND next_action_at <= now`, which made `ScheduleFollowUps`'s live
+        settings re-check (spec §7: an operator's interval change applies
+        to pending rows) work in ONE direction only: LENGTHENING an
+        interval correctly deferred a row (the app-layer recompute says
+        not-due), but SHORTENING one could never accelerate a row ahead of
+        its stale stored `next_action_at`, because this SQL excluded the
+        row before the recompute ever ran. That defeated the whole point
+        of re-deriving due-ness live. Dropping the time filter here fixes
+        it: `ScheduleFollowUps` now sees every `SENT` row and decides
+        due-ness itself, entirely from the last outbound message's
+        `sent_at` plus the live `settings.followup_day_1`/`followup_day_2`
+        (never from this row's own `next_action_at`, which is written by
+        `SendApproved` purely for display/audit purposes now).
+
+        A `sequence_step < 2` filter was considered and rejected: a
+        `sequence_step == 2` row must still come back here so
+        `ScheduleFollowUps` can close it out (spec §6, "after step 2 with
+        no human reply, the row moves to CLOSED") — filtering it out at
+        the SQL layer would make closing unreachable.
+
+        At the pipeline's real scale (hundreds of outreach rows, spec's
+        own count) an unfiltered `state = SENT` scan costs nothing
+        measurable; there is no locking or limit here for the same reason
+        `list_by_state` has none (no concurrent worker contention yet in
+        Phase 2's single job runner)."""
         return list(
             self.session.execute(
-                select(Outreach).where(
-                    Outreach.state == str(OutreachState.SENT),
-                    Outreach.next_action_at.is_not(None),
-                    Outreach.next_action_at <= now,
-                )
+                select(Outreach).where(Outreach.state == str(OutreachState.SENT))
             ).scalars()
         )
 

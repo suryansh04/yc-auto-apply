@@ -125,59 +125,74 @@ def test_postings_with_a_url_still_key_on_the_url(session, an_outreach):
     assert b.id == a.id and b.title == "Backend Intern (renamed)"
 
 
-# --- Task 11 review fix round 1 (ruling T11-3): OutreachRepo.list_due -------
+# --- Task 11 review: OutreachRepo.list_due -----------------------------------
 #
-# Mutation testing on the real (SQLAlchemy) `list_due` found it had zero
-# direct tests: deleting either the `state == SENT` filter or the
-# `next_action_at.is_not(None)` clause still left 802/802 passing, because
-# only the fake mirror (`FakeOutreachRepo.list_due`) was ever exercised.
-# These three pin the real query directly, against real Postgres — SQL NULL
-# comparison semantics (`NULL <= now()` is `UNKNOWN`, not `False`) are
-# exactly the kind of thing a fake can get right for the wrong reason.
+# Fix round 1: mutation testing on the real (SQLAlchemy) `list_due` found
+# it had zero direct tests — deleting either the `state == SENT` filter or
+# the (then-present) `next_action_at.is_not(None)` clause still left
+# 802/802 passing, because only the fake mirror was ever exercised.
+#
+# Fix round 2 (ruling T11-3): `list_due` no longer filters on
+# `next_action_at` at all — it caused the live-settings recompute
+# (`ScheduleFollowUps`) to work in only one direction (a LENGTHENED
+# interval correctly deferred a row, but a SHORTENED one could never
+# accelerate one past a stale, still-future `next_action_at`, because the
+# SQL excluded the row before the recompute ever ran). Now it returns
+# every `SENT` row, full stop — due-ness, `next_action_at`'s value
+# included or not, is entirely the application layer's call. These tests
+# are updated to match: the positive case no longer needs a past
+# `next_action_at` at all, the state filter is still directly pinned, and
+# the NULL case is now a POSITIVE assertion (must be RETURNED, not
+# excluded) — the safety net for a NULL anchor lives in
+# `ScheduleFollowUps` itself (see
+# `test_a_null_next_action_at_is_still_evaluated_via_sent_at` and
+# `test_a_row_with_no_outbound_message_at_all_does_not_crash_the_recompute`
+# in `tests/application/test_schedule_follow_ups.py`), not in this query.
 
 
-def test_list_due_returns_a_sent_row_past_its_next_action_at(session, an_outreach):
+def test_list_due_returns_a_sent_row_regardless_of_its_next_action_at(session, an_outreach):
+    """No time filter here any more — a `SENT` row with a future
+    `next_action_at` is still a candidate; `ScheduleFollowUps` decides
+    due-ness live."""
     from datetime import datetime, timedelta, timezone
 
     from app.adapters.db.repositories import OutreachRepo
 
-    now = datetime.now(timezone.utc)
     an_outreach.state = "sent"
-    an_outreach.next_action_at = now - timedelta(days=1)
+    an_outreach.next_action_at = datetime.now(timezone.utc) + timedelta(days=30)
     session.flush()
 
-    due_ids = [o.id for o in OutreachRepo(session).list_due(now)]
+    due_ids = [o.id for o in OutreachRepo(session).list_due()]
     assert an_outreach.id in due_ids
 
 
-def test_list_due_excludes_a_replied_row_even_when_its_next_action_at_is_past(session, an_outreach):
-    """The `state == SENT` filter, not just the timestamp — a mutant that
-    dropped it would still find this row eligible."""
+def test_list_due_excludes_a_replied_row(session, an_outreach):
+    """The `state == SENT` filter is the only filter left — a mutant that
+    dropped it would find every state eligible."""
     from datetime import datetime, timedelta, timezone
 
     from app.adapters.db.repositories import OutreachRepo
 
-    now = datetime.now(timezone.utc)
     an_outreach.state = "replied"
-    an_outreach.next_action_at = now - timedelta(days=1)
+    an_outreach.next_action_at = datetime.now(timezone.utc) - timedelta(days=1)
     session.flush()
 
-    due_ids = [o.id for o in OutreachRepo(session).list_due(now)]
+    due_ids = [o.id for o in OutreachRepo(session).list_due()]
     assert an_outreach.id not in due_ids
 
 
-def test_list_due_excludes_a_null_next_action_at(session, an_outreach):
-    """A `SENT` row with no scheduled next action must never be treated as
-    immediately due — real Postgres NULL semantics, not just a Python
-    `is not None` check in a fake."""
-    from datetime import datetime, timezone
-
+def test_list_due_includes_a_null_next_action_at(session, an_outreach):
+    """Fix round 2: a `SENT` row with `next_action_at IS NULL` is now
+    RETURNED, not excluded — real Postgres NULL semantics no longer come
+    into play at all, since there is no `next_action_at` clause left to
+    evaluate them against. `ScheduleFollowUps` is what has to remain safe
+    when handed a NULL anchor (pinned at the application layer, not
+    here)."""
     from app.adapters.db.repositories import OutreachRepo
 
-    now = datetime.now(timezone.utc)
     an_outreach.state = "sent"
     an_outreach.next_action_at = None
     session.flush()
 
-    due_ids = [o.id for o in OutreachRepo(session).list_due(now)]
-    assert an_outreach.id not in due_ids
+    due_ids = [o.id for o in OutreachRepo(session).list_due()]
+    assert an_outreach.id in due_ids

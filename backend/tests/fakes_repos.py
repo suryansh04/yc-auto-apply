@@ -452,10 +452,6 @@ class FakeMessageRepo:
         row."""
         return next((r for r in self.rows if r.gmail_message_id == gmail_message_id), None)
 
-    def list_by_thread_id(self, gmail_thread_id: str) -> list[FakeMessageRow]:
-        """Task 8: mirrors `MessageRepo.list_by_thread_id`."""
-        return [r for r in self.rows if r.gmail_thread_id == gmail_thread_id]
-
     def reserve_for_send(self, message_id: int, now) -> int:
         """Task 15 (ruling R1): models the real repo's single conditional
         `UPDATE messages SET sent_at = :now WHERE id = :id AND sent_at IS
@@ -620,6 +616,7 @@ class FakeGmailReader:
         self._expired = False
         self._gmail_error_pending = False
         self.used_fallback = False
+        self.get_message_calls = 0  # fix round 2: proves dedupe-before-fetch skips the call entirely
 
     def add(self, *, thread_id: str, message_id: str, sender: str, body: str,
             subject: str = "", received_at=None) -> None:
@@ -655,6 +652,7 @@ class FakeGmailReader:
         return self._deliver()
 
     def get_message(self, message_id: str) -> FakeInboundMessage:
+        self.get_message_calls += 1
         return self._by_id[message_id]
 
     def current_history_id(self) -> str:

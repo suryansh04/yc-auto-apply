@@ -141,8 +141,18 @@ class PollReplies:
         # (Task 7's `GmailReader` is constructed with a fixed `account`);
         # asking it rather than threading a separate constructor arg
         # through keeps this class's interface exactly `(reader, repos,
-        # clock)`, matching the brief's Interfaces line.
-        self._account_email = getattr(reader, "account", None)
+        # clock)`, matching the brief's Interfaces line. Fix round 2: a
+        # reader with no (or an empty) `.account` fails LOUDLY, right here
+        # at construction — silently defaulting to `None` would otherwise
+        # go on to look up a credential row for account `None`, a
+        # confusing failure far from its actual cause.
+        account_email = getattr(reader, "account", None)
+        if not account_email:
+            raise ValueError(
+                f"{reader!r} has no non-empty `account` attribute — PollReplies "
+                "needs to know which GmailCredential row to read/write"
+            )
+        self._account_email = account_email
 
     def run(self) -> PollResult:
         result = PollResult()

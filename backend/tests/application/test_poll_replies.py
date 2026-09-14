@@ -242,3 +242,78 @@ def test_a_bounce_on_an_outreach_not_in_sent_is_stored_but_state_is_left_alone(
     assert result.bounced == 1
     assert repos.outreach.get(sent_outreach.outreach.id).state == S.REPLIED
     assert repos.message.list_by_outreach(sent_outreach.outreach.id)[-1].label == "BOUNCE"
+
+
+# --- Fix round 2 (review): mutation-surviving gaps -------------------------
+
+
+def test_a_non_gmail_exception_propagates_out_of_run(repos, sent_outreach, fake_reader):
+    """`run()` must catch ONLY `GmailError` — widening that to a bare
+    `except Exception:` would turn every genuine bug in a poll (a repo
+    error, an attribute typo, anything) into a silently "clean" run
+    reporting zero replies. A `RuntimeError` raised mid-run (here, from a
+    broken `credential` repo) must escape `run()` unchanged."""
+
+    class _BrokenCredentialRepo:
+        def get_by_account_email(self, account_email):
+            raise RuntimeError("boom: not a Gmail failure")
+
+        def set_history_id(self, account_email, history_id):
+            raise AssertionError("should never be reached")
+
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="m1", sender="a@b.com", body="hi")
+    broken_repos = _repos(repos)
+    broken_repos.credential = _BrokenCredentialRepo()
+
+    with pytest.raises(RuntimeError, match="boom: not a Gmail failure"):
+        PollReplies(fake_reader, broken_repos, _clock()).run()
+
+
+def test_the_fallback_persists_a_fresh_cursor_not_the_stale_one(repos, sent_outreach, fake_reader):
+    """After an expired-history fallback, the persisted cursor must be the
+    reader's FRESH id (`current_history_id()`), never the stale one that
+    just expired — persisting the stale value would make every future poll
+    fall back again forever, re-scanning a 14-day window each time instead
+    of ever resuming from `history_since` again."""
+    stale_cursor = repos.credential.get_by_account_email("me@gmail.com").last_history_id
+    fake_reader.expire_history()
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="m1", sender="a@b.com", body="yes")
+
+    PollReplies(fake_reader, _repos(repos), _clock()).run()
+
+    persisted = repos.credential.get_by_account_email("me@gmail.com").last_history_id
+    assert persisted == fake_reader.current_history_id()
+    assert persisted != stale_cursor
+
+
+def test_a_re_poll_of_the_same_window_never_calls_get_message_again(repos, sent_outreach, fake_reader):
+    """Dedupe-before-fetch (module docstring point 3): `get_by_gmail_id`
+    must be checked BEFORE `reader.get_message(id)` is ever called for a
+    known id — not just "no duplicate row ends up stored". Proven here by
+    counting the fake reader's actual `get_message` calls across a rewound
+    re-poll, which must not grow."""
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="m1", sender="a@b.com", body="yes")
+    p = PollReplies(fake_reader, _repos(repos), _clock())
+
+    p.run()
+    calls_after_first_run = fake_reader.get_message_calls
+    assert calls_after_first_run == 1
+
+    fake_reader.rewind()  # same window again
+    p.run()
+
+    assert fake_reader.get_message_calls == calls_after_first_run  # no new fetch burned
+
+
+def test_a_reader_with_no_account_fails_fast_at_construction(repos):
+    """`getattr(reader, "account", None)` silently defaulting to `None`
+    would go on to look up (and, worse, later persist a cursor for) a
+    credential row keyed on account `None` — a confusing failure far from
+    its actual cause. `PollReplies` must instead refuse to construct at
+    all when the reader has no non-empty `.account`."""
+
+    class _AccountlessReader:
+        pass  # no .account attribute at all
+
+    with pytest.raises(ValueError, match="account"):
+        PollReplies(_AccountlessReader(), _repos(repos), _clock())

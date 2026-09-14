@@ -270,15 +270,6 @@ class MessageRepo:
             select(Message).where(Message.gmail_message_id == gmail_message_id)
         ).scalar_one_or_none()
 
-    def list_by_thread_id(self, gmail_thread_id: str) -> list[Message]:
-        """Added in Task 8: every message (outbound and inbound) on a
-        given Gmail thread, in insertion order."""
-        return list(
-            self.session.execute(
-                select(Message).where(Message.gmail_thread_id == gmail_thread_id)
-            ).scalars()
-        )
-
     def list_by_outreach(self, outreach_id: int) -> list[Message]:
         """Added in Task 8: the brief's own tests call it by this name.
         Equivalent to filtering `list_by_state`/similar by outreach id —

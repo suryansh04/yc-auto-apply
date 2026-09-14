@@ -327,25 +327,36 @@ class ClassifyReply:
     def _next_action_at(self, outreach, last_outbound):
         """The last outbound message's `sent_at` plus the follow-up
         interval for the NEXT sequence step (`outreach.sequence_step + 1`
-        — the step that hasn't gone out yet). `None` when there is no
-        outbound `sent_at` to anchor to, or no further follow-up step
-        defined (Phase 1/2 define exactly two: step 1 at +5 days, step 2 at
-        +12 days) — never guessed."""
+        — the step that hasn't gone out yet). `None` only when there is no
+        outbound `sent_at` to anchor to — never for a missing interval:
+        `_followup_interval_days` always returns one (see its docstring),
+        so a restored row is never silently left un-schedulable."""
         if last_outbound is None or last_outbound.sent_at is None:
             return None
         interval_days = self._followup_interval_days(outreach.sequence_step + 1)
-        if interval_days is None:
-            return None
         return last_outbound.sent_at + timedelta(days=interval_days)
 
-    def _followup_interval_days(self, next_step: int) -> int | None:
+    def _followup_interval_days(self, next_step: int) -> int:
         """`followup_day_1`/`followup_day_2` from the `settings` table
         (`ClassifyRepos.settings`), falling back to the same defaults
         `SendApproved` uses for `followup_day_1` (spec §7) when there is no
-        settings repo, no row, or the row's field is `None`."""
+        settings repo, no row, or the row's field is `None`.
+
+        Task 11 review (ruling T11-1): `next_step == 1` uses
+        `followup_day_1`; `next_step >= 2` uses `followup_day_2` —
+        deliberately NOT `next_step == 2` only. Before Task 11,
+        `next_step == 3` (a correction of a step-2 `SENT` row, i.e.
+        `outreach.sequence_step == 2`) returned `None` here, which made
+        `_restore_sent` leave `next_action_at = None` on the restored row.
+        Once `ScheduleFollowUps.list_due` started excluding NULL
+        `next_action_at` outright (Task 11, spec §6), that `None` became a
+        real bug: the row would sit in `SENT` forever, never picked up,
+        never closed. Mirrors `ScheduleFollowUps._interval_days`'s own
+        choice to reuse `followup_day_2` as the step-2 "wait before close"
+        interval, so the two never disagree on what a step-2 row's next
+        due date is, regardless of which path (a normal send, or a
+        REPLIED->SENT correction) produced it."""
         settings_row = self._repos.settings.get() if self._repos.settings is not None else None
         if next_step == 1:
             return getattr(settings_row, "followup_day_1", None) or _DEFAULT_FOLLOWUP_DAY_1
-        if next_step == 2:
-            return getattr(settings_row, "followup_day_2", None) or _DEFAULT_FOLLOWUP_DAY_2
-        return None
+        return getattr(settings_row, "followup_day_2", None) or _DEFAULT_FOLLOWUP_DAY_2

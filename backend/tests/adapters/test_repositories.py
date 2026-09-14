@@ -123,3 +123,61 @@ def test_postings_with_a_url_still_key_on_the_url(session, an_outreach):
     a = repo.upsert(company_id=company_id, title="Backend Intern", url="/jobs/1")
     b = repo.upsert(company_id=company_id, title="Backend Intern (renamed)", url="/jobs/1")
     assert b.id == a.id and b.title == "Backend Intern (renamed)"
+
+
+# --- Task 11 review fix round 1 (ruling T11-3): OutreachRepo.list_due -------
+#
+# Mutation testing on the real (SQLAlchemy) `list_due` found it had zero
+# direct tests: deleting either the `state == SENT` filter or the
+# `next_action_at.is_not(None)` clause still left 802/802 passing, because
+# only the fake mirror (`FakeOutreachRepo.list_due`) was ever exercised.
+# These three pin the real query directly, against real Postgres — SQL NULL
+# comparison semantics (`NULL <= now()` is `UNKNOWN`, not `False`) are
+# exactly the kind of thing a fake can get right for the wrong reason.
+
+
+def test_list_due_returns_a_sent_row_past_its_next_action_at(session, an_outreach):
+    from datetime import datetime, timedelta, timezone
+
+    from app.adapters.db.repositories import OutreachRepo
+
+    now = datetime.now(timezone.utc)
+    an_outreach.state = "sent"
+    an_outreach.next_action_at = now - timedelta(days=1)
+    session.flush()
+
+    due_ids = [o.id for o in OutreachRepo(session).list_due(now)]
+    assert an_outreach.id in due_ids
+
+
+def test_list_due_excludes_a_replied_row_even_when_its_next_action_at_is_past(session, an_outreach):
+    """The `state == SENT` filter, not just the timestamp — a mutant that
+    dropped it would still find this row eligible."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.adapters.db.repositories import OutreachRepo
+
+    now = datetime.now(timezone.utc)
+    an_outreach.state = "replied"
+    an_outreach.next_action_at = now - timedelta(days=1)
+    session.flush()
+
+    due_ids = [o.id for o in OutreachRepo(session).list_due(now)]
+    assert an_outreach.id not in due_ids
+
+
+def test_list_due_excludes_a_null_next_action_at(session, an_outreach):
+    """A `SENT` row with no scheduled next action must never be treated as
+    immediately due — real Postgres NULL semantics, not just a Python
+    `is not None` check in a fake."""
+    from datetime import datetime, timezone
+
+    from app.adapters.db.repositories import OutreachRepo
+
+    now = datetime.now(timezone.utc)
+    an_outreach.state = "sent"
+    an_outreach.next_action_at = None
+    session.flush()
+
+    due_ids = [o.id for o in OutreachRepo(session).list_due(now)]
+    assert an_outreach.id not in due_ids

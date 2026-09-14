@@ -135,6 +135,51 @@ def test_the_restore_uses_followup_day_2_for_a_second_step(client, repos):
     assert outreach.next_action_at == sent_at + timedelta(days=20)
 
 
+def test_the_restore_uses_followup_day_2_for_a_step_two_correction(client, repos):
+    """Task 11 review (ruling T11-1): before the fix,
+    `_followup_interval_days(next_step=3)` — reached from a step-2 row
+    (`outreach.sequence_step == 2`) — returned `None`, so this correction
+    left `next_action_at = None` and the row could never become due for
+    `ScheduleFollowUps` to close (spec §6 defines no third interval, so
+    the fix reuses `followup_day_2`, mirroring `ScheduleFollowUps._
+    interval_days`'s own reuse choice for the same step)."""
+    sent_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    item = _human_labelled_outreach(repos, 507, sequence_step=2, sent_at=sent_at)
+
+    r = client.post(f"/api/messages/{item.reply.id}/label", json={"label": "OUT_OF_OFFICE"})
+    assert r.status_code == 200
+
+    outreach = repos.outreach.get(item.outreach.id)
+    assert outreach.state == S.SENT
+    assert outreach.next_action_at == sent_at + timedelta(days=12)
+
+
+def test_a_corrected_step_two_row_eventually_closes(client, repos):
+    """End to end (T11-1): a step-2 SENT row mislabelled REPLIED, then
+    corrected back to a machine label, must actually reach CLOSED once
+    `ScheduleFollowUps` next runs past the restored `next_action_at` — not
+    sit in SENT forever because the restore path left it un-schedulable."""
+    from app.application.schedule_follow_ups import FollowUpRepos, ScheduleFollowUps
+
+    sent_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    item = _human_labelled_outreach(repos, 508, sequence_step=2, sent_at=sent_at)
+
+    r = client.post(f"/api/messages/{item.reply.id}/label", json={"label": "OUT_OF_OFFICE"})
+    assert r.status_code == 200
+    assert repos.outreach.get(item.outreach.id).state == S.SENT
+
+    class _PastDueClock:
+        def now(self_inner):
+            return sent_at + timedelta(days=13)  # past the restored next_action_at (+12)
+
+    follow_up_repos = FollowUpRepos(outreach=repos.outreach, message=repos.message,
+                                    session=repos.session, settings=repos.settings)
+    result = ScheduleFollowUps(follow_up_repos, _PastDueClock()).run()
+
+    assert result.closed == 1
+    assert repos.outreach.get(item.outreach.id).state == S.CLOSED
+
+
 def test_correcting_human_to_human_leaves_the_state_alone(client, repos):
     item = _human_labelled_outreach(repos, 503, label="REJECTED")
 

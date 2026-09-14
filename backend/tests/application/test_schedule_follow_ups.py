@@ -63,6 +63,36 @@ def test_the_intervals_come_from_settings_not_constants(repos, sent_five_days_ag
     assert ScheduleFollowUps(_repos(repos), clock, day_1=30).run().scheduled == 0
 
 
+# --- beyond the brief: the LIVE settings-table read, not just the constructor --
+#
+# T11-2 (review): the test above only ever exercises the `day_1=30`
+# constructor kwarg. Deleting `repos.settings.get()` from `_interval_days`
+# entirely (always falling back to `self._day_1`/`self._day_2`) left the
+# whole suite passing — the module docstring's central justification for
+# the two-stage due-check design ("an operator can edit the settings row at
+# any time... this run must honour the CURRENT configured interval") had no
+# test pinning it. This one leaves the constructor at its defaults and
+# writes to `repos.settings` instead — it fails if `_interval_days` ever
+# stops reading the settings repo.
+
+
+def test_a_live_settings_row_overrides_the_constructor_default(repos, sent_five_days_ago, clock):
+    repos.settings.set(followup_day_1=30)
+    # Constructor day_1 is left at its default (5); only the settings row
+    # says 30. A 5-day-old row must NOT be scheduled if the settings read
+    # is real.
+    assert ScheduleFollowUps(_repos(repos), clock).run().scheduled == 0
+    assert repos.outreach.get(sent_five_days_ago.outreach.id).state == S.SENT
+
+
+def test_a_live_settings_row_also_governs_the_step_two_close_check(repos, sent_step_two_due, clock):
+    repos.settings.set(followup_day_2=30)
+    # sent_step_two_due was sent 15 days ago; a 30-day settings interval
+    # is not yet due, even though the constructor default (12) would be.
+    assert ScheduleFollowUps(_repos(repos), clock).run().closed == 0
+    assert repos.outreach.get(sent_step_two_due.outreach.id).state == S.SENT
+
+
 # --- beyond the brief: the sequence_step < 2 cap --------------------------------
 
 

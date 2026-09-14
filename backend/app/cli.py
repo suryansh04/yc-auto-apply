@@ -525,22 +525,36 @@ def _gmail_sender(client_id: str, client_secret: str, refresh_token: str, sender
                        refresh_token=refresh_token, sender_address=sender_address)
 
 
+# Task 7 (Phase 2, spec §5): `gmail-auth` now requests BOTH the send scope
+# (Task 15) and read-only (needed by `app.adapters.gmail_reader.GmailReader`
+# to poll replies). A refresh token minted under the old send-only scope
+# cannot read mail - Google enforces scopes on the token, not just on the
+# consent screen - so an operator who authorised before this change must
+# re-run `gmail-auth` once; the command prints a note about this below.
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
+
+
 @app.command("gmail-auth")
 def gmail_auth() -> None:
-    """One-time OAuth bootstrap (Task 15, spec §14): opens a browser for the
-    Google consent screen with the `gmail.send` scope only, then stores the
-    resulting REFRESH token in the `gmail_credentials` table (never in a
-    file) under GMAIL_SENDER_ADDRESS. Re-run it if `send` reports
-    `invalid_grant` (token revoked/expired). Not covered by the offline
-    suite: it needs a browser and Google's servers."""
+    """One-time OAuth bootstrap (Task 15, spec §14; widened in Task 7,
+    spec §5): opens a browser for the Google consent screen with the
+    `gmail.send` and `gmail.readonly` scopes, then stores the resulting
+    REFRESH token in the `gmail_credentials` table (never in a file) under
+    GMAIL_SENDER_ADDRESS. Re-run it if `send` reports `invalid_grant`
+    (token revoked/expired), or once after upgrading past Task 7 if the
+    stored token predates the read scope (a send-only token cannot read
+    mail; Google enforces scopes on the token itself). Not covered by the
+    offline suite: it needs a browser and Google's servers."""
     from app.adapters.db.repositories import GmailCredentialRepo
-    from app.adapters.gmail import SCOPES
 
     settings = get_settings()
     _require_gmail_config(settings)
     from google_auth_oauthlib.flow import InstalledAppFlow
 
-    flow = InstalledAppFlow.from_client_secrets_file(settings.gmail_client_secrets_path, scopes=SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(settings.gmail_client_secrets_path, scopes=GMAIL_SCOPES)
     creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
     if not creds.refresh_token:
         typer.echo("Google returned no refresh token - revoke the app's access at "
@@ -551,10 +565,14 @@ def gmail_auth() -> None:
             account_email=settings.gmail_sender_address,
             refresh_token=creds.refresh_token,
             token_uri=creds.token_uri or "https://oauth2.googleapis.com/token",
-            scopes=list(creds.scopes or SCOPES),
+            scopes=list(creds.scopes or GMAIL_SCOPES),
         )
         session.commit()
-    typer.echo(f"stored a refresh token for {settings.gmail_sender_address} (scope: gmail.send)")
+    typer.echo(f"stored a refresh token for {settings.gmail_sender_address} (scopes: gmail.send, gmail.readonly)")
+    typer.echo("NOTE: if you authorised this account before this change, that older token was "
+               "send-only and cannot read replies - this run replaced it with one covering both "
+               "scopes, so no further action is needed. If a colleague's token is still send-only, "
+               "they must run `gmail-auth` again once.")
 
 
 @app.command()

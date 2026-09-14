@@ -165,31 +165,51 @@ class GmailSender:
         return self._access_token
 
     def _refresh(self) -> None:
-        try:
-            response = self._http.post(
-                TOKEN_URL,
-                data={
-                    "client_id": self._client_id,
-                    "client_secret": self._client_secret,
-                    "refresh_token": self._refresh_token,
-                    "grant_type": "refresh_token",
-                },
-            )
-        except httpx.HTTPError as exc:
-            raise GmailError("token refresh", reason=type(exc).__name__) from None
-        if response.status_code >= 400:
-            raise GmailError("token refresh", status=response.status_code,
-                             reason=_error_code(response))
-        try:
-            payload = response.json()
-            token = str(payload["access_token"])
-            expires_in = float(payload.get("expires_in", 3600))
-        except (ValueError, KeyError, TypeError):
-            raise GmailError("token refresh", status=response.status_code,
-                             reason="response missing access_token")
-        self._access_token = token
+        self._access_token, expires_in = exchange_refresh_token(
+            self._http, self._client_id, self._client_secret, self._refresh_token,
+        )
         self._expires_at = self._now() + expires_in
         logger.info("gmail access token refreshed; expires in %.0fs", expires_in)
+
+
+def exchange_refresh_token(
+    http: httpx.Client, client_id: str, client_secret: str, refresh_token: str,
+) -> tuple[str, float]:
+    """The OAuth refresh-token exchange (`POST /token`), shared by every
+    Gmail adapter that needs an access token - `GmailSender` here and
+    `app.adapters.gmail_reader.GmailReader` (Task 7). Written once so the
+    exchange is never duplicated, following this project's precedent for
+    shared wiring (`require_send_config`, `on_gemini_free_tier`,
+    `build_drafter` are each extracted to one home rather than copied).
+
+    Returns `(access_token, expires_in_seconds)`. Raises `GmailError`
+    ("token refresh", ...) on any failure - transport error, non-2xx
+    response, or a malformed body - carrying only the HTTP status and a
+    short OAuth error code (`_error_code`), never the refresh token, the
+    client secret, or the response body."""
+    try:
+        response = http.post(
+            TOKEN_URL,
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+        )
+    except httpx.HTTPError as exc:
+        raise GmailError("token refresh", reason=type(exc).__name__) from None
+    if response.status_code >= 400:
+        raise GmailError("token refresh", status=response.status_code,
+                         reason=_error_code(response))
+    try:
+        payload = response.json()
+        token = str(payload["access_token"])
+        expires_in = float(payload.get("expires_in", 3600))
+    except (ValueError, KeyError, TypeError):
+        raise GmailError("token refresh", status=response.status_code,
+                         reason="response missing access_token")
+    return token, expires_in
 
 
 def _error_code(response: httpx.Response) -> str | None:

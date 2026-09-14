@@ -564,6 +564,16 @@ class GmailCredentialRepo:
             select(GmailCredential).where(GmailCredential.account_email == account_email)
         ).scalar_one_or_none()
 
+    def set_history_id(self, account_email: str, history_id: str) -> None:
+        """Task 7 (spec §5): the narrow write the reply poller (Task 8)
+        needs after a successful `GmailReader.history_since` or
+        `current_history_id()` call - update just the stored cursor
+        without touching the refresh token or scopes. Thin wrapper over
+        `upsert`, which already updates only the fields it is given;
+        deciding *when* to call this is Task 8's job, not this repo's or
+        `GmailReader`'s."""
+        self.upsert(account_email=account_email, last_history_id=history_id)
+
 
 # --- Added in Task 2 (Phase 2, spec §4): bookkeeping for a background stage
 # run, one row per invocation. Same `upsert(**fields)` shape as every repo

@@ -839,6 +839,127 @@ def stale_job_client(repos):
 
 
 @pytest.fixture
+def unlabelled_reply(repos: FakeRepos):
+    """One `SENT` outreach with the step-0 outbound draft (the context
+    `ClassifyReply` must hand the classifier alongside the reply itself —
+    "Sure, Friday works" is unclassifiable on its own) plus one inbound
+    reply row with `label=None` — the base case `ClassifyReply` classifies.
+    `next_action_at` is stamped with a future timestamp (a pending
+    follow-up) so a test can assert a human label actually clears it, not
+    just that it stays `None`. `.outreach` / `.founder` / `.message` (the
+    reply row)."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    repos.company.add(id=300, domain="foo.io", name="Foo")
+    founder = repos.founder.add(id=300, company_id=300, full_name="Asha Founder")
+    outreach = repos.outreach.add(id=300, founder_id=founder.id, state=str(OutreachState.SENT))
+    outreach.resolved_email = "asha@foo.io"
+    outreach.sequence_step = 0
+    outreach.next_action_at = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="outbound",
+        subject="Backend intern at Foo", body="You're building payments tooling. Would you take an intern?",
+        gmail_message_id="sent-300", gmail_thread_id="thread-300",
+        approved_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        sent_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    reply = repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="inbound",
+        subject="Re: Backend intern at Foo", body="Sure, tell me more.",
+        gmail_message_id="reply-300", gmail_thread_id="thread-300",
+        received_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+    )
+    return SimpleNamespace(outreach=outreach, founder=founder, message=reply)
+
+
+@pytest.fixture
+def labelled_reply(repos: FakeRepos):
+    """Same shape as `unlabelled_reply`, but already classified — models an
+    operator's manual correction (Task 10) that a re-run must never
+    overwrite. The outreach is already `REPLIED`, matching what a real
+    human label would already have done."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    repos.company.add(id=301, domain="bar.io", name="Bar")
+    founder = repos.founder.add(id=301, company_id=301, full_name="Vikram Founder")
+    outreach = repos.outreach.add(id=301, founder_id=founder.id, state=str(OutreachState.REPLIED))
+    outreach.resolved_email = "vikram@bar.io"
+    outreach.sequence_step = 0
+    repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="outbound",
+        subject="Backend intern at Bar", body="You're building fleet routing. Would you take an intern?",
+        gmail_message_id="sent-301", gmail_thread_id="thread-301",
+        approved_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        sent_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    reply = repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="inbound",
+        subject="Re: Backend intern at Bar", body="Not hiring interns right now.",
+        gmail_message_id="reply-301", gmail_thread_id="thread-301",
+        received_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+        label="REJECTED", confidence=0.9, rationale="operator-corrected",
+        classified_at=datetime(2026, 9, 3, tzinfo=timezone.utc),
+    )
+    return SimpleNamespace(outreach=outreach, founder=founder, message=reply)
+
+
+@pytest.fixture
+def two_unlabelled_replies(repos: FakeRepos):
+    """Two independent `SENT` outreaches, each with an unlabelled inbound
+    reply — used for the "one failure doesn't stop the batch" and "limit"
+    tests, where a single reply isn't enough to prove ordering/partial
+    processing. Returns the two reply (message) rows, in the order
+    `ClassifyReply` will see them."""
+    from datetime import datetime, timezone
+
+    replies = []
+    for cid, name in [(310, "Baz"), (311, "Qux")]:
+        repos.company.add(id=cid, domain=f"{name.lower()}.io", name=name)
+        founder = repos.founder.add(id=cid, company_id=cid, full_name=f"Founder {name}")
+        outreach = repos.outreach.add(id=cid, founder_id=founder.id, state=str(OutreachState.SENT))
+        outreach.resolved_email = f"founder@{name.lower()}.io"
+        outreach.sequence_step = 0
+        repos.message.upsert(
+            outreach_id=outreach.id, sequence_step=0, direction="outbound",
+            subject=f"Backend intern at {name}", body=f"You're building things at {name}. Intern?",
+            gmail_message_id=f"sent-{cid}", gmail_thread_id=f"thread-{cid}",
+            approved_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+            sent_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        )
+        reply = repos.message.upsert(
+            outreach_id=outreach.id, sequence_step=0, direction="inbound",
+            subject=f"Re: Backend intern at {name}", body=f"reply body for {name}",
+            gmail_message_id=f"reply-{cid}", gmail_thread_id=f"thread-{cid}",
+            received_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+        )
+        replies.append(reply)
+    return tuple(replies)
+
+
+@pytest.fixture
+def fake_classifier():
+    from tests.fakes import FakeReplyClassifier
+
+    return FakeReplyClassifier()
+
+
+@pytest.fixture
+def exploding_classifier():
+    from tests.fakes import ExplodingReplyClassifier
+
+    return ExplodingReplyClassifier()
+
+
+@pytest.fixture
+def flaky_classifier():
+    from tests.fakes import FlakyReplyClassifier
+
+    return FlakyReplyClassifier()
+
+
+@pytest.fixture
 def all_active_jobs_client(repos):
     """Fix round 1 (T6-1): a `queued` row with NO `started_at` at all, and
     a `running` row started only an instant ago - the two shapes the old

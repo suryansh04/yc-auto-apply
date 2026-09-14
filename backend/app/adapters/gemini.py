@@ -36,6 +36,7 @@ from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.domain.names import company_display_name
+from app.domain.replies import LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -305,4 +306,104 @@ class GeminiDrafter:
             "body": str(data["body"]),
             "research_source_type": str(data["research_source_type"]),
             "research_source_id": source_id,
+        }
+
+
+# --- Task 9: GeminiReplyClassifier ---------------------------------------------
+
+CLASSIFY_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "label": {"type": "STRING", "enum": list(LABELS)},
+        "confidence": {"type": "NUMBER"},
+        "rationale": {"type": "STRING"},
+    },
+    "required": ["label", "confidence", "rationale"],
+}
+
+_CLASSIFIER_SYSTEM = """You are classifying a founder's reply to a cold internship enquiry a
+student sent them. Judge the founder's INTENT in the reply, never facts -
+your job is to say what kind of reply this is, not whether anything in it
+is true.
+
+Label the reply with EXACTLY ONE of:
+- INTERESTED: the founder wants to continue the conversation - asks a
+  question, wants to talk, asks for a resume, proposes a time.
+- REJECTED: the founder says no, is not hiring interns, or is not
+  interested.
+- REFERRAL: the founder points the student to someone else, a form, or a
+  different channel to apply through, rather than answering directly.
+- AUTO_REPLY: an automated acknowledgement - a bot confirming the message
+  was received, a "we will get back to you" auto-responder, or anything
+  else a human did not personally write in response to THIS message.
+- OUT_OF_OFFICE: an automated out-of-office / vacation responder.
+- UNCLEAR: anything that does not clearly fit one of the above - including
+  a reply too short, too ambiguous, or too generic to judge with
+  confidence on its own.
+
+AUTO_REPLY and OUT_OF_OFFICE are for machine-generated replies ONLY. An
+autoresponder must never be mistaken for a human decision: if you are not
+reasonably sure a human personally wrote the reply, do not guess
+INTERESTED or REJECTED - use UNCLEAR instead.
+
+You will be shown the message the student originally sent and the
+founder's reply to it - use the original message to understand what the
+reply is actually responding to; a short reply like "Sure, Friday works"
+is only classifiable in that context.
+
+Return a JSON object with "label" (one of the six above, exactly as
+spelled), "confidence" (a number from 0 to 1), and "rationale" (at most
+25 words, explaining the label).
+"""
+
+
+def build_classify_prompt(context: dict) -> str:
+    our_message = context.get("our_message") or ""
+    reply_body = context.get("reply_body") or ""
+    return (
+        "OUR MESSAGE (what the student originally sent)\n"
+        f"{our_message}\n\n"
+        "THEIR REPLY (what you are classifying)\n"
+        f"{reply_body}\n"
+    )
+
+
+class GeminiReplyClassifier:
+    """Real `ReplyClassifier` port (spec §5). `classify(context)` returns
+    `{label, confidence, rationale}`; `app.application.classify_reply`
+    normalises `label` before trusting it (never this adapter's job — the
+    adapter only guarantees the shape the schema promised, same division
+    of responsibility as `GeminiDrafter`/`GeminiResumeParser` above)."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def classify(self, context: dict) -> dict:
+        response = _generate_with_retry(
+            self._client, self._sleep, "reply classifier",
+            model=self._model,
+            contents=build_classify_prompt(context),
+            config=types.GenerateContentConfig(
+                system_instruction=_CLASSIFIER_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=CLASSIFY_SCHEMA,
+                temperature=0,
+            ),
+        )
+        data = _decode_json(response.text, "reply classifier")
+        if not isinstance(data, dict):
+            raise ValueError("reply classifier: expected a JSON object")
+        missing = [k for k in ("label", "confidence", "rationale") if k not in data]
+        if missing:
+            raise ValueError(f"reply classifier: response missing {', '.join(missing)}")
+        try:
+            confidence = float(data["confidence"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("reply classifier: confidence is not a number") from exc
+        return {
+            "label": str(data["label"]),
+            "confidence": confidence,
+            "rationale": str(data["rationale"]),
         }

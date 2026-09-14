@@ -445,6 +445,11 @@ class FakeMessageRepo:
         14/16) is untouched."""
         return self.list_by_outreach_id(outreach_id)
 
+    def list_unclassified_inbound(self) -> list[FakeMessageRow]:
+        """Task 9: mirrors `MessageRepo.list_unclassified_inbound` — every
+        inbound reply not yet labelled, in insertion order."""
+        return [r for r in self.rows if r.direction == "inbound" and r.label is None]
+
     def get_by_gmail_id(self, gmail_message_id: str) -> FakeMessageRow | None:
         """Task 8: mirrors `MessageRepo.get_by_gmail_id` — the dedupe check
         `PollReplies` runs BEFORE fetching a message's full content, so a

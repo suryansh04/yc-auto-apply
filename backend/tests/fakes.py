@@ -65,6 +65,55 @@ class FakeDrafter:
                 "research_source_type": "news", "research_source_id": 1}
 
 
+class FakeReplyClassifier:
+    """Task 9: `.next` queues the dict `classify()` returns on its NEXT
+    call (cleared after use, so a test can set a different label per call
+    by re-assigning it); with no `.next` set, defaults to UNCLEAR. `.calls`
+    records every context dict handed in, so a test can assert on what the
+    use case actually showed the classifier (e.g. `our_message` +
+    `reply_body`, not just the reply alone)."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+        self.next: dict | None = None
+
+    def classify(self, context: dict) -> dict:
+        self.calls.append(context)
+        if self.next is not None:
+            return self.next
+        return {"label": "UNCLEAR", "confidence": 0.5, "rationale": "no queued response"}
+
+
+class ExplodingReplyClassifier:
+    """Task 9: every call to `classify()` raises — the classifier-failure
+    path (`ClassifyReply` must leave the row unlabelled and count
+    `result.errors`, never crash the whole run)."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def classify(self, context: dict) -> dict:
+        self.calls.append(context)
+        raise RuntimeError("simulated classifier failure")
+
+
+class FlakyReplyClassifier:
+    """Task 9: raises on the FIRST call only, then answers UNCLEAR for
+    every call after — proves one bad reply in a batch does not stop
+    `ClassifyReply` from finishing the rest."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+        self._raised = False
+
+    def classify(self, context: dict) -> dict:
+        self.calls.append(context)
+        if not self._raised:
+            self._raised = True
+            raise RuntimeError("simulated classifier failure")
+        return {"label": "UNCLEAR", "confidence": 0.3, "rationale": "recovered"}
+
+
 class FakeSender:
     def __init__(self):
         self.sent: list[dict] = []

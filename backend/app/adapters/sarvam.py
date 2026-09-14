@@ -38,11 +38,14 @@ import httpx
 from app.adapters.gemini import (
     CLAIM_KINDS,
     SOURCE_KINDS,
+    _CLASSIFIER_SYSTEM,
     _DRAFTER_SYSTEM,
     _PARSER_PROMPT,
     _decode_json,
+    build_classify_prompt,
     build_draft_prompt,
 )
+from app.domain.replies import LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +93,20 @@ DRAFT_JSON_SCHEMA: dict[str, Any] = {
         "research_source_id": {"type": "integer"},
     },
     "required": ["subject", "body", "research_source_type", "research_source_id"],
+    "additionalProperties": False,
+}
+
+# Task 9: JSON-schema (lowercase) mirror of `gemini.CLASSIFY_SCHEMA` — same
+# three fields, same six-label enum, `additionalProperties: false` for
+# strict mode.
+REPLY_CLASSIFICATION_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "label": {"type": "string", "enum": list(LABELS)},
+        "confidence": {"type": "number"},
+        "rationale": {"type": "string"},
+    },
+    "required": ["label", "confidence", "rationale"],
     "additionalProperties": False,
 }
 
@@ -236,3 +253,41 @@ class SarvamDrafter:
         if missing:
             raise ValueError(f"drafter: response missing {', '.join(missing)}")
         return data
+
+
+class SarvamReplyClassifier:
+    """Real `ReplyClassifier` port (spec §5) over Sarvam. Same three-field
+    contract as `GeminiReplyClassifier`, sharing the same prompt
+    (`_CLASSIFIER_SYSTEM`/`build_classify_prompt`, imported from
+    `app.adapters.gemini`) so both providers are held to exactly the same
+    rules for what counts as each label."""
+
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, **chat_kwargs):
+        self._chat = _SarvamChat(api_key, model, **chat_kwargs)
+
+    def classify(self, context: dict) -> dict:
+        content = self._chat.complete(
+            "reply classifier",
+            [
+                {"role": "system", "content": _CLASSIFIER_SYSTEM},
+                {"role": "user", "content": build_classify_prompt(context)},
+            ],
+            REPLY_CLASSIFICATION_JSON_SCHEMA,
+            "reply_classification",
+            temperature=0,
+        )
+        data = _decode_json(content, "reply classifier")
+        if not isinstance(data, dict):
+            raise ValueError("reply classifier: expected a JSON object")
+        missing = [k for k in ("label", "confidence", "rationale") if k not in data]
+        if missing:
+            raise ValueError(f"reply classifier: response missing {', '.join(missing)}")
+        try:
+            confidence = float(data["confidence"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("reply classifier: confidence is not a number") from exc
+        return {
+            "label": str(data["label"]),
+            "confidence": confidence,
+            "rationale": str(data["rationale"]),
+        }

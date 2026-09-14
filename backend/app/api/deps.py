@@ -157,6 +157,28 @@ def build_drafter(settings: Settings):
     return GeminiDrafter(client, model=settings.gemini_model)
 
 
+def build_classifier(settings: Settings):
+    """Task 9: the identical LLM-provider switch as `build_drafter` above,
+    for a `ReplyClassifier` adapter (Sarvam or Gemini) instead of a
+    `Drafter` — kept beside it, not duplicated a third time, for the same
+    reason `build_drafter`'s own docstring gives (T6-6)."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamReplyClassifier(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiReplyClassifier
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiReplyClassifier(client, model=settings.gemini_model)
+
+
 def require_send_config(settings: Settings) -> list[str]:
     """Task 5: every `Settings` field `send` needs before it may build a
     real `GmailSender` — the Gmail OAuth client config plus a real,

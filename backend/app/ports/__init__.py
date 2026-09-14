@@ -142,5 +142,16 @@ class MailSender(Protocol):
 
 
 @runtime_checkable
+class ReplyClassifier(Protocol):
+    """Task 9 (spec §5): labels one inbound reply, given enough context to
+    judge intent rather than just the bare reply text (`context` carries at
+    least `our_message` — the outbound the founder is replying to — and
+    `reply_body`). Backed by a Sarvam/Gemini adapter (configuration, not
+    part of this interface), same shape as `Drafter` above."""
+
+    def classify(self, context: dict) -> dict: ...  # {label, confidence, rationale}
+
+
+@runtime_checkable
 class Clock(Protocol):
     def now(self) -> datetime: ...

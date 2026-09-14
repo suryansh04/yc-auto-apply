@@ -280,6 +280,18 @@ class MessageRepo:
             ).scalars()
         )
 
+    def list_unclassified_inbound(self) -> list[Message]:
+        """Added in Task 9 (spec §5): what `ClassifyReply` classifies each
+        run — every inbound reply not yet labelled. An already-labelled row
+        (a prior run, or an operator's manual correction via Task 10) is
+        never returned here, so `ClassifyReply` never even calls the
+        classifier for it, let alone overwrites it."""
+        return list(
+            self.session.execute(
+                select(Message).where(Message.direction == "inbound", Message.label.is_(None))
+            ).scalars()
+        )
+
     def get_outbound(self, outreach_id: int, sequence_step: int) -> Message | None:
         """Added in fix round 1 of Tasks 13/14 (F1, ruling R1): the
         draft-time outbound row for `(outreach_id, sequence_step)` IS the

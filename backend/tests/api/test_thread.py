@@ -69,14 +69,16 @@ def test_an_invalid_label_is_422(client, thread_with_reply):
 
 
 def _human_labelled_outreach(repos, id: int, label: str = "INTERESTED", sequence_step: int = 0,
-                             sent_at=datetime(2026, 9, 1, tzinfo=timezone.utc)):
-    """A `REPLIED` outreach whose one outbound step (at `sequence_step`)
-    already went out at `sent_at`, with an inbound reply already carrying
-    a human `label` (`next_action_at` cleared, exactly as `apply_label`'s
-    forward path leaves it) — the base case for T9-1's restore path."""
+                             sent_at=datetime(2026, 9, 1, tzinfo=timezone.utc), state: S = S.REPLIED):
+    """An outreach (`REPLIED` by default; pass `state=S.BOUNCED` etc. for
+    the guard-coverage tests below) whose one outbound step (at
+    `sequence_step`) already went out at `sent_at`, with an inbound reply
+    already carrying a human `label` (`next_action_at` cleared, exactly as
+    `apply_label`'s forward path leaves it) — the base case for T9-1's
+    restore path."""
     repos.company.add(id=id, domain=f"co{id}.example.com", name=f"Company {id}")
     founder = repos.founder.add(id=id, company_id=id, full_name=f"Founder {id}")
-    outreach = repos.outreach.add(id=id, founder_id=founder.id, state=str(S.REPLIED))
+    outreach = repos.outreach.add(id=id, founder_id=founder.id, state=str(state))
     outreach.resolved_email = f"founder{id}@co{id}.example.com"
     outreach.sequence_step = sequence_step
     outreach.next_action_at = None
@@ -142,6 +144,29 @@ def test_correcting_human_to_human_leaves_the_state_alone(client, repos):
     outreach = repos.outreach.get(item.outreach.id)
     assert outreach.state == S.REPLIED and outreach.next_action_at is None
     assert repos.message.get(item.reply.id).label == "INTERESTED"
+
+
+def test_a_human_to_machine_correction_on_a_bounced_outreach_does_not_restore_sent(client, repos):
+    # Fix round 1 (review): `_restore_sent`'s own `assert_transition` guard
+    # (REPLIED -> SENT is the only legal source per T9-1) had zero test
+    # coverage - deleting it left every existing test passing. A `BOUNCED`
+    # outreach carrying a human-labelled reply, corrected to a machine
+    # label, must NOT flip to SENT: assert_transition(BOUNCED, SENT) is
+    # illegal (no such edge in `app.domain.states._LEGAL`), so this must be
+    # refused exactly like `_mark_replied`'s guard already is for the
+    # forward direction - the label still changes, the state and
+    # next_action_at do not. (Mirrors Task 9's own
+    # test_a_human_label_on_an_already_bounced_outreach_never_overwrites_bounced
+    # for the same class of gap.)
+    item = _human_labelled_outreach(repos, 506, label="INTERESTED", state=S.BOUNCED)
+
+    r = client.post(f"/api/messages/{item.reply.id}/label", json={"label": "AUTO_REPLY"})
+    assert r.status_code == 200
+
+    outreach = repos.outreach.get(item.outreach.id)
+    assert outreach.state == S.BOUNCED
+    assert outreach.next_action_at is None
+    assert repos.message.get(item.reply.id).label == "AUTO_REPLY"
 
 
 def test_correcting_machine_to_machine_leaves_the_state_alone(client, repos, thread_with_auto_reply):

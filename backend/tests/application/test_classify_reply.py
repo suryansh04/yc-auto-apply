@@ -199,3 +199,34 @@ def test_an_empty_run_touches_nothing_and_never_calls_the_classifier(repos, fake
     result = ClassifyReply(fake_classifier, _repos(repos), _clock()).run()
     assert result.classified == 0 and result.replied == 0 and result.ignored == 0 and result.errors == 0
     assert fake_classifier.calls == []
+
+
+# --- Task 10 fix round 1 (review): dedicated branch coverage for apply_label --
+#
+# `apply_label`'s human->human (and machine->machine) case relies on
+# `_mark_replied`/`_restore_sent` never being CALLED at all - not on their
+# own `assert_transition` guards catching a bad attempt after the fact.
+# The end-to-end assertion alone (state/next_action_at unchanged) can't
+# tell those two apart: a REPLIED outreach corrected human->human would
+# land on the same unchanged state whether `apply_label` skipped the
+# transition attempt entirely, or attempted an illegal REPLIED -> REPLIED
+# and had `assert_transition` swallow it. This test distinguishes them
+# directly by making `_mark_replied`/`_restore_sent` raise if invoked.
+
+
+def test_correcting_human_to_human_never_even_attempts_a_transition(repos, labelled_reply, fake_classifier):
+    use_case = ClassifyReply(fake_classifier, _repos(repos), _clock())
+
+    def _must_not_be_called(*args, **kwargs):
+        raise AssertionError("human -> human must not attempt any transition")
+
+    use_case._mark_replied = _must_not_be_called
+    use_case._restore_sent = _must_not_be_called
+
+    before = repos.outreach.get(labelled_reply.outreach.id).next_action_at
+    transitioned = use_case.apply_label(labelled_reply.message, "INTERESTED")
+
+    assert transitioned is False
+    assert repos.message.get(labelled_reply.message.id).label == "INTERESTED"
+    outreach = repos.outreach.get(labelled_reply.outreach.id)
+    assert outreach.state == S.REPLIED and outreach.next_action_at == before

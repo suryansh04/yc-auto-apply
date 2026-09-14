@@ -514,11 +514,17 @@ class FakeSession:
 # --- Phase 2 (Task 8): the Gmail credential row `PollReplies` reads/writes
 # its history cursor through, and a fake `GmailReader`-shaped reader for the
 # application-layer tests. Neither imports anything from `app.adapters` -
-# `InboundMessage`-equivalent rows are just a local dataclass here, and the
-# two "adapter exceptions" `PollReplies` recognises by name
-# (`GmailHistoryExpired`, `GmailError`) are raised as these plain local
-# classes, matching that name-based recognition exactly the way the real
-# `app.adapters.gmail_reader` ones would from the outside.
+# `InboundMessage`-equivalent rows are just a local dataclass here. Fix
+# round 1 (ruling T8-1): `GmailHistoryExpired`/`GmailError` are imported
+# from `app.ports` — the same module `PollReplies` itself imports them
+# from — and raised as those real types, not local stand-ins, so these
+# fakes exercise the actual `except GmailHistoryExpired:` / `except
+# GmailError:` `isinstance` handling, the same way a real `GmailReader`
+# failure would from outside `app.adapters`. Importing from `app.ports`
+# here is unrestricted: this is a test fixture module, not `app/domain/`
+# or `app/application/`.
+
+from app.ports import GmailError, GmailHistoryExpired
 
 
 @dataclass
@@ -564,19 +570,6 @@ class FakeCredentialRepo:
         self.upsert(account_email=account_email, last_history_id=history_id)
 
 
-class GmailHistoryExpired(Exception):
-    """Local stand-in for `app.adapters.gmail_reader.GmailHistoryExpired`
-    — `PollReplies` recognises it by class name only (it never imports the
-    real adapter exception, per the layering rule), so this separately
-    defined class exercises that recognition exactly as the real one
-    would."""
-
-
-class GmailError(Exception):
-    """Local stand-in for `app.adapters.gmail.GmailError` — same
-    by-name recognition as `GmailHistoryExpired` above."""
-
-
 @dataclass
 class FakeInboundMessage:
     gmail_message_id: str
@@ -610,7 +603,12 @@ class FakeGmailReader:
     `_account`) because `PollReplies` reads it to know which credential
     row to update — see that module's docstring for why the interface
     stays `PollReplies(reader, repos, clock)` with no separate account
-    argument."""
+    argument.
+
+    `.fail_with_gmail_error()` (fix round 1, ruling T8-1): the next call to
+    `history_since` raises `app.ports.GmailError` (the REAL type — not a
+    name-alike) once, then clears — for the test proving `PollReplies`
+    catches it by `isinstance`, ending the run cleanly."""
 
     def __init__(self, account: str = "me@gmail.com", start_history_id: str = "1"):
         self.account = account
@@ -620,6 +618,7 @@ class FakeGmailReader:
         self._pos = 0
         self._pos_before_last_call = 0
         self._expired = False
+        self._gmail_error_pending = False
         self.used_fallback = False
 
     def add(self, *, thread_id: str, message_id: str, sender: str, body: str,
@@ -639,7 +638,13 @@ class FakeGmailReader:
     def expire_history(self) -> None:
         self._expired = True
 
+    def fail_with_gmail_error(self) -> None:
+        self._gmail_error_pending = True
+
     def history_since(self, history_id: str) -> tuple[list[str], str]:
+        if self._gmail_error_pending:
+            self._gmail_error_pending = False
+            raise GmailError("history", status=500, reason="simulated transport failure")
         if self._expired:
             self._expired = False
             raise GmailHistoryExpired(f"startHistoryId {history_id!r} is no longer retained")

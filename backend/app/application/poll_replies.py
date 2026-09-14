@@ -3,7 +3,12 @@ rows. `PollReplies` is pure application logic — it depends only on an
 injected `reader` (the `GmailReader`-shaped port from Task 7) plus a
 bundle of repos (`PollRepos`) and a `clock`, never on a concrete adapter
 (D8) — so this module never imports `app.adapters` (enforced by
-`tests/test_architecture.py`).
+`tests/test_architecture.py`). It DOES import `GmailError` /
+`GmailHistoryExpired` from `app.ports` (fix round 1, ruling T8-1) — the
+same shared-contract module `QuotaExhausted`/`VerifierError` already live
+in for the identical reason (`ResolveEmails` catching what the email
+verifier adapter raises, Phase 1). `app/ports/` is not `app/adapters/`;
+`application/` depending on it is expected, not a layering violation.
 
 Classification is explicitly NOT this module's job (Task 9's): a reply
 lands here as an inbound row with `label=None` and the outreach's state
@@ -21,12 +26,12 @@ Order of operations per run, and why:
 2. **Ask Gmail what's new.** `reader.history_since(history_id)` — Gmail's
    cheap "what changed since X" call. A stale/expired cursor answers with
    `GmailHistoryExpired` (raised by the real `GmailReader`, spec §5's
-   documented ~week-old retention limit): fall back to
-   `reader.recent_message_ids()` (a plain inbox scan) and mint a fresh
-   cursor via `reader.current_history_id()`. Neither adapter exception
-   class is imported here (that would violate the layering rule the
-   architecture test pins) — they are recognised by name, the same
-   duck-typing this project already leans on at its port boundaries.
+   documented ~week-old retention limit; the type lives in `app.ports`, so
+   it's caught here by `except GmailHistoryExpired:`, not by inspecting the
+   exception's class name — a rename of the adapter's own alias can never
+   silently break this the way T4-1 ruled out elsewhere in this codebase):
+   fall back to `reader.recent_message_ids()` (a plain inbox scan) and mint
+   a fresh cursor via `reader.current_history_id()`.
 3. **Per message id: dedupe before fetching.** `messages.gmail_message_id`
    carries a unique index (Task 1) and `MessageRepo.get_by_gmail_id`
    checks it BEFORE calling `reader.get_message(id)` — re-polling the same
@@ -68,6 +73,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from app.domain.states import IllegalTransition, OutreachState, assert_transition
+from app.ports import GmailError, GmailHistoryExpired
 
 logger = logging.getLogger(__name__)
 
@@ -142,15 +148,13 @@ class PollReplies:
         result = PollResult()
         try:
             self._run(result)
-        except Exception as exc:  # noqa: BLE001 — recognised by name, see module docstring
-            if type(exc).__name__ == "GmailError":
-                logger.warning(
-                    "poll_replies: gmail error this run (%s); ending cleanly, "
-                    "the next scheduled poll will refresh and retry",
-                    type(exc).__name__,
-                )
-                return result
-            raise
+        except GmailError as exc:
+            logger.warning(
+                "poll_replies: gmail error this run (%s); ending cleanly, "
+                "the next scheduled poll will refresh and retry",
+                type(exc).__name__,
+            )
+            return result
         return result
 
     def _run(self, result: PollResult) -> None:
@@ -160,9 +164,7 @@ class PollReplies:
         if history_id:
             try:
                 ids, new_cursor = self._reader.history_since(history_id)
-            except Exception as exc:  # noqa: BLE001 — see module docstring
-                if type(exc).__name__ != "GmailHistoryExpired":
-                    raise
+            except GmailHistoryExpired:
                 ids = self._reader.recent_message_ids()
                 new_cursor = self._reader.current_history_id()
         else:

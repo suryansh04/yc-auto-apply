@@ -20,6 +20,7 @@ import pytest
 
 from app.application.poll_replies import PollReplies, PollRepos
 from app.domain.states import OutreachState as S
+from app.ports import GmailError, GmailHistoryExpired
 
 
 def _repos(repos) -> PollRepos:
@@ -162,3 +163,82 @@ def test_the_cursor_is_persisted_only_after_messages_are_committed(repos, sent_o
     # it advanced.
     assert calls[0] == before
     assert calls[-1] == fake_reader.history_id
+
+
+# --- Fix round 1 (ruling T8-1): exceptions caught by type, not by name -----
+
+
+def test_the_adapters_gmail_exceptions_are_the_same_objects_as_ports(repos, sent_outreach, fake_reader):
+    """Pins the fix itself: `PollReplies` must catch these by `isinstance`
+    against `app.ports`, not by comparing `type(exc).__name__` — a rename
+    of the adapter's own re-exported alias can never silently turn a
+    recognised, handled failure into an unhandled crash mid-poll (exactly
+    the class of bug T4-1 already ruled out elsewhere in this codebase),
+    because there is only ever ONE class object, not two same-named ones."""
+    import app.ports as ports
+    from app.adapters.gmail import GmailError as AdapterGmailError
+    from app.adapters.gmail_reader import GmailHistoryExpired as AdapterGmailHistoryExpired
+
+    assert AdapterGmailHistoryExpired is ports.GmailHistoryExpired
+    assert AdapterGmailError is ports.GmailError
+
+
+def test_an_expired_cursor_raised_as_the_real_ports_type_is_handled(repos, sent_outreach, fake_reader):
+    """Same behaviour as `test_an_expired_history_id_falls_back_to_a_recent_window`
+    above, but pins that the fallback is reached via `except
+    GmailHistoryExpired:` catching the REAL `app.ports` type the fake now
+    raises (fix round 1) — not a name-alike stand-in."""
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="m1", sender="a@b.com", body="yes")
+    with pytest.raises(GmailHistoryExpired):
+        fake_reader.expire_history()
+        fake_reader.history_since("100")  # sanity: the fake really raises the real ports type
+    fake_reader.expire_history()  # expire_history() fires once per call; arm it again for the real run
+    result = PollReplies(fake_reader, _repos(repos), _clock()).run()
+    assert result.stored == 1
+    assert fake_reader.used_fallback is True
+
+
+def test_a_gmail_error_mid_run_ends_the_run_cleanly(repos, sent_outreach, fake_reader):
+    """A `GmailError` (real `app.ports` type) raised by the reader while
+    fetching what's new must not propagate out of `PollReplies.run()` —
+    the run ends cleanly with whatever partial result it has (here, none),
+    and the CURSOR IS NOT ADVANCED, so the next scheduled poll retries this
+    same window rather than skipping it."""
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="m1", sender="a@b.com", body="yes")
+    before = repos.credential.get_by_account_email("me@gmail.com").last_history_id
+
+    with pytest.raises(GmailError):
+        fake_reader.fail_with_gmail_error()
+        fake_reader.history_since("100")  # sanity: the fake really raises the real ports type
+    fake_reader.fail_with_gmail_error()  # arm it again — it fires once per call
+
+    result = PollReplies(fake_reader, _repos(repos), _clock()).run()  # must not raise
+    assert result.stored == 0
+    assert repos.credential.get_by_account_email("me@gmail.com").last_history_id == before
+
+
+# --- Fix round 1: pin the bounce-outside-SENT decision (was disclosed, untested) --
+
+
+def test_a_bounce_on_an_outreach_not_in_sent_is_stored_but_state_is_left_alone(
+    repos, sent_outreach, fake_reader,
+):
+    """Decision, not an accident (flagged in the Task 8 report as an
+    untested disclosed guess): a bounce arriving while the outreach is
+    already past `SENT` (here, `REPLIED` — a founder replied normally,
+    then a LATER message on the same thread bounces, e.g. a stale CC)
+    cannot legally transition `REPLIED -> BOUNCED`
+    (`app.domain.states._LEGAL` has no such edge). `PollReplies` stores
+    the row anyway — labelled `BOUNCE`, still counted, still never
+    reachable by the classifier — but leaves the outreach's state exactly
+    as it was, rather than raising `IllegalTransition` and losing the rest
+    of the run."""
+    repos.outreach.upsert(founder_id=sent_outreach.founder.id, state=str(S.REPLIED))
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="b1",
+                    sender="mailer-daemon@googlemail.com", body="Address not found")
+
+    result = PollReplies(fake_reader, _repos(repos), _clock()).run()
+
+    assert result.bounced == 1
+    assert repos.outreach.get(sent_outreach.outreach.id).state == S.REPLIED
+    assert repos.message.list_by_outreach(sent_outreach.outreach.id)[-1].label == "BOUNCE"

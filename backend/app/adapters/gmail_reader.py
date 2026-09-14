@@ -64,7 +64,8 @@ from typing import Callable
 
 import httpx
 
-from app.adapters.gmail import GmailError, _error_code, exchange_refresh_token
+from app.adapters.gmail import _error_code, exchange_refresh_token
+from app.ports import GmailError, GmailHistoryExpired
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +76,12 @@ PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
 _EXPIRY_MARGIN_SECONDS = 60.0  # same margin as GmailSender: refresh this long before Google says it dies
 _TIMEOUT_SECONDS = 30.0
 
-
-class GmailHistoryExpired(Exception):
-    """Gmail answered 404 to `users.history.list`: `startHistoryId` is
-    older than what the mailbox retains. Not a `GmailError` - this is an
-    expected, recoverable condition (the caller falls back to
-    `recent_message_ids` + `current_history_id()`), not an adapter
-    failure."""
+# Fix round 1 (ruling T8-1): `GmailError`/`GmailHistoryExpired` now live in
+# `app.ports`, imported and re-exported here so every existing
+# `from app.adapters.gmail_reader import GmailHistoryExpired` call site
+# (this module's own docstring above, Task 7's tests) keeps working
+# unchanged — this module no longer defines its own copy of either.
+__all__ = ["GmailError", "GmailHistoryExpired", "GmailReader", "InboundMessage"]
 
 
 @dataclass(frozen=True)

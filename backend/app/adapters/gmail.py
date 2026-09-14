@@ -45,6 +45,8 @@ from typing import Callable
 
 import httpx
 
+from app.ports import GmailError
+
 logger = logging.getLogger(__name__)
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -54,22 +56,13 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 _EXPIRY_MARGIN_SECONDS = 60.0  # refresh this long before Google says the token dies
 _TIMEOUT_SECONDS = 30.0
 
-
-class GmailError(Exception):
-    """Any Gmail/OAuth failure. Message is built from `status` and `reason`
-    only — never from a response body or an underlying exception's text —
-    so it is always safe to log, print, or surface via a CLI traceback."""
-
-    def __init__(self, stage: str, status: int | None = None, reason: str | None = None):
-        self.stage = stage
-        self.status = status
-        self.reason = reason
-        parts = [f"gmail {stage} failed"]
-        if status is not None:
-            parts.append(f"(HTTP {status})")
-        if reason:
-            parts.append(f"- {reason}")
-        super().__init__(" ".join(parts))
+# Fix round 1 (ruling T8-1): `GmailError` now lives in `app.ports`, beside
+# `QuotaExhausted`/`VerifierError`, so `app.application.poll_replies` can
+# catch it by type without importing this adapter module (D8). Imported
+# and re-exported here (rather than removed) so every existing
+# `from app.adapters.gmail import GmailError` call site keeps working
+# unchanged — this module no longer defines its own copy.
+__all__ = ["GmailError", "GmailSender", "build_mime", "encode_raw", "exchange_refresh_token"]
 
 
 def build_mime(sender: str, to: str, subject: str, body: str, attachment_path: str | None) -> bytes:

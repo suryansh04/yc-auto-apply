@@ -47,6 +47,49 @@ class VerifierError(Exception):
         super().__init__(" ".join(parts))
 
 
+class GmailError(Exception):
+    """Any Gmail/OAuth failure (Task 15/Task 7's `GmailSender` /
+    `GmailReader`). Fix round 1 (ruling T8-1): moved here from
+    `app.adapters.gmail`, alongside `QuotaExhausted`/`VerifierError` above,
+    for the identical reason — `app.application.poll_replies.PollReplies`
+    needs to catch it without importing a concrete adapter (D8), and this
+    module is the shared contract application code is allowed to depend on.
+    `app.adapters.gmail` and `app.adapters.gmail_reader` import this class
+    and re-export it under their own names, so every existing
+    `from app.adapters.gmail import GmailError` call site keeps working
+    unchanged — this is the one and only definition; the adapter modules no
+    longer define their own.
+
+    Message is built from `status` and `reason` only — never from a
+    response body or an underlying exception's text — so it is always safe
+    to log, print, or surface via a CLI traceback."""
+
+    def __init__(self, stage: str, status: int | None = None, reason: str | None = None):
+        self.stage = stage
+        self.status = status
+        self.reason = reason
+        parts = [f"gmail {stage} failed"]
+        if status is not None:
+            parts.append(f"(HTTP {status})")
+        if reason:
+            parts.append(f"- {reason}")
+        super().__init__(" ".join(parts))
+
+
+class GmailHistoryExpired(Exception):
+    """Raised by `app.adapters.gmail_reader.GmailReader.history_since` when
+    Gmail answers 404 to `users.history.list`: `startHistoryId` is older
+    than what the mailbox retains. Not a `GmailError` — this is an
+    expected, recoverable condition (the caller falls back to
+    `recent_message_ids` + `current_history_id()`), not an adapter failure.
+
+    Fix round 1 (ruling T8-1): moved here from `app.adapters.gmail_reader`
+    for the same reason as `GmailError` above — `PollReplies` catches this
+    by type, not by class-name string matching (which a rename would
+    silently break, invisibly to `test_architecture.py`, since nothing
+    would be importing the renamed class at all)."""
+
+
 @runtime_checkable
 class YCDirectory(Protocol):
     def fetch_companies(self) -> list[dict]: ...

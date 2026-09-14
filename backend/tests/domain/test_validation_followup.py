@@ -8,6 +8,8 @@ and is NOT reimplemented here. This file's own scope is what PF-3 found
 genuinely missing: `FOLLOW_UP_WORD_TARGETS` and the near-restatement
 rejection (a follow-up that says the same thing as the first email, even
 if it happens to use fewer words)."""
+import pytest
+
 from app.domain.entities import Draft
 from app.domain.validation import FOLLOW_UP_WORD_TARGETS, validate_style
 
@@ -71,3 +73,41 @@ def test_a_shorter_reworded_follow_up_does_not_trip_the_restatement_rule():
     reworded = "Following up on the note about voice routing.\n\nStill keen to intern with you."
     errs = validate_style(_draft(reworded), previous_body=FIRST)
     assert not any("restat" in e for e in errs)
+
+
+# --- Fix round 1: pin FOLLOW_UP_RESTATEMENT_OVERLAP's actual value (0.6) ----
+#
+# Review finding: `test_a_follow_up_that_trims_but_still_restates_...` above
+# uses a body whose overlap ratio is effectively 1.0 (drops one clause), so
+# it only pins the threshold somewhere above "always true" — moving
+# `FOLLOW_UP_RESTATEMENT_OVERLAP` from 0.6 to 0.85 still passes the whole
+# suite. This body's overlap with FIRST is 9/11 terms = 0.818..., strictly
+# between 0.6 and 0.85: it must be rejected at the real 0.6 threshold and
+# would wrongly pass at 0.85.
+def test_a_follow_up_with_moderate_overlap_is_still_rejected():
+    moderate = ("Quick note on Vahan routes hiring over voice with a scheduler in Python.\n\n"
+                "Would you take an intern?")
+    assert len(moderate.split()) < len(FIRST.split())  # genuinely shorter
+    errs = validate_style(_draft(moderate), previous_body=FIRST)
+    assert any("restat" in e for e in errs)
+
+
+# --- Fix round 1 (ruling T12-1): D29 also covers the sender's own earlier
+# email, not just a research source. Each phrase gets its own test so a
+# regression in any one of them (not just the whole list) fails visibly.
+@pytest.mark.parametrize("phrase", [
+    "my last email", "my previous email", "my earlier email", "my previous note",
+    "as I mentioned", "in case you missed", "following up on my",
+])
+def test_self_referencing_the_earlier_email_is_rejected(phrase):
+    body = f"Vahan routes blue-collar hiring over voice - {phrase} last week.\n\nWould you take an intern?"
+    errs = validate_style(_draft(body), previous_body=None)
+    assert any("banned phrase" in e and phrase.lower() in e for e in errs)
+
+
+def test_natural_continuation_without_naming_the_channel_is_not_banned():
+    # "following up on ..." (no "my") is the prompt's own safe example —
+    # must not collide with the "following up on my" ban.
+    body = "Following up on the note about voice routing.\n\nWould you take an intern?"
+    errs = validate_style(_draft(body), previous_body=None)
+    assert not any("banned phrase" in e for e in errs)

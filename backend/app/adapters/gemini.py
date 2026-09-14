@@ -36,7 +36,7 @@ from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.domain.names import company_display_name
-from app.domain.replies import LABELS
+from app.domain.replies import LABELS, MACHINE_LABELS
 from app.domain.validation import FOLLOW_UP_WORD_TARGETS
 
 logger = logging.getLogger(__name__)
@@ -212,13 +212,25 @@ FOLLOW-UPS: when the prompt below includes a THREAD SO FAR section, you are
 writing a follow-up, not a first email - the founder already saw an earlier
 note from you. Do not repeat what that note already said; assume they read
 it and refer back to it in half a sentence at most ("following up on ...",
-never a restatement of the whole hook). Hit the word target given for this
-step - it is lower than a first email's, on purpose, because a follow-up
-earns less of the founder's attention than the first message did, not more.
-The follow-up must end up shorter than the message before it, every time.
-If the thread already shows a reply from the founder (marked "they
-replied"), acknowledge what it said instead of writing as if nothing came
-back.
+never a restatement of the whole hook). Never call that earlier note an
+"email" or "message" you sent - the same rule that bans naming a news
+article as a source applies to naming your own earlier note as a channel:
+never write "my last email", "my previous email", "as I mentioned", "in
+case you missed" or anything else that names the earlier note as a thing
+you sent, rather than a thing you're continuing. Hit the word target given
+for this step - it is lower than a first email's, on purpose, because a
+follow-up earns less of the founder's attention than the first message
+did, not more. The follow-up must end up shorter than the message before
+it, every time.
+
+THREAD SO FAR marks each entry "you sent" or "they replied" - or, for an
+inbound row that is an automated reply (marked "automated reply, NOT the
+founder", with its label - AUTO_REPLY or OUT_OF_OFFICE), that entry is a
+bot, not the founder. Only acknowledge an entry marked "they replied" as
+something the founder said. Never thank a founder for replying, and never
+write as if they personally responded, when the only inbound entry is
+marked as an automated reply - you may use it for timing only (for
+example, they mentioned being away until a date).
 
 OUTPUT: JSON with "subject" (three to six words, no emoji, no all-caps
 words, naming the company), "body" (plain text, no markdown, no HTML, NO
@@ -245,10 +257,22 @@ def _format_claims(claims: list[dict]) -> str:
 
 
 def _format_thread_history(history: list[dict]) -> str:
+    # Fix round 1 (ruling T12-2): an inbound row's `label` distinguishes a
+    # real human reply from a bot. Only a machine label gets the
+    # "automated reply" wording — a human label can never actually reach
+    # here (the state machine moves the outreach to REPLIED first), and an
+    # unclassified row (label=None) is treated as "they replied" rather
+    # than silently hidden, since hiding it would be worse if it does turn
+    # out to be human content.
     lines = []
     for m in history:
-        who = "you sent" if m.get("direction") == "outbound" else "they replied"
         body = str(m.get("body", "")).replace("\n", " ").strip()
+        if m.get("direction") == "outbound":
+            who = "you sent"
+        elif m.get("label") in MACHINE_LABELS:
+            who = f"automated reply, NOT the founder ({m.get('label')})"
+        else:
+            who = "they replied"
         lines.append(f"- [{who}, step {m.get('sequence_step')}]: {body}")
     return "\n".join(lines) if lines else "- (none)"
 

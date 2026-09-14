@@ -286,6 +286,13 @@ class DraftOutreach:
                 "sequence_step": m.sequence_step,
                 "subject": getattr(m, "subject", None),
                 "body": m.body,
+                # Fix round 1 (ruling T12-2): an inbound row here can only
+                # ever be machine-labelled (AUTO_REPLY/OUT_OF_OFFICE) or not
+                # yet classified — a human label moves the outreach to
+                # REPLIED before it ever reaches READY_TO_DRAFT again. The
+                # prompt needs this to avoid telling the model a bot's
+                # out-of-office is the founder speaking.
+                "label": getattr(m, "label", None),
             }
             for m in ordered
         ]

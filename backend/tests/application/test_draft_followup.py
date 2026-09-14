@@ -134,3 +134,115 @@ def test_a_first_email_prompt_has_no_follow_up_section(repos, ready_founder):
     prompt = build_draft_prompt(fake_drafter.calls[0])
     assert "THIS IS A FOLLOW-UP" not in prompt
     assert "THREAD SO FAR" not in prompt
+
+
+# --- Fix round 1: coordinator-flagged defects and mutation pins ------------
+
+
+def test_the_prompt_labels_the_sender_and_founder_correctly_not_swapped():
+    # Review defect 1: swapping "you sent" / "they replied" in
+    # `_format_thread_history` left every existing test green. Content-
+    # anchored: find the line each marker body actually landed on, and
+    # check ITS label, so an inversion of the labels fails this directly.
+    from app.adapters.gemini import build_draft_prompt
+
+    ctx = {
+        "company": {"name": "Vahan", "one_liner": "Recruitment over voice"},
+        "founder": {"full_name": "Madhav Krishna", "title": "Founder", "bio": None},
+        "available_sources": [], "claims": [],
+        "sequence_step": 1,
+        "thread_history": [
+            {"direction": "outbound", "sequence_step": 0, "subject": "s0",
+             "body": "OUTBOUND_MARKER_FROM_THE_SENDER", "label": None},
+            {"direction": "inbound", "sequence_step": 0, "subject": None,
+             "body": "INBOUND_MARKER_FROM_THE_FOUNDER", "label": None},
+        ],
+    }
+    prompt = build_draft_prompt(ctx)
+    sender_line = next(l for l in prompt.splitlines() if "OUTBOUND_MARKER_FROM_THE_SENDER" in l)
+    founder_line = next(l for l in prompt.splitlines() if "INBOUND_MARKER_FROM_THE_FOUNDER" in l)
+    assert "you sent" in sender_line
+    assert "they replied" in founder_line
+
+
+def test_an_out_of_office_inbound_row_carries_its_label_into_thread_history(repos, ready_follow_up):
+    # Review defect 3 / ruling T12-2: thread_history must carry `label` so
+    # the prompt can tell a bot's auto-reply apart from the founder.
+    from datetime import datetime, timezone
+
+    repos.message.upsert(
+        outreach_id=ready_follow_up.outreach.id, sequence_step=0, direction="inbound",
+        body="I'm out of office until the 20th.", label="OUT_OF_OFFICE",
+        received_at=datetime(2026, 9, 10, tzinfo=timezone.utc),
+    )
+    fake_drafter = FakeDrafter([GOOD_FOLLOW_UP])
+    DraftOutreach(fake_drafter, repos).run(limit=1)
+    (inbound_entry,) = [e for e in fake_drafter.calls[0]["thread_history"] if e["direction"] == "inbound"]
+    assert inbound_entry["label"] == "OUT_OF_OFFICE"
+
+
+def test_the_prompt_marks_an_out_of_office_reply_as_not_the_founder():
+    # Review defect 3: the prompt's own instruction ("acknowledge their
+    # reply") must not fire on the only kind of inbound row that can
+    # actually reach a follow-up draft (a machine label).
+    from app.adapters.gemini import build_draft_prompt
+
+    ctx = {
+        "company": {"name": "Vahan", "one_liner": "Recruitment over voice"},
+        "founder": {"full_name": "Madhav Krishna", "title": "Founder", "bio": None},
+        "available_sources": [], "claims": [],
+        "sequence_step": 1,
+        "thread_history": [
+            {"direction": "outbound", "sequence_step": 0, "subject": "s0", "body": "b0", "label": None},
+            {"direction": "inbound", "sequence_step": 0, "subject": None,
+             "body": "Out of office until the 20th", "label": "OUT_OF_OFFICE"},
+        ],
+    }
+    prompt = build_draft_prompt(ctx)
+    reply_line = next(l for l in prompt.splitlines() if "Out of office until the 20th" in l)
+    assert "automated reply" in reply_line
+    assert "OUT_OF_OFFICE" in reply_line
+    assert "they replied" not in reply_line
+
+
+def test_a_first_email_has_empty_thread_history_even_with_a_stray_inbound_row(repos, ready_founder):
+    # Mutation pin (survivor 3): the `if step <= 0: return []` guard in
+    # `_thread_history` is otherwise unexercised, since the inbound filter
+    # doesn't look at `step` at all — without the guard, a stray inbound row
+    # already sitting on a step-0 outreach would leak into a "first email"'s
+    # thread_history purely by accident.
+    from datetime import datetime, timezone
+
+    repos.message.upsert(
+        outreach_id=ready_founder.id, sequence_step=0, direction="inbound",
+        body="stray reply that predates any real send",
+        received_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    fake_drafter = FakeDrafter([{
+        "subject": "Backend intern at Vahan",
+        "body": ("You're matching blue-collar workers to jobs over voice at Vahan. "
+                 "That routing problem is what I keep thinking about.\n\n"
+                 "I built a scheduler in Python.\n\n"
+                 "Would you take an intern?"),
+        "research_source_type": "news", "research_source_id": 1,
+    }])
+    DraftOutreach(fake_drafter, repos).run(limit=1)
+    assert fake_drafter.calls[0]["thread_history"] == []
+
+
+def test_a_redraft_of_the_same_step_does_not_quote_its_own_existing_draft_back_at_itself(
+    repos, ready_follow_up,
+):
+    # Mutation pin (survivor 4): `sequence_step < step` vs `<= step` in the
+    # outbound filter. Simulates the legal `PENDING_APPROVAL -> READY_TO_
+    # DRAFT` redraft path: a step-1 outbound row already exists (a rejected
+    # attempt, or one a reviewer sent back) when DraftOutreach runs again
+    # for that same step — it must never show up as "history" for itself.
+    repos.message.upsert(
+        outreach_id=ready_follow_up.outreach.id, sequence_step=1, direction="outbound",
+        subject="old attempt", body="an earlier rejected attempt at the follow-up",
+    )
+    fake_drafter = FakeDrafter([GOOD_FOLLOW_UP])
+    DraftOutreach(fake_drafter, repos).run(limit=1)
+    steps_shown = [e["sequence_step"] for e in fake_drafter.calls[0]["thread_history"]]
+    assert steps_shown == [0]

@@ -38,6 +38,15 @@ BANNED_PHRASES = [
     "i came across your company", "delve", "tapestry", "in today's fast-paced",
     "reach out", "circle back", "at your earliest convenience",
     "i would love the opportunity", "please do not hesitate",
+    # Task 12 (ruling T12-1): D29 bans naming a news source as a source
+    # ("I saw the article") because the source is how you learned something,
+    # never what the sentence is about. A follow-up's earlier email is the
+    # same kind of channel, pointed at the sender instead of a publication —
+    # "as I mentioned in my last email" is the identical tell. Deterministic
+    # ban mirrors D29's SOURCE_REFERENCE_PHRASES below, one level up (the
+    # channel is the sender's own prior message, not a research source).
+    "my last email", "my previous email", "my earlier email", "my previous note",
+    "as i mentioned", "in case you missed", "following up on my",
 ]
 SENIORITY_PHRASES = [
     "years of experience", "in my current role", "my team", "i led a team",

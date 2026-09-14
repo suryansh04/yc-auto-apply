@@ -30,6 +30,15 @@ LABELS = ("INTERESTED", "REJECTED", "REFERRAL", "AUTO_REPLY", "OUT_OF_OFFICE", "
 
 _HUMAN_LABELS = frozenset({"INTERESTED", "REJECTED", "REFERRAL", "UNCLEAR"})
 
+# Task 12 (ruling T12-2): public (unlike `_HUMAN_LABELS`) because
+# `app.adapters.gemini`'s follow-up prompt needs to tell a machine-labelled
+# inbound row apart from an actual human reply — the state machine
+# guarantees a still-draftable outreach can only ever carry an inbound row
+# that is one of these two labels (or not yet classified), never a human
+# one, since a human label always moves the outreach to `REPLIED` first
+# (`cancels_sequence` below).
+MACHINE_LABELS = frozenset({"AUTO_REPLY", "OUT_OF_OFFICE"})
+
 
 def cancels_sequence(label: str) -> bool:
     """True for the four human labels; False for the two machine labels

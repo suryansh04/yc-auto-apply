@@ -233,6 +233,34 @@ def test_gmail_auth_does_not_need_the_resume_or_signature(monkeypatch, tmp_path,
     assert isinstance(result.exception, _FlowStarted)
 
 
+def test_gmail_auth_requests_both_send_and_readonly_scopes(monkeypatch, tmp_path, send_env):
+    """Task 7 (spec §5) fix round 1: `gmail-auth` must widen its scope so
+    `GmailReader` can poll replies - a send-only token cannot read mail
+    (Google enforces scopes on the token itself). Pins the exact scope
+    list `cli.gmail_auth` passes to `InstalledAppFlow`, so a future edit
+    that silently drops `gmail.readonly` fails loudly here instead of only
+    as a confusing permission error against a live account."""
+    import google_auth_oauthlib.flow as flow_module
+
+    _complete_send_config(monkeypatch, tmp_path)
+    get_settings.cache_clear()
+
+    requested_scopes = []
+
+    class _Flow:
+        @staticmethod
+        def from_client_secrets_file(path, scopes):
+            requested_scopes.extend(scopes)
+            raise _FlowStarted()
+
+    monkeypatch.setattr(flow_module, "InstalledAppFlow", _Flow)
+    runner.invoke(cli.app, ["gmail-auth"])
+
+    assert requested_scopes == cli.GMAIL_SCOPES
+    assert "https://www.googleapis.com/auth/gmail.send" in requested_scopes
+    assert "https://www.googleapis.com/auth/gmail.readonly" in requested_scopes
+
+
 # --- Fix round 1 (F1): `--to-self` routing. The reviewer's mutant "route
 # `--to-self` to `run()`" - the operator's smoke test emailing every founder -
 # survived the suite because every CLI test stopped at the patched session.

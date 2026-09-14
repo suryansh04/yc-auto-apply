@@ -120,3 +120,102 @@ def test_a_401_never_carries_the_token(reader):
     with pytest.raises(Exception) as exc_info:
         reader.history_since("1")
     assert "ya29" not in str(exc_info.value)
+
+
+# --- Fix round 1: pin the four behaviours the review found surviving under
+# mutation - correct as shipped, but unguarded because the test file above
+# is the brief's Step 1 content verbatim. Each test targets the exact
+# regression the brief's own prose called out.
+
+
+@respx.mock
+@pytest.mark.parametrize("text", ["Yes!", "OK"])  # "Yes!" needs 2 '=' of padding, "OK" needs 1
+def test_get_message_decodes_an_unpadded_base64_body(reader, text):
+    """Gmail's `body.data` is base64url WITHOUT the trailing `=` padding
+    Python's own `base64.urlsafe_b64encode` always emits; naive
+    `urlsafe_b64decode` raises `binascii.Error: Incorrect padding` on
+    that. Both padding-length cases (1 and 2 missing `=`) are covered."""
+    import base64
+
+    padded = base64.urlsafe_b64encode(text.encode()).decode()
+    assert padded.endswith("=")
+    unpadded = padded.rstrip("=")
+    respx.get(f"{MESSAGES}/m-unpadded").mock(return_value=httpx.Response(200, json={
+        "id": "m-unpadded", "threadId": "t1", "internalDate": "1789000000000",
+        "payload": {"headers": [{"name": "From", "value": "a@b.com"}],
+                    "mimeType": "text/plain", "body": {"data": unpadded}},
+    }))
+    assert reader.get_message("m-unpadded").body_text == text
+
+
+@respx.mock
+def test_get_message_finds_plain_text_nested_inside_multipart_mixed(reader):
+    """A real reply with an attachment arrives as `multipart/mixed`
+    wrapping a `multipart/alternative` (html + plain) part - one level
+    deeper than the flat `multipart/alternative` the other test covers.
+    A one-level-only part walk would silently return an empty body for
+    every such reply."""
+    import base64
+
+    text = base64.urlsafe_b64encode(b"plain reply text").decode()
+    html = base64.urlsafe_b64encode(b"<p>html reply text</p>").decode()
+    pdf = base64.urlsafe_b64encode(b"%PDF-1.4 fake resume bytes").decode()
+    respx.get(f"{MESSAGES}/m-nested").mock(return_value=httpx.Response(200, json={
+        "id": "m-nested", "threadId": "t1", "internalDate": "1789000000000",
+        "payload": {
+            "headers": [{"name": "From", "value": "a@b.com"}],
+            "mimeType": "multipart/mixed",
+            "parts": [
+                {"mimeType": "multipart/alternative", "parts": [
+                    {"mimeType": "text/html", "body": {"data": html}},
+                    {"mimeType": "text/plain", "body": {"data": text}},
+                ]},
+                {"mimeType": "application/pdf", "body": {"data": pdf, "attachmentId": "a1"}},
+            ],
+        },
+    }))
+    assert reader.get_message("m-nested").body_text == "plain reply text"
+
+
+@respx.mock
+def test_get_message_with_no_body_part_returns_empty_string(reader):
+    """A message with no `text/plain` leaf anywhere (e.g. image-only, or a
+    body Gmail didn't inline) must return `""`, not raise - Task 8 decides
+    what an empty body means, but a `KeyError`/`TypeError` here would take
+    down the whole poll."""
+    respx.get(f"{MESSAGES}/m-empty").mock(return_value=httpx.Response(200, json={
+        "id": "m-empty", "threadId": "t1", "internalDate": "1789000000000",
+        "payload": {"headers": [{"name": "From", "value": "a@b.com"}],
+                    "mimeType": "text/plain", "body": {}},
+    }))
+    assert reader.get_message("m-empty").body_text == ""
+
+
+@respx.mock
+def test_a_401_body_carrying_a_fake_refresh_token_never_leaks(reader, caplog):
+    """`test_a_401_never_carries_the_token` above only checks the literal
+    string "ya29" (an access-token prefix). This pins the stronger claim
+    the brief actually makes: the raw response BODY must never reach the
+    exception or the logs, exercised with a secret shaped like a refresh
+    token and a client secret sitting directly in the JSON body (a
+    provider that ever did this would otherwise leak through
+    `_error_code` if that helper were loosened to return arbitrary
+    fields)."""
+    import logging
+
+    fake_refresh_token = "1//09-fake-refresh-token-should-never-leak"
+    fake_client_secret = "GOCSPX-fake-client-secret-should-never-leak"
+    respx.get(HISTORY).mock(return_value=httpx.Response(401, json={
+        "error": {"message": "bad token", "refresh_token": fake_refresh_token,
+                  "client_secret": fake_client_secret},
+    }))
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(Exception) as exc_info:
+            reader.history_since("1")
+    joined_logs = "\n".join(r.getMessage() for r in caplog.records)
+    assert fake_refresh_token not in str(exc_info.value)
+    assert fake_refresh_token not in repr(exc_info.value)
+    assert fake_refresh_token not in joined_logs
+    assert fake_client_secret not in str(exc_info.value)
+    assert fake_client_secret not in repr(exc_info.value)
+    assert fake_client_secret not in joined_logs

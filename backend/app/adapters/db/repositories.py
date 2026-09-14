@@ -191,6 +191,22 @@ class OutreachRepo:
             select(Outreach).where(Outreach.founder_id == founder_id)
         ).scalar_one_or_none()
 
+    def get_by_thread_id(self, thread_id: str) -> Outreach | None:
+        """Added in Task 8 (spec §5): `PollReplies` maps an inbound Gmail
+        message's `threadId` back to the outreach it belongs to by joining
+        through `Message.gmail_thread_id` — every outbound step we send on
+        an outreach shares the same Gmail thread, so this resolves to
+        exactly one outreach even when a follow-up step has already gone
+        out. A `threadId` with no matching message (the operator's own
+        ordinary inbox mail) returns `None` — the caller's cue to skip it,
+        never storing or classifying it."""
+        return self.session.execute(
+            select(Outreach)
+            .join(Message, Message.outreach_id == Outreach.id)
+            .where(Message.gmail_thread_id == thread_id)
+            .limit(1)
+        ).scalars().first()
+
     def list_by_state(self, state: OutreachState | str) -> list[Outreach]:
         """Plain unordered `WHERE state = :state` listing — sufficient for
         Phase 1's single-process CLI, where nothing else is contending for
@@ -244,6 +260,34 @@ class MessageRepo:
 
     def get(self, id: int) -> Message | None:
         return self.session.get(Message, id)
+
+    def get_by_gmail_id(self, gmail_message_id: str) -> Message | None:
+        """Added in Task 8 (spec §5): the dedupe check `PollReplies` runs
+        BEFORE calling `GmailReader.get_message` for a given id — backed by
+        `uq_messages_gmail_message_id` (Task 1), so re-polling the same
+        window costs no network call, not just no duplicate row."""
+        return self.session.execute(
+            select(Message).where(Message.gmail_message_id == gmail_message_id)
+        ).scalar_one_or_none()
+
+    def list_by_thread_id(self, gmail_thread_id: str) -> list[Message]:
+        """Added in Task 8: every message (outbound and inbound) on a
+        given Gmail thread, in insertion order."""
+        return list(
+            self.session.execute(
+                select(Message).where(Message.gmail_thread_id == gmail_thread_id)
+            ).scalars()
+        )
+
+    def list_by_outreach(self, outreach_id: int) -> list[Message]:
+        """Added in Task 8: the brief's own tests call it by this name.
+        Equivalent to filtering `list_by_state`/similar by outreach id —
+        every message (outbound and inbound) belonging to one outreach."""
+        return list(
+            self.session.execute(
+                select(Message).where(Message.outreach_id == outreach_id)
+            ).scalars()
+        )
 
     def get_outbound(self, outreach_id: int, sequence_step: int) -> Message | None:
         """Added in fix round 1 of Tasks 13/14 (F1, ruling R1): the

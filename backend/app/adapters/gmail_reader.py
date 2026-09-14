@@ -132,6 +132,13 @@ class GmailReader:
     ):
         self._credential_repo = credential_repo
         self._account = account
+        # Public alias of `_account` (Task 8): `PollReplies` needs to know
+        # which mailbox this reader was built for, to look up/persist the
+        # right `GmailCredential` row's history cursor, without taking a
+        # separate constructor argument of its own (the brief's interface
+        # is exactly `PollReplies(reader, repos, clock)`). The reader is
+        # the one thing that already knows this.
+        self.account = account
         self._client_id = client_id
         self._client_secret = client_secret
         self._http = _client or httpx.Client(timeout=timeout)

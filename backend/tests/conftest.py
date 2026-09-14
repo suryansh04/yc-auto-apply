@@ -35,7 +35,7 @@ def _ignore_operator_dotenv(monkeypatch):
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 from app.domain.states import OutreachState
@@ -47,9 +47,11 @@ from tests.fakes_repos import (
     RESUME_CLAIMS,
     VAHAN_NEWS,
     FakeCompanyRepo,
+    FakeCredentialRepo,
     FakeEmailCandidateRepo,
     FakeFounderRepo,
     FakeFounderRow,
+    FakeGmailReader,
     FakeJobPostingRepo,
     FakeJobRepo,
     FakeLaunchRepo,
@@ -69,6 +71,8 @@ from tests.fakes_repos import (
 @pytest.fixture
 def repos() -> FakeRepos:
     outreach = FakeOutreachRepo()
+    message = FakeMessageRepo()
+    outreach._message_repo = message  # Task 8: lets FakeOutreachRepo.get_by_thread_id look messages up
     bundle = FakeRepos(
         founder=FakeFounderRepo(outreach),
         company=FakeCompanyRepo(),
@@ -77,10 +81,11 @@ def repos() -> FakeRepos:
         email_candidate=FakeEmailCandidateRepo(),
         news=FakeNewsRepo(),
         job_posting=FakeJobPostingRepo(),
-        message=FakeMessageRepo(),
+        message=message,
         resume_profile=FakeResumeProfileRepo(),
         job=FakeJobRepo(),
         session=FakeSession(),
+        credential=FakeCredentialRepo(),
     )
     # deepcopy (Task 16 fix round 1): a test that flips a claim's `span_verified`
     # in place must not leak into the module-level RESUME_CLAIMS.
@@ -357,6 +362,44 @@ def manual_founder(repos: FakeRepos):
     repos.email_candidate.upsert(founder_id=founder.id, address="pratish@onefin.in",
                                  priority=1, verdict="catch_all")
     return SimpleNamespace(outreach=outreach, founder=founder)
+
+
+# --- Task 8 fixtures: PollReplies ----------------------------------------------
+
+
+@pytest.fixture
+def sent_outreach(repos: FakeRepos):
+    """One founder, `SENT`, with the step-0 outbound draft row carrying a
+    Gmail thread id — the base case `PollReplies` matches inbound mail
+    against. Also seeds a `GmailCredential` row for "me@gmail.com" as
+    `gmail-auth` would already have run (Task 8 handover note 1:
+    `set_history_id` needs an existing row — NOT NULL on `refresh_token`),
+    with a starting history cursor so a normal poll takes the
+    `history_since` path rather than the first-ever-poll fallback.
+    `.outreach` / `.founder` / `.thread_id`."""
+    from types import SimpleNamespace
+
+    repos.company.add(id=200, domain="onefin.in", name="OneFin")
+    founder = repos.founder.add(id=200, company_id=200, full_name="Pratish Gandhi")
+    outreach = repos.outreach.add(id=200, founder_id=founder.id, state=str(OutreachState.SENT))
+    outreach.resolved_email = "pratish@onefin.in"
+    outreach.sequence_step = 0
+    repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="outbound",
+        subject="Backend intern at OneFin", body="You're building payments infra...",
+        gmail_message_id="sent-200", gmail_thread_id="thread-200",
+        approved_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        sent_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    repos.credential.upsert(
+        account_email="me@gmail.com", refresh_token="refresh-token-abc123", last_history_id="100",
+    )
+    return SimpleNamespace(outreach=outreach, founder=founder, thread_id="thread-200")
+
+
+@pytest.fixture
+def fake_reader() -> FakeGmailReader:
+    return FakeGmailReader(account="me@gmail.com")
 
 
 @pytest.fixture

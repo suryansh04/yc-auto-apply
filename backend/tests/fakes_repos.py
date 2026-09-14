@@ -156,6 +156,12 @@ class FakeOutreachRepo:
     def __init__(self):
         self.rows: dict[int, FakeOutreachRow] = {}
         self._by_founder_id: dict[int, int] = {}
+        # Task 8: wired to the sibling `FakeMessageRepo` by the `repos`
+        # fixture after both are constructed (mirrors `FakeFounderRepo`'s
+        # constructor-injected join to `FakeOutreachRepo` — this one can't
+        # take it at construction time since `message` is built after
+        # `outreach` in the `repos` fixture today).
+        self._message_repo = None
 
     def add(self, id: int, founder_id: int, state: str) -> FakeOutreachRow:
         row = FakeOutreachRow(id=id, founder_id=founder_id, state=state)
@@ -169,6 +175,19 @@ class FakeOutreachRepo:
     def get_by_founder_id(self, founder_id: int) -> FakeOutreachRow | None:
         row_id = self._by_founder_id.get(founder_id)
         return self.rows.get(row_id) if row_id is not None else None
+
+    def get_by_thread_id(self, thread_id: str) -> FakeOutreachRow | None:
+        """Task 8: mirrors the real `OutreachRepo.get_by_thread_id` — find
+        any message (outbound or inbound) carrying this Gmail thread id and
+        return its parent outreach. A thread with two outbound steps (an
+        initial send plus a follow-up) still resolves to exactly one row,
+        since both messages share the same `outreach_id`."""
+        if self._message_repo is None or not thread_id:
+            return None
+        for m in self._message_repo.rows:
+            if m.gmail_thread_id == thread_id:
+                return self.get(m.outreach_id)
+        return None
 
     def upsert(self, **fields) -> FakeOutreachRow:
         founder_id = fields["founder_id"]
@@ -372,6 +391,11 @@ class FakeMessageRow:
     sent_at: object = None            # Task 15: set by `reserve_for_send`
     gmail_message_id: str | None = None
     gmail_thread_id: str | None = None
+    received_at: object = None        # Task 8: inbound rows only
+    label: str | None = None          # Task 8/9: reply classification ("BOUNCE" set by PollReplies)
+    confidence: float | None = None
+    rationale: str | None = None
+    classified_at: object = None
 
 
 class FakeMessageRepo:
@@ -412,6 +436,25 @@ class FakeMessageRepo:
 
     def list_by_outreach_id(self, outreach_id: int) -> list[FakeMessageRow]:
         return [r for r in self.rows if r.outreach_id == outreach_id]
+
+    def list_by_outreach(self, outreach_id: int) -> list[FakeMessageRow]:
+        """Task 8: the brief's own test bodies call it by this name
+        (`repos.message.list_by_outreach(...)`) — an alias of
+        `list_by_outreach_id` above, kept as a separate method rather than
+        a rename so every existing `list_by_outreach_id` call site (Tasks
+        14/16) is untouched."""
+        return self.list_by_outreach_id(outreach_id)
+
+    def get_by_gmail_id(self, gmail_message_id: str) -> FakeMessageRow | None:
+        """Task 8: mirrors `MessageRepo.get_by_gmail_id` — the dedupe check
+        `PollReplies` runs BEFORE fetching a message's full content, so a
+        re-poll of the same window burns no fetch, not just no duplicate
+        row."""
+        return next((r for r in self.rows if r.gmail_message_id == gmail_message_id), None)
+
+    def list_by_thread_id(self, gmail_thread_id: str) -> list[FakeMessageRow]:
+        """Task 8: mirrors `MessageRepo.list_by_thread_id`."""
+        return [r for r in self.rows if r.gmail_thread_id == gmail_thread_id]
 
     def reserve_for_send(self, message_id: int, now) -> int:
         """Task 15 (ruling R1): models the real repo's single conditional
@@ -466,6 +509,157 @@ class FakeSession:
 
     def rollback(self) -> None:
         self.rollback_calls += 1
+
+
+# --- Phase 2 (Task 8): the Gmail credential row `PollReplies` reads/writes
+# its history cursor through, and a fake `GmailReader`-shaped reader for the
+# application-layer tests. Neither imports anything from `app.adapters` -
+# `InboundMessage`-equivalent rows are just a local dataclass here, and the
+# two "adapter exceptions" `PollReplies` recognises by name
+# (`GmailHistoryExpired`, `GmailError`) are raised as these plain local
+# classes, matching that name-based recognition exactly the way the real
+# `app.adapters.gmail_reader` ones would from the outside.
+
+
+@dataclass
+class FakeCredentialRow:
+    account_email: str
+    refresh_token: str
+    token_uri: str = "https://oauth2.googleapis.com/token"
+    scopes: object = None
+    last_history_id: str | None = None
+
+
+class FakeCredentialRepo:
+    """Mirrors `GmailCredentialRepo`: `upsert` keyed on `account_email`,
+    and `set_history_id` — a thin wrapper that (like the real repo, Task 7
+    handover note 1) blows up if the account has no stored row yet, since
+    the real `GmailCredential.refresh_token` column is NOT NULL and
+    `set_history_id` never supplies one."""
+
+    def __init__(self):
+        self.rows: dict[str, FakeCredentialRow] = {}
+
+    def upsert(self, **fields) -> FakeCredentialRow:
+        existing = self.rows.get(fields["account_email"])
+        if existing is None:
+            existing = FakeCredentialRow(
+                account_email=fields["account_email"],
+                refresh_token=fields.get("refresh_token", ""),
+            )
+            self.rows[existing.account_email] = existing
+        for k, v in fields.items():
+            setattr(existing, k, v)
+        return existing
+
+    def get_by_account_email(self, account_email: str) -> FakeCredentialRow | None:
+        return self.rows.get(account_email)
+
+    def set_history_id(self, account_email: str, history_id: str) -> None:
+        if account_email not in self.rows:
+            raise ValueError(
+                f"no stored Gmail credential for {account_email!r} — "
+                "refresh_token is NOT NULL; run gmail-auth first"
+            )
+        self.upsert(account_email=account_email, last_history_id=history_id)
+
+
+class GmailHistoryExpired(Exception):
+    """Local stand-in for `app.adapters.gmail_reader.GmailHistoryExpired`
+    — `PollReplies` recognises it by class name only (it never imports the
+    real adapter exception, per the layering rule), so this separately
+    defined class exercises that recognition exactly as the real one
+    would."""
+
+
+class GmailError(Exception):
+    """Local stand-in for `app.adapters.gmail.GmailError` — same
+    by-name recognition as `GmailHistoryExpired` above."""
+
+
+@dataclass
+class FakeInboundMessage:
+    gmail_message_id: str
+    gmail_thread_id: str
+    from_address: str
+    subject: str
+    body_text: str
+    received_at: object
+
+
+class FakeGmailReader:
+    """A `GmailReader`-shaped fake (Task 7's real adapter) for
+    application-layer tests: `.add(...)` queues a message as if Gmail had
+    just delivered it; `history_since`/`recent_message_ids`/`get_message`/
+    `current_history_id` match the real reader's methods exactly.
+
+    Delivery model: every `.add()` appends to an internal log and bumps
+    `self.history_id` (the "current server cursor", exposed publicly so
+    tests can assert the persisted cursor matches it). `history_since`
+    and `recent_message_ids` both deliver everything logged since the
+    last delivery call and advance an internal position pointer past it -
+    deliberately NOT keyed off the `history_id` argument `PollReplies`
+    passes in, since this fake is the sole authority on what "new" means
+    for itself (the real Gmail API is the sole authority for the real
+    reader). `.rewind()` — used to simulate "poll the same window again"
+    (a crash before the cursor was persisted, or a deliberate re-poll) -
+    resets that pointer back to where it stood before the last delivery
+    call, so the next call redelivers the same ids.
+
+    `.account` is public (unlike the real `GmailReader`'s private
+    `_account`) because `PollReplies` reads it to know which credential
+    row to update — see that module's docstring for why the interface
+    stays `PollReplies(reader, repos, clock)` with no separate account
+    argument."""
+
+    def __init__(self, account: str = "me@gmail.com", start_history_id: str = "1"):
+        self.account = account
+        self.history_id = start_history_id
+        self._log: list[FakeInboundMessage] = []
+        self._by_id: dict[str, FakeInboundMessage] = {}
+        self._pos = 0
+        self._pos_before_last_call = 0
+        self._expired = False
+        self.used_fallback = False
+
+    def add(self, *, thread_id: str, message_id: str, sender: str, body: str,
+            subject: str = "", received_at=None) -> None:
+        msg = FakeInboundMessage(
+            gmail_message_id=message_id, gmail_thread_id=thread_id, from_address=sender,
+            subject=subject, body_text=body,
+            received_at=received_at or datetime(2026, 9, 14, tzinfo=timezone.utc),
+        )
+        self._log.append(msg)
+        self._by_id[message_id] = msg
+        self.history_id = str(int(self.history_id) + 1)
+
+    def rewind(self) -> None:
+        self._pos = self._pos_before_last_call
+
+    def expire_history(self) -> None:
+        self._expired = True
+
+    def history_since(self, history_id: str) -> tuple[list[str], str]:
+        if self._expired:
+            self._expired = False
+            raise GmailHistoryExpired(f"startHistoryId {history_id!r} is no longer retained")
+        return self._deliver(), self.history_id
+
+    def recent_message_ids(self, query: str = "newer_than:14d") -> list[str]:
+        self.used_fallback = True
+        return self._deliver()
+
+    def get_message(self, message_id: str) -> FakeInboundMessage:
+        return self._by_id[message_id]
+
+    def current_history_id(self) -> str:
+        return self.history_id
+
+    def _deliver(self) -> list[str]:
+        self._pos_before_last_call = self._pos
+        ids = [m.gmail_message_id for m in self._log[self._pos:]]
+        self._pos = len(self._log)
+        return ids
 
 
 # --- Phase 2 (Task 2/3): job bookkeeping ---------------------------------------
@@ -524,6 +718,7 @@ class FakeRepos:
     resume_profile: FakeResumeProfileRepo
     job: FakeJobRepo
     session: FakeSession
+    credential: FakeCredentialRepo = None  # Task 8: default so pre-Task-8 FakeRepos(...) call sites still work
 
 
 RESUME_CLAIMS = [

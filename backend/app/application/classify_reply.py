@@ -37,13 +37,20 @@ Order of operations per run:
 4. **Normalise the label before it ever reaches the database or
    `cancels_sequence`.** A model can return anything: an unrecognised
    string, one of the six spec labels with stray whitespace or the wrong
-   case, `None`. Anything that is not an EXACT match (after stripping and
-   upper-casing) for one of the six `app.domain.replies.LABELS` becomes
-   `UNCLEAR` — never stored raw, never crashes the run. `UNCLEAR` is
-   itself a human label (see `app.domain.replies`'s module docstring), so
-   this fallback is conservative in the safe direction: an ambiguous or
-   malformed answer still closes out the sequence rather than leaving a
-   founder who already replied on the hook for a robotic follow-up.
+   case, `None`. Anything that is not an EXACT, case-sensitive match for
+   one of the six `app.domain.replies.LABELS` — no stripping, no
+   upper-casing, no fuzzy mapping — becomes `UNCLEAR` — never stored raw,
+   never crashes the run. This strictness is deliberate: a strict
+   JSON-schema `enum` response should never legitimately come back as
+   `"interested "` or `"Interested"`, so a value that close but not exact
+   is a signal something upstream is already off-contract, not a typo
+   safe to silently correct — `UNCLEAR` surfaces that to the operator
+   instead of quietly guessing what the model "must have meant". `UNCLEAR`
+   is itself a human label (see `app.domain.replies`'s module docstring),
+   so this fallback is conservative in the safe direction either way: an
+   ambiguous or malformed answer still closes out the sequence rather than
+   leaving a founder who already replied on the hook for a robotic
+   follow-up.
 5. **Persist label/confidence/rationale/classified_at exactly as given.**
    Confidence is never clamped, rounded, or hidden below some threshold —
    spec §5's whole point is that a low-confidence label is still SHOWN to

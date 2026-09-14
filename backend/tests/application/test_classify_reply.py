@@ -162,6 +162,32 @@ def test_a_reply_on_an_outreach_already_past_sent_is_labelled_but_state_is_left_
     assert repos.outreach.get(unlabelled_reply.outreach.id).state == S.REPLIED
 
 
+def test_a_human_label_on_an_already_bounced_outreach_never_overwrites_bounced(
+    repos, unlabelled_reply, fake_classifier,
+):
+    # Fix round 1 (review): the previous "already past SENT" test above
+    # starts AND ends at REPLIED, so it can't tell a guarded write
+    # (assert_transition + IllegalTransition caught) apart from an
+    # unconditional one (`outreach.state` written no matter what) - both
+    # leave the row at REPLIED either way. BOUNCED is a genuinely
+    # DIFFERENT terminal state: SENT -> REPLIED is illegal from BOUNCED
+    # too (`app.domain.states._LEGAL` has no BOUNCED -> REPLIED edge), so
+    # an unguarded write would visibly stamp REPLIED over a bounce - this
+    # is the case that actually distinguishes "guard present" from "guard
+    # missing".
+    repos.outreach.upsert(founder_id=unlabelled_reply.founder.id, state=str(S.BOUNCED))
+    fake_classifier.next = {"label": "INTERESTED", "confidence": 0.9, "rationale": "keen"}
+
+    result = ClassifyReply(fake_classifier, _repos(repos), _clock()).run()
+
+    assert result.classified == 1
+    row = repos.message.get(unlabelled_reply.message.id)
+    assert row.label == "INTERESTED"
+    # The load-bearing assertion: BOUNCED must survive untouched, never
+    # silently become REPLIED.
+    assert repos.outreach.get(unlabelled_reply.outreach.id).state == S.BOUNCED
+
+
 def test_limit_processes_only_that_many_rows(repos, two_unlabelled_replies, fake_classifier):
     fake_classifier.next = {"label": "UNCLEAR", "confidence": 0.3, "rationale": "short"}
     result = ClassifyReply(fake_classifier, _repos(repos), _clock()).run(limit=1)

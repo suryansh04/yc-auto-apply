@@ -11,8 +11,8 @@ import httpx
 import pytest
 import respx
 
-from app.adapters.gemini import CLASSIFY_SCHEMA, GeminiReplyClassifier, build_classify_prompt
-from app.adapters.sarvam import REPLY_CLASSIFICATION_JSON_SCHEMA, SarvamReplyClassifier
+from app.adapters.gemini import GeminiReplyClassifier, build_classify_prompt
+from app.adapters.sarvam import SarvamReplyClassifier
 from app.domain.replies import LABELS
 from tests.adapters.test_gemini import FakeGenAIClient, _config_as_dict
 
@@ -50,11 +50,6 @@ def test_gemini_classifier_requests_structured_json_with_the_three_field_schema(
         assert field in schema
     for label in LABELS:
         assert label in schema
-
-
-def test_gemini_classifier_schema_matches_the_module_constant():
-    assert CLASSIFY_SCHEMA["required"] == ["label", "confidence", "rationale"]
-    assert set(CLASSIFY_SCHEMA["properties"]["label"]["enum"]) == set(LABELS)
 
 
 def test_gemini_classifier_temperature_is_zero_for_determinism():
@@ -157,11 +152,6 @@ def test_sarvam_classifier_requests_strict_json_schema_with_the_label_enum():
     assert schema["required"] == ["label", "confidence", "rationale"]
     assert schema["additionalProperties"] is False
     assert body["temperature"] == 0
-
-
-def test_sarvam_classifier_schema_matches_the_module_constant():
-    assert REPLY_CLASSIFICATION_JSON_SCHEMA["required"] == ["label", "confidence", "rationale"]
-    assert set(REPLY_CLASSIFICATION_JSON_SCHEMA["properties"]["label"]["enum"]) == set(LABELS)
 
 
 @respx.mock

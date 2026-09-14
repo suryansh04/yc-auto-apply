@@ -63,6 +63,7 @@ from tests.fakes_repos import (
     FakeRepos,
     FakeResumeProfileRepo,
     FakeSession,
+    FakeSettingsRepo,
     _add_founder_with_draft,
     _add_pending_founder,
 )
@@ -86,6 +87,7 @@ def repos() -> FakeRepos:
         job=FakeJobRepo(),
         session=FakeSession(),
         credential=FakeCredentialRepo(),
+        settings=FakeSettingsRepo(),
     )
     # deepcopy (Task 16 fix round 1): a test that flips a claim's `span_verified`
     # in place must not leak into the module-level RESUME_CLAIMS.
@@ -936,6 +938,75 @@ def two_unlabelled_replies(repos: FakeRepos):
         )
         replies.append(reply)
     return tuple(replies)
+
+
+# --- Task 10 fixtures: thread view / label correction -------------------------
+
+
+@pytest.fixture
+def thread_with_reply(repos: FakeRepos):
+    """One `SENT` outreach with a step-0 outbound send and one unlabelled
+    inbound reply, both carrying the same Gmail thread id — the base case
+    `GET /api/outreach/{id}/thread` renders and `POST
+    /api/messages/{id}/label` corrects. `.outreach` / `.founder` /
+    `.reply` (the inbound message row) / `.thread_id`."""
+    from types import SimpleNamespace
+
+    repos.company.add(id=400, domain="qux.io", name="Qux")
+    founder = repos.founder.add(id=400, company_id=400, full_name="Nisha Founder")
+    outreach = repos.outreach.add(id=400, founder_id=founder.id, state=str(OutreachState.SENT))
+    outreach.resolved_email = "nisha@qux.io"
+    outreach.sequence_step = 0
+    outreach.next_action_at = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="outbound",
+        subject="Backend intern at Qux", body="You're building things at Qux. Intern?",
+        gmail_message_id="sent-400", gmail_thread_id="thread-400",
+        approved_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        sent_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    reply = repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="inbound",
+        subject="Re: Backend intern at Qux", body="Tell me more, please.",
+        gmail_message_id="reply-400", gmail_thread_id="thread-400",
+        received_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+    )
+    return SimpleNamespace(outreach=outreach, founder=founder, reply=reply, thread_id="thread-400")
+
+
+@pytest.fixture
+def thread_with_auto_reply(repos: FakeRepos):
+    """One `SENT` outreach whose inbound reply was already (mis)classified
+    `AUTO_REPLY` — the base case for the "correcting a machine label to a
+    human one cancels the sequence" test (brief step 1's
+    `test_correcting_to_a_human_label_cancels_follow_ups`): the machine
+    label never transitioned the outreach (spec §5's central rule), so
+    `next_action_at` is still the pending follow-up a correct human label
+    must clear. `.outreach` / `.founder` / `.reply`."""
+    from types import SimpleNamespace
+
+    repos.company.add(id=401, domain="quux.io", name="Quux")
+    founder = repos.founder.add(id=401, company_id=401, full_name="Omar Founder")
+    outreach = repos.outreach.add(id=401, founder_id=founder.id, state=str(OutreachState.SENT))
+    outreach.resolved_email = "omar@quux.io"
+    outreach.sequence_step = 0
+    outreach.next_action_at = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="outbound",
+        subject="Backend intern at Quux", body="You're building things at Quux. Intern?",
+        gmail_message_id="sent-401", gmail_thread_id="thread-401",
+        approved_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        sent_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    reply = repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="inbound",
+        subject="Re: Backend intern at Quux", body="I'm out of office until next week.",
+        gmail_message_id="reply-401", gmail_thread_id="thread-401",
+        received_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+        label="AUTO_REPLY", confidence=0.8, rationale="autoresponder",
+        classified_at=datetime(2026, 9, 2, 1, tzinfo=timezone.utc),
+    )
+    return SimpleNamespace(outreach=outreach, founder=founder, reply=reply, thread_id="thread-401")
 
 
 @pytest.fixture

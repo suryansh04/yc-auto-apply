@@ -63,6 +63,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
+    AppSettings,
     Company,
     CompanyLaunch,
     CompanyNews,
@@ -663,3 +664,22 @@ class JobRepo:
         return list(self._session.scalars(
             select(Job).order_by(Job.id.desc()).limit(limit)
         ))
+
+
+# --- Added in Task 10 (spec §7, T9-1): the one-row `settings` table -
+# `followup_day_1`/`followup_day_2`, the source `ClassifyReply.apply_label`'s
+# restore path (a human label hand-corrected back to a machine one) reads
+# the follow-up interval from, falling back to `SendApproved`'s own
+# defaults (5/12 days) when there is no row yet.
+
+
+class SettingsRepo:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get(self) -> AppSettings | None:
+        """The single `settings` row (spec §7 describes it as a singleton
+        operator-configured table), or `None` before an operator has ever
+        saved one - callers fall back to their own defaults rather than
+        this repo inventing one."""
+        return self.session.execute(select(AppSettings)).scalars().first()

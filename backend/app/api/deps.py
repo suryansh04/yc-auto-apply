@@ -37,6 +37,12 @@ class Repos:
     resume_profile: Any
     job: Any
     session: Any
+    # Task 10: the `settings` table's `followup_day_1`/`followup_day_2` -
+    # `app.api.routers.thread` reads it (via `ClassifyRepos.settings`) for
+    # T9-1's next_action_at restore. Defaults to `None` for every call site
+    # built before Task 10; `ClassifyReply` already falls back cleanly when
+    # it is.
+    settings: Any = None
     # Task 5: a pre-built `MailSender`, present only when a caller injected
     # one (the test harness's `fake_sender` fixture). `None` in production -
     # `app.api.routers.send` builds a real `GmailSender` itself, gated by
@@ -81,6 +87,7 @@ def real_repos(session_factory: Callable[[], Session] = _session) -> Iterator[Re
         MessageRepo,
         OutreachRepo,
         ResumeProfileRepo,
+        SettingsRepo,
     )
 
     session = session_factory()
@@ -97,6 +104,7 @@ def real_repos(session_factory: Callable[[], Session] = _session) -> Iterator[Re
             resume_profile=ResumeProfileRepo(session),
             job=JobRepo(session),
             session=session,
+            settings=SettingsRepo(session),
         )
     finally:
         session.close()

@@ -267,6 +267,10 @@ class Message(Base):
     confidence: Mapped[float | None]
     rationale: Mapped[str | None] = mapped_column(String(300))
     classified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Task 10: True only once an operator has hand-corrected this row's
+    # label via POST /api/messages/{id}/label - never set by the automatic
+    # classifier (ClassifyReply._classify_one never passes corrected=True).
+    corrected: Mapped[bool] = mapped_column(default=False)
 
     outreach: Mapped["Outreach"] = relationship(back_populates="messages")
 

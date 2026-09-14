@@ -396,6 +396,7 @@ class FakeMessageRow:
     confidence: float | None = None
     rationale: str | None = None
     classified_at: object = None
+    corrected: bool = False           # Task 10: True only via an operator's hand correction
 
 
 class FakeMessageRepo:
@@ -709,6 +710,34 @@ class FakeJobRepo:
 
 
 @dataclass
+class FakeSettingsRow:
+    """Task 10: mirrors the `settings` table's shape (spec §7) — just the
+    two fields `ClassifyReply.apply_label`'s T9-1 restore path reads.
+    `None` on either field means "not configured", the same as a real
+    `AppSettings` row with a NULL column — the caller falls back to its
+    own default (5/12 days), never this row inventing one."""
+
+    followup_day_1: int | None = None
+    followup_day_2: int | None = None
+
+
+class FakeSettingsRepo:
+    """Mirrors `SettingsRepo`: `.get()` returns the single row, or `None`
+    before a test ever calls `.set(...)` — the same "no row yet" case a
+    real, never-configured `settings` table produces."""
+
+    def __init__(self):
+        self._row: FakeSettingsRow | None = None
+
+    def get(self) -> FakeSettingsRow | None:
+        return self._row
+
+    def set(self, followup_day_1: int | None = None, followup_day_2: int | None = None) -> FakeSettingsRow:
+        self._row = FakeSettingsRow(followup_day_1=followup_day_1, followup_day_2=followup_day_2)
+        return self._row
+
+
+@dataclass
 class FakeRepos:
     """Structural superset of `ResolveRepos` (Task 12), `DraftRepos`
     (Task 14), `SendRepos` (Task 15), `ReviewRepos` (Task 16) and — since
@@ -727,6 +756,7 @@ class FakeRepos:
     job: FakeJobRepo
     session: FakeSession
     credential: FakeCredentialRepo = None  # Task 8: default so pre-Task-8 FakeRepos(...) call sites still work
+    settings: FakeSettingsRepo = None  # Task 10: default so pre-Task-10 FakeRepos(...) call sites still work
 
 
 RESUME_CLAIMS = [

@@ -134,6 +134,57 @@ class SendResultOut(BaseModel):
     errors: int
 
 
+class MessageOut(BaseModel):
+    """Task 10: one message row in a thread's timeline — outbound (an
+    outreach step we sent) or inbound (a founder's reply). `label`/
+    `confidence`/`rationale` are `None` on every outbound row and on an
+    inbound row `ClassifyReply` hasn't classified yet. `corrected` is
+    `True` only once an operator has hand-corrected this row's label via
+    `POST /api/messages/{id}/label` — never set by the automatic
+    classifier — so the browser (Task 17) can show which labels are the
+    model's own and which an operator overrode."""
+
+    id: int
+    direction: str
+    sequence_step: int
+    subject: str | None = None
+    body: str
+    sent_at: datetime | None = None
+    received_at: datetime | None = None
+    label: str | None = None
+    confidence: float | None = None
+    rationale: str | None = None
+    corrected: bool = False
+
+
+class ThreadOut(BaseModel):
+    """Task 10: the operator's whole-conversation read view for one
+    outreach — `GET /api/outreach/{id}/thread`. `messages` is every
+    outbound and inbound row for the outreach, in time order (outbound
+    sorted by `sent_at`, inbound by `received_at`) so the browser can
+    render it as a single timeline with no client-side merge/sort logic.
+    `gmail_url` is a deep link into the operator's own Gmail
+    (`https://mail.google.com/mail/u/0/#inbox/<thread_id>`), `None` only
+    when no message in the thread carries a Gmail thread id yet (e.g. a
+    draft that was never sent)."""
+
+    outreach_id: int
+    company_name: str | None = None
+    founder_name: str | None = None
+    to: str | None = None
+    state: str
+    gmail_url: str | None = None
+    messages: list[MessageOut]
+
+
+class LabelCorrectionIn(BaseModel):
+    """Body of `POST /api/messages/{id}/label`: the operator's corrected
+    label — validated against `app.domain.replies.LABELS` by the router
+    (422 on anything else, spec's six labels only)."""
+
+    label: str
+
+
 class ContactOut(BaseModel):
     """Task 5: one company/founder pair for the browser's contacts list -
     every outreach row, unfiltered by default (D19: `hiring` is a view

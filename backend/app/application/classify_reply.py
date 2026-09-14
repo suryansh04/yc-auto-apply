@@ -72,16 +72,53 @@ Order of operations per run:
    crash mid-run keeps whatever was already written, and the next run's
    `list_unclassified_inbound()` picks up exactly where this one left off
    — nothing here is re-processed or double-counted.
+
+`apply_label` (Task 10, ruling T9-1) is the extraction of point 6 above
+into its own method: the ONE place a label's classification (human vs.
+machine, `cancels_sequence`) is turned into an outreach transition. It is
+shared, unchanged, by two callers:
+
+- `_classify_one` (this module, automatic): `message.label` is always
+  `None` beforehand (only `list_unclassified_inbound()` rows reach it), so
+  the only transition it can ever trigger is machine/none -> human
+  (`SENT -> REPLIED`).
+- `app.api.routers.thread`'s `POST /api/messages/{id}/label` (manual,
+  Task 10): `message.label` is whatever it was before — a fresh
+  classification OR an earlier correction — so a correction can go either
+  direction:
+  - human -> machine (T9-1, reachable ONLY from this path): the operator
+    fixed a false positive (the classifier mistook, say, an
+    out-of-office for `INTERESTED`, which had already cancelled the
+    founder's follow-ups). `REPLIED -> SENT`, with `next_action_at`
+    RESTORED — never left `None` — recomputed from the last outbound
+    message's `sent_at` plus the follow-up interval for the next
+    sequence step (`followup_day_1`/`followup_day_2`, read from the
+    `settings` table via `ClassifyRepos.settings`, falling back to 5/12
+    exactly as `SendApproved` does for `followup_day_1`).
+  - machine -> human: cancels the sequence exactly as the automatic path
+    does — `SENT -> REPLIED`.
+  - human -> human / machine -> machine: only the label text changes; the
+    outreach's state is left alone.
+
+  An outreach that is not in the state the needed transition requires
+  (e.g. a correction on a `BOUNCED` or already-corrected-twice outreach)
+  is never corrupted: `assert_transition`'s refusal is swallowed exactly
+  the way point 7 above already swallows it for the automatic path — the
+  label itself still changes, the state does not.
 """
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Protocol
 
 from app.domain.replies import LABELS, cancels_sequence
 from app.domain.states import IllegalTransition, OutreachState, assert_transition
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_FOLLOWUP_DAY_1 = 5   # spec §7 settings default — mirrors `send_approved.py`
+_DEFAULT_FOLLOWUP_DAY_2 = 12  # spec §7 settings default
 
 
 @dataclass
@@ -107,14 +144,25 @@ class _Committable(Protocol):
     def commit(self) -> None: ...
 
 
+class _SettingsRepo(Protocol):
+    def get(self): ...
+
+
 @dataclass
 class ClassifyRepos:
     """What `ClassifyReply` needs — same two-repos-plus-session shape as
-    `PollRepos` (Task 8)."""
+    `PollRepos` (Task 8), plus `settings` (Task 10, optional): the
+    `followup_day_1`/`followup_day_2` source `apply_label`'s T9-1 restore
+    path reads. Optional (defaults to `None`) so every existing call site
+    that built a `ClassifyRepos` before Task 10 — this module's own
+    automatic path never needs it — keeps working unchanged; a `None`
+    settings repo (or a settings row with a `None` field) just falls back
+    to the same defaults `SendApproved` uses for `followup_day_1`."""
 
     message: _MessageRepo
     outreach: _OutreachRepo
     session: _Committable
+    settings: _SettingsRepo | None = None
 
 
 def _normalise_label(raw_label) -> str:
@@ -149,7 +197,6 @@ class ClassifyReply:
         return result
 
     def _classify_one(self, row, result: ClassifyResult) -> None:
-        outreach = self._repos.outreach.get(row.outreach_id)
         our_message = self._repos.message.get_outbound(row.outreach_id, row.sequence_step)
         context = {
             "our_message": getattr(our_message, "body", "") or "",
@@ -171,21 +218,55 @@ class ClassifyReply:
         confidence = raw.get("confidence") if isinstance(raw, dict) else None
         rationale = raw.get("rationale") if isinstance(raw, dict) else None
 
-        self._repos.message.upsert(
-            id=row.id,
-            label=label,
-            confidence=confidence,
-            rationale=rationale,
-            classified_at=self._clock.now(),
+        transitioned = self.apply_label(
+            row, label, confidence=confidence, rationale=rationale, classified_at=self._clock.now(),
         )
         result.classified += 1
 
-        if cancels_sequence(label) and outreach is not None and self._mark_replied(outreach):
+        if cancels_sequence(label) and transitioned:
             result.replied += 1
         else:
             result.ignored += 1
 
         self._repos.session.commit()
+
+    def apply_label(self, message, label: str, corrected: bool = False, **extra_fields) -> bool:
+        """Persist `label` on `message` and apply everything that follows
+        from it to the parent outreach — the ONE place a label's
+        consequence is decided (point 6 of the module docstring), shared
+        by `_classify_one` (automatic) and Task 10's manual correction
+        route so the two can never drift.
+
+        `corrected` (Task 10) is stamped on the message row's own
+        `corrected` column, never reinterpreted here — it is what tells
+        the thread view a label came from an operator's hand, not the
+        classifier. `**extra_fields` (`confidence`/`rationale`/
+        `classified_at`) are passed straight through to `upsert`, exactly
+        as `_classify_one` always wrote them; the manual correction path
+        passes none of these, so upsert's "only set what's given"
+        semantics leave a message's original confidence/rationale/
+        classified_at untouched by a later hand correction.
+
+        Returns whether a state transition actually happened — `True` only
+        when the outreach moved (`_mark_replied`/`_restore_sent` each
+        return `False` when the needed `assert_transition` is illegal, or
+        when the old and new label are in the same bucket and no
+        transition was ever attempted)."""
+        previous_label = message.label
+        self._repos.message.upsert(id=message.id, label=label, corrected=corrected, **extra_fields)
+
+        outreach = self._repos.outreach.get(message.outreach_id)
+        if outreach is None:
+            return False
+
+        was_human = previous_label is not None and cancels_sequence(previous_label)
+        is_human = cancels_sequence(label)
+
+        if is_human and not was_human:
+            return self._mark_replied(outreach)
+        if was_human and not is_human:
+            return self._restore_sent(outreach, message)
+        return False
 
     def _mark_replied(self, outreach) -> bool:
         """`SENT -> REPLIED` through `assert_transition`, clearing
@@ -207,3 +288,64 @@ class ClassifyReply:
             next_action_at=None,
         )
         return True
+
+    def _restore_sent(self, outreach, message) -> bool:
+        """T9-1: the reverse of `_mark_replied` — reachable ONLY when an
+        operator corrects a human label to a machine one (Task 10). The
+        classifier will eventually mistake an out-of-office for
+        `INTERESTED`, which cancels the founder's remaining follow-ups;
+        this is what undoes that consequence, not just the label text.
+
+        `REPLIED -> SENT` through `assert_transition`; an outreach that is
+        not `REPLIED` (a second correction, or a terminal state such as
+        `BOUNCED`) makes this illegal — swallowed exactly like
+        `_mark_replied` does: the label itself still changed, the state is
+        left exactly as it was, never corrupted.
+
+        `next_action_at` is RESTORED, never left `None` — a null
+        `next_action_at` here would silently drop the founder from the
+        follow-up sequence forever, the exact failure T9-1 exists to
+        prevent — recomputed as the last outbound message's `sent_at` plus
+        the follow-up interval for the next sequence step."""
+        try:
+            assert_transition(OutreachState(outreach.state), OutreachState.SENT)
+        except IllegalTransition:
+            logger.warning(
+                "classify_reply: outreach %s is %s, not REPLIED — label corrected, "
+                "state left unchanged", outreach.id, outreach.state,
+            )
+            return False
+
+        last_outbound = self._repos.message.get_outbound(outreach.id, outreach.sequence_step)
+        self._repos.outreach.upsert(
+            founder_id=outreach.founder_id,
+            state=str(OutreachState.SENT),
+            next_action_at=self._next_action_at(outreach, last_outbound),
+        )
+        return True
+
+    def _next_action_at(self, outreach, last_outbound):
+        """The last outbound message's `sent_at` plus the follow-up
+        interval for the NEXT sequence step (`outreach.sequence_step + 1`
+        — the step that hasn't gone out yet). `None` when there is no
+        outbound `sent_at` to anchor to, or no further follow-up step
+        defined (Phase 1/2 define exactly two: step 1 at +5 days, step 2 at
+        +12 days) — never guessed."""
+        if last_outbound is None or last_outbound.sent_at is None:
+            return None
+        interval_days = self._followup_interval_days(outreach.sequence_step + 1)
+        if interval_days is None:
+            return None
+        return last_outbound.sent_at + timedelta(days=interval_days)
+
+    def _followup_interval_days(self, next_step: int) -> int | None:
+        """`followup_day_1`/`followup_day_2` from the `settings` table
+        (`ClassifyRepos.settings`), falling back to the same defaults
+        `SendApproved` uses for `followup_day_1` (spec §7) when there is no
+        settings repo, no row, or the row's field is `None`."""
+        settings_row = self._repos.settings.get() if self._repos.settings is not None else None
+        if next_step == 1:
+            return getattr(settings_row, "followup_day_1", None) or _DEFAULT_FOLLOWUP_DAY_1
+        if next_step == 2:
+            return getattr(settings_row, "followup_day_2", None) or _DEFAULT_FOLLOWUP_DAY_2
+        return None

@@ -37,6 +37,7 @@ from google.genai import types
 
 from app.domain.names import company_display_name
 from app.domain.replies import LABELS
+from app.domain.validation import FOLLOW_UP_WORD_TARGETS
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +208,18 @@ hesitate".
 
 Name the company once in the body (not only in the subject).
 
+FOLLOW-UPS: when the prompt below includes a THREAD SO FAR section, you are
+writing a follow-up, not a first email - the founder already saw an earlier
+note from you. Do not repeat what that note already said; assume they read
+it and refer back to it in half a sentence at most ("following up on ...",
+never a restatement of the whole hook). Hit the word target given for this
+step - it is lower than a first email's, on purpose, because a follow-up
+earns less of the founder's attention than the first message did, not more.
+The follow-up must end up shorter than the message before it, every time.
+If the thread already shows a reply from the founder (marked "they
+replied"), acknowledge what it said instead of writing as if nothing came
+back.
+
 OUTPUT: JSON with "subject" (three to six words, no emoji, no all-caps
 words, naming the company), "body" (plain text, no markdown, no HTML, NO
 greeting line and NO sign-off - those are added at send time), and
@@ -231,6 +244,15 @@ def _format_claims(claims: list[dict]) -> str:
     return "\n".join(lines) if lines else "- (none)"
 
 
+def _format_thread_history(history: list[dict]) -> str:
+    lines = []
+    for m in history:
+        who = "you sent" if m.get("direction") == "outbound" else "they replied"
+        body = str(m.get("body", "")).replace("\n", " ").strip()
+        lines.append(f"- [{who}, step {m.get('sequence_step')}]: {body}")
+    return "\n".join(lines) if lines else "- (none)"
+
+
 def build_draft_prompt(context: dict) -> str:
     company = context.get("company") or {}
     founder = context.get("founder") or {}
@@ -251,6 +273,23 @@ def build_draft_prompt(context: dict) -> str:
         "RESUME CLAIMS (the only things you may say about the sender)",
         _format_claims(context.get("claims") or []),
     ]
+    # Task 12: a follow-up (sequence_step > 0) gets its own section naming
+    # the word target for this step and showing the thread so far — a
+    # first email (step 0, or a context with no `sequence_step` at all)
+    # gets neither, so `build_draft_prompt` renders identically to before
+    # this task for step-0 calls.
+    step = int(context.get("sequence_step") or 0)
+    if step > 0:
+        target = FOLLOW_UP_WORD_TARGETS.get(step, min(FOLLOW_UP_WORD_TARGETS.values()))
+        parts += [
+            "",
+            f"THIS IS A FOLLOW-UP (step {step}). Do not repeat the earlier note - refer",
+            "to it briefly instead. Target about "
+            f"{target} words this time; it must end up shorter than the message before it.",
+            "",
+            "THREAD SO FAR",
+            _format_thread_history(context.get("thread_history") or []),
+        ]
     errors = context.get("validation_errors")
     if errors:
         previous = context.get("previous_draft") or {}

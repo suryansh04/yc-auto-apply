@@ -77,6 +77,7 @@ about the sender.
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Protocol
 
 from app.domain.entities import Draft, ResumeClaim
@@ -119,6 +120,7 @@ class _UpsertRepo(Protocol):
 class _MessageRepo(Protocol):
     def upsert(self, **fields): ...
     def get_outbound(self, outreach_id: int, sequence_step: int): ...
+    def list_by_outreach(self, outreach_id: int): ...
 
 
 class _ProfileRepo(Protocol):
@@ -194,6 +196,7 @@ class DraftOutreach:
                 "available_sources": sources.offered,
                 "claims": [{"kind": c.kind, "text": c.text} for c in claims],
                 "sequence_step": step,
+                "thread_history": self._thread_history(outreach, step),
             }
             # Fix round 1 (F4): facts about *them* that the prompt hands the
             # model, so the claims rule must not treat them as fabrications.
@@ -259,6 +262,33 @@ class DraftOutreach:
             return None
         previous = self._repos.message.get_outbound(outreach.id, step - 1)
         return getattr(previous, "body", None) if previous is not None else None
+
+    def _thread_history(self, outreach, step: int) -> list[dict]:
+        """Task 12: what a follow-up's prompt is shown of the thread so
+        far — every prior OUTBOUND step (never the one being drafted right
+        now, so a redraft of the same step doesn't quote itself back at the
+        model) plus every INBOUND reply regardless of step, because an
+        auto-reply may have landed on the thread and the model should know
+        the founder (or their inbox) already said something back. A first
+        email (`step == 0`) has nothing before it — empty, no LLM call
+        wasted building it."""
+        if step <= 0:
+            return []
+        messages = self._repos.message.list_by_outreach(outreach.id)
+        relevant = [
+            m for m in messages
+            if m.direction == "inbound" or (m.direction == "outbound" and m.sequence_step < step)
+        ]
+        ordered = sorted(relevant, key=_message_sort_key)
+        return [
+            {
+                "direction": m.direction,
+                "sequence_step": m.sequence_step,
+                "subject": getattr(m, "subject", None),
+                "body": m.body,
+            }
+            for m in ordered
+        ]
 
     def _build_sources(self, company) -> _Sources:
         return build_sources(self._repos.news, self._repos.launch, self._repos.job_posting, company)
@@ -352,6 +382,24 @@ def build_sources(news_repo, launch_repo, job_posting_repo, company) -> _Sources
         s.resolvable[("long_description", company.id)] = SourceRow("long_description", desc, None, None)
 
     return s
+
+
+_EPOCH = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _message_sort_key(message) -> datetime:
+    """Chronological order for `thread_history`: outbound rows are
+    timestamped by `sent_at`, inbound rows by `received_at` (mirrors
+    `app.api.routers.thread._sort_key`). Falls back to the epoch, and
+    normalises a naive datetime to UTC, so a row missing its timestamp (or
+    a fake row built without tzinfo) sorts first rather than raising a
+    naive/aware comparison error."""
+    ts = getattr(message, "sent_at", None) or getattr(message, "received_at", None)
+    if ts is None:
+        return _EPOCH
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
 
 
 def _to_draft(raw: dict, step: int) -> Draft:

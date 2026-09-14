@@ -18,6 +18,20 @@ MIN_PARAGRAPHS = 2
 MAX_SENTENCES_PER_PARAGRAPH = 3
 MAX_EM_DASHES = 2
 
+# Task 12 (spec §6): a follow-up is not just "shorter than the previous
+# message" (that rule predates this task — see PF-3) but shorter on a
+# shrinking schedule, one target per step, so the prompt can tell the model
+# a concrete number instead of a vague "be brief". Step 1 (the first
+# follow-up) allows more room than step 2 (the second/last), matching the
+# existing shrink-rule's invariant that each step must be shorter than the
+# one before it.
+FOLLOW_UP_WORD_TARGETS = {1: 60, 2: 40}
+
+# The near-restatement threshold reuses the exact ratio the one_liner-echo
+# check below already uses (`hook overlaps more than 60% with one_liner`) —
+# one shared notion of "too similar", not a second bespoke number.
+FOLLOW_UP_RESTATEMENT_OVERLAP = 0.6
+
 BANNED_PHRASES = [
     "i hope this email finds you well", "i am reaching out", "reaching out",
     "passionate about", "leverage", "synergy", "game-changing",
@@ -119,6 +133,17 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
     if draft.sequence_step > 0 and previous_body is not None:
         if len(_words(body)) >= len(_words(previous_body)):
             errs.append("follow-up is not shorter than the previous message")
+        else:
+            # Task 12: shorter is not the same as different. A trimmed-down
+            # copy of the previous message is still shorter by word count
+            # but moves the thread nowhere — reject it the same way the
+            # one_liner-echo check below rejects a hook that just parrots
+            # the one_liner back, by term overlap rather than a second
+            # from-scratch similarity metric (PF-3).
+            body_terms = _terms(body)
+            prev_terms = _terms(previous_body)
+            if body_terms and len(body_terms & prev_terms) / len(body_terms) > FOLLOW_UP_RESTATEMENT_OVERLAP:
+                errs.append("follow-up restates the previous message instead of moving the thread forward")
 
     return errs
 

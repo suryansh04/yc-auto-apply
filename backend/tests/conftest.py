@@ -1242,3 +1242,32 @@ def approved_follow_up(repos: FakeRepos):
         subject="step 1 follow-up", body="follow-up body", approved_at=_NOW,
     )
     return SimpleNamespace(outreach=outreach, founder=founder, message=message)
+
+
+# --- Task 12 fixtures ---------------------------------------------------------
+
+
+@pytest.fixture
+def ready_follow_up(repos: FakeRepos) -> SimpleNamespace:
+    """Madhav at a Vahan-shaped company (id=515, same id-reuse convention as
+    `_add_pending_founder`), `READY_TO_DRAFT` at `sequence_step=1` — the
+    step-0 email (`PENDING_BODY`, the task-14 body that already validates
+    against `VAHAN_NEWS` + the one resume claim) went out 5 days ago and no
+    reply has arrived. `.outreach` / `.founder`."""
+    id = 515
+    repos.company.add(id=id, domain=f"vahan{id}.ai", name="Vahan",
+                      one_liner="Recruitment over voice", long_description=VAHAN_DESCRIPTION)
+    founder = repos.founder.add(id=id, company_id=id, full_name="Madhav Krishna", title="Founder")
+    outreach = repos.outreach.add(id=id, founder_id=founder.id, state=str(OutreachState.READY_TO_DRAFT))
+    outreach.resolved_email = f"founder{id}@example.com"
+    outreach.sequence_step = 1
+    repos.news.add(id=id, company_id=id, title=VAHAN_NEWS, source="The Economic Times")
+    sent_at = _NOW - timedelta(days=5)
+    repos.message.upsert(
+        outreach_id=outreach.id, sequence_step=0, direction="outbound",
+        subject=PENDING_SUBJECT, body=PENDING_BODY,
+        research_source_type="news", research_source_id=id,
+        approved_at=sent_at, sent_at=sent_at,
+        gmail_message_id=f"sent-{id}-0", gmail_thread_id=f"thread-{id}",
+    )
+    return SimpleNamespace(outreach=outreach, founder=founder)

@@ -1,12 +1,7 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
-import { setupServer } from 'msw/node'
+import { server } from '../test/server'
 import { ApiError, apiGet, apiPost } from './client'
-
-const server = setupServer()
-beforeAll(() => server.listen())
-afterEach(() => server.resetHandlers())
-afterAll(() => server.close())
 
 it('returns parsed JSON on success', async () => {
   server.use(http.get('/api/stats', () => HttpResponse.json({ counts: { new: 2 } })))

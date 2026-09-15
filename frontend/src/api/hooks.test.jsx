@@ -2,7 +2,7 @@
 // component calls useApprove() and, on success, both the queue and stats
 // queries it invalidates are refetched (proven by a second GET landing at
 // the mock server, and the on-screen queue count updating).
-import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { waitFor, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -10,10 +10,8 @@ import { server } from '../test/server'
 import { renderWithQuery } from '../test/render'
 import { useApprove, useQueue, useStats } from './hooks'
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
-afterEach(() => server.resetHandlers())
-afterAll(() => server.close())
-
+// server's listen/resetHandlers/close lifecycle is owned globally by
+// src/test/setup.js - this file only registers handlers via server.use().
 let queueGetCount = 0
 let statsGetCount = 0
 

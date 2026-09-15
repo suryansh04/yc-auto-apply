@@ -145,12 +145,22 @@ export function useStartJob() {
   })
 }
 
+/**
+ * POST /api/messages/{messageId}/label - corrects a reply's classified
+ * label (`app.api.routers.thread.correct_label`).
+ *
+ * `mutate({ messageId, label, threadId })` - `threadId` is REQUIRED even
+ * though the backend route takes no outreach/thread id: the response is a
+ * bare `OkOut` with nothing to invalidate by, so the caller (Task 17's
+ * thread screen, which already has the thread's id in scope from its own
+ * route param) must pass it through as a mutation variable purely so this
+ * hook knows which `['thread', id]` query to invalidate. Omitting it
+ * invalidates `['thread', undefined]`, which matches nothing.
+ */
 export function useSetLabel() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ messageId, label }) => apiPost(`/messages/${messageId}/label`, { label }),
-    // threadId is a caller-supplied mutation variable (the backend's
-    // OkOut response carries no outreach/thread id to invalidate by) -
     // onSuccess's second argument is always the variables object passed
     // to mutate(), per TanStack Query's mutation contract.
     onSuccess: (_data, { threadId }) => {

@@ -45,8 +45,24 @@ export function useManual() {
   return useQuery({ queryKey: ['manual'], queryFn: () => apiGet('/manual'), ...QUERY_DEFAULTS })
 }
 
+// Polls every 2s ONLY while at least one job in the last response is
+// `running` (Task 15's Pipeline screen needs live progress; every other
+// screen just wants the list). `refetchInterval` as a function is
+// re-evaluated after every fetch, so polling starts the moment a job
+// starts running and stops the moment the last one finishes - no separate
+// "am I still polling" state to track by hand.
+function jobsRefetchInterval(query) {
+  const jobs = query.state.data
+  return Array.isArray(jobs) && jobs.some((j) => j.status === 'running') ? 2000 : false
+}
+
 export function useJobs() {
-  return useQuery({ queryKey: ['jobs'], queryFn: () => apiGet('/jobs'), ...QUERY_DEFAULTS })
+  return useQuery({
+    queryKey: ['jobs'],
+    queryFn: () => apiGet('/jobs'),
+    refetchInterval: jobsRefetchInterval,
+    ...QUERY_DEFAULTS,
+  })
 }
 
 function contactsQueryString(filters = {}) {

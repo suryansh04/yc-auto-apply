@@ -10,8 +10,18 @@
 // generic network error.
 import '@testing-library/jest-dom/vitest'
 import { afterAll, afterEach, beforeAll } from 'vitest'
+import { cleanup } from '@testing-library/react'
 import { server } from './server'
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
+
+// vite.config.js sets test.globals: false, so @testing-library/react's own
+// auto-cleanup (which only registers when it finds a *global* afterEach)
+// never fires. Without this, a screen test file with more than one
+// render() call per file leaks the previous test's DOM into the next
+// test - "Found multiple elements" failures that have nothing to do with
+// the component under test. Task 15's Pipeline.test.jsx is the first file
+// with multiple full renders per file, which is what surfaced this.
+afterEach(() => cleanup())

@@ -13,3 +13,60 @@ body {
 nav a {
   margin-right: 1rem;
 }
+
+/* Task 15's Pipeline screen. Dense, information-first, hand-written -
+   real tables, one accent colour, no card grids. Task 18 does the full
+   visual pass; this just keeps the screen legible until then. */
+:root {
+  --accent: #2a5adf;
+  --danger: #b3261e;
+}
+
+table {
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+}
+
+th,
+td {
+  padding: 0.25rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #ddd;
+}
+
+td.count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+tr.is-action-queue th {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.job-button:disabled {
+  opacity: 0.6;
+}
+
+.job-status-running {
+  color: var(--accent);
+}
+
+.job-status-failed {
+  color: var(--danger);
+}
+
+.job-status-none {
+  color: #888;
+}
+
+.banner {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  border-left: 3px solid var(--accent);
+}
+
+.banner-error {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}

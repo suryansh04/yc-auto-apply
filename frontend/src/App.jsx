@@ -1,8 +1,10 @@
 import { Link, Route, Routes } from 'react-router-dom'
+import Pipeline from './screens/Pipeline'
 
-// Router shell only - Tasks 15-17 fill these routes in. Spec §16's four
-// screens plus the manual-email screen Task 17 adds:
-//   Pipeline     -> GET /api/stats                              (Task 15)
+// Router shell. Task 15 fills in Pipeline; the rest are still placeholders
+// for Tasks 16-17. Spec §16's four screens plus the manual-email screen
+// Task 17 adds:
+//   Pipeline     -> GET /api/stats, /api/jobs, POST /api/jobs/{kind} (Task 15, done)
 //   Review Queue -> GET /api/queue, approve/edit/reject/redraft (Task 15)
 //   Contacts     -> GET /api/contacts                            (Task 17)
 //   Thread       -> GET /api/outreach/{id}/thread, POST /api/messages/{id}/label (Task 17)
@@ -22,7 +24,7 @@ function App() {
         <Link to="/manual">Manual email</Link>
       </nav>
       <Routes>
-        <Route path="/" element={<Placeholder name="Pipeline" />} />
+        <Route path="/" element={<Pipeline />} />
         <Route path="/queue" element={<Placeholder name="Review Queue" />} />
         <Route path="/contacts" element={<Placeholder name="Contacts" />} />
         <Route path="/thread/:id" element={<Placeholder name="Thread" />} />

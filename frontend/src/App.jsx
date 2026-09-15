@@ -1,5 +1,6 @@
 import { Link, Route, Routes } from 'react-router-dom'
 import Pipeline from './screens/Pipeline'
+import ReviewQueue from './screens/ReviewQueue'
 
 // Router shell. Task 15 fills in Pipeline; the rest are still placeholders
 // for Tasks 16-17. Spec §16's four screens plus the manual-email screen
@@ -25,7 +26,7 @@ function App() {
       </nav>
       <Routes>
         <Route path="/" element={<Pipeline />} />
-        <Route path="/queue" element={<Placeholder name="Review Queue" />} />
+        <Route path="/queue" element={<ReviewQueue />} />
         <Route path="/contacts" element={<Placeholder name="Contacts" />} />
         <Route path="/thread/:id" element={<Placeholder name="Thread" />} />
         <Route path="/manual" element={<Placeholder name="Manual email" />} />

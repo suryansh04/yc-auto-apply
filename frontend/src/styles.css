@@ -1,0 +1,15 @@
+/* Placeholder global stylesheet. Screens (Tasks 15-17) build their own
+   styling; this just resets the obvious defaults so the empty route shell
+   doesn't look broken during development. */
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+nav a {
+  margin-right: 1rem;
+}

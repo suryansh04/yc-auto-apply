@@ -480,6 +480,9 @@ CRITIC_SCHEMA: dict[str, Any] = {
         "verdict": {"type": "STRING", "enum": ["PASS", "NEEDS_REVISION"]},
         "concerns": {
             "type": "ARRAY",
+            # spec: "0-3 items" — enforced structurally, not just by
+            # instruction (fix round 1, review item #5).
+            "maxItems": 3,
             "items": {
                 "type": "OBJECT",
                 "properties": {

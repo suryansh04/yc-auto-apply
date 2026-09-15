@@ -102,6 +102,14 @@ def test_gemini_critic_raises_on_non_json_output():
         GeminiCritic(client, model=MODEL).critique(DRAFT)
 
 
+def test_gemini_critic_schema_bounds_concerns_to_at_most_three():
+    # Fix round 1 (review item #5): the spec's "0-3 items" was previously
+    # enforced only by prompt instruction, not structurally.
+    from app.adapters.gemini import CRITIC_SCHEMA
+
+    assert CRITIC_SCHEMA["properties"]["concerns"]["maxItems"] == 3
+
+
 def test_build_critic_prompt_is_shared_verbatim_with_sarvam():
     from app.adapters import sarvam
 
@@ -156,6 +164,14 @@ def test_sarvam_critic_requests_strict_json_schema_with_the_verdict_enum():
     assert schema["required"] == ["verdict", "concerns", "overall_note"]
     assert schema["additionalProperties"] is False
     assert body["temperature"] == 0
+
+
+def test_sarvam_critic_schema_bounds_concerns_to_at_most_three():
+    # Fix round 1 (review item #5): Sarvam's strict mode actually enforces
+    # this server-side, unlike a prompt-only instruction.
+    from app.adapters.sarvam import CRITIC_JSON_SCHEMA
+
+    assert CRITIC_JSON_SCHEMA["properties"]["concerns"]["maxItems"] == 3
 
 
 @respx.mock
@@ -248,11 +264,21 @@ def test_build_critic_gemini_requires_the_api_key():
 
 
 def test_neither_adapter_hardcodes_a_model_id():
-    # D13: the model id is configuration, never code. Greps this file's own
-    # adapter module for a literal Gemini/Sarvam model string.
+    # D13: the model id is configuration, never code. Greps BOTH adapter
+    # classes' own source for a literal Gemini/Sarvam model string — fix
+    # round 1 (review item #4): the original version of this test only
+    # inspected `GeminiCritic`, despite its name promising "neither".
     import inspect
 
     import app.adapters.gemini as gemini_mod
+    import app.adapters.sarvam as sarvam_mod
 
-    source = inspect.getsource(gemini_mod.GeminiCritic)
-    assert "gemini-" not in source.lower()
+    gemini_source = inspect.getsource(gemini_mod.GeminiCritic)
+    assert "gemini-" not in gemini_source.lower()
+
+    sarvam_source = inspect.getsource(sarvam_mod.SarvamCritic)
+    # `SarvamCritic`'s own class body never writes a Sarvam model id
+    # literal — its default comes from the shared `DEFAULT_MODEL` module
+    # constant it takes as a parameter default, not from a string baked
+    # into the class body itself.
+    assert "sarvam-105b" not in sarvam_source.lower()

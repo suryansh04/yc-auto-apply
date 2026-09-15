@@ -88,6 +88,36 @@ def test_without_a_critic_behaviour_is_unchanged(repos, ready_founder, fake_draf
     assert repos.message.get_outbound(ready_founder.id, 0).critic_verdict is None
 
 
+def test_a_critic_free_redraft_never_wipes_an_existing_stored_verdict(repos, ready_founder, fake_drafter):
+    """Fix round 1 (review item #1): `critic=None` must be byte-for-byte
+    unchanged not only for a freshly-inserted row (every other test in this
+    file) but for a REDRAFT of a row a prior, critic-enabled run already
+    stamped — e.g. a reviewer sent a critiqued draft back to
+    READY_TO_DRAFT, and this particular run happens to have no critic
+    (an outage, a deliberate opt-out). `_finish`'s `if critic_result is not
+    None` guard exists specifically so this run's `message.upsert(...)`
+    never includes a `critic_verdict=None` key that would clobber the
+    stored value - deleting that guard leaves this row's fields
+    unconditionally overwritten with `None` and this test catches it."""
+    # Simulate the prior critic-enabled run's stored verdict on the SAME
+    # outbound row this run's redraft will update (outreach_id=5, step=0 -
+    # ready_founder's own ids), while the outreach itself is still
+    # READY_TO_DRAFT (a reviewer sent it back, spec's "PENDING_APPROVAL ->
+    # READY_TO_DRAFT is a legal transition").
+    repos.message.upsert(
+        outreach_id=ready_founder.id, sequence_step=0, direction="outbound",
+        subject="stale subject", body="stale body",
+        critic_verdict="PASS", critic_concerns=[], critic_overall_note="specific and short",
+    )
+
+    DraftOutreach(fake_drafter, _repos(repos)).run(limit=1)
+
+    row = repos.message.get_outbound(ready_founder.id, 0)
+    assert row.body == PENDING_BODY               # the redraft did happen - new body landed
+    assert row.critic_verdict == "PASS"            # but the stored verdict from before was NOT wiped
+    assert row.critic_overall_note == "specific and short"
+
+
 # --- Guards beyond the brief ---------------------------------------------------
 
 
@@ -157,6 +187,31 @@ def test_critic_concerns_appear_verbatim_in_the_redraft_prompt(repos, ready_foun
     # And the first attempt's context carried no critic_concerns at all —
     # only the retry does.
     assert "critic_concerns" not in fake_drafter.calls[0]
+
+
+def test_a_critic_exceptions_own_message_never_reaches_the_log(
+    repos, ready_founder, fake_drafter, caplog,
+):
+    """Fix round 1 (review item #3): `run_critic` must log only the
+    exception's TYPE name, never `str(exc)` - the same discipline
+    `DraftOutreach`'s existing drafter-failure handling already follows
+    (fix round 1, F3), because a provider's own exception message can
+    carry request detail the SDK doesn't let us control. Plants a fake
+    secret in the raised exception's message and asserts it never appears
+    anywhere in the captured log output."""
+    secret = "sk-live-do-not-log-this-9f3a7c21"
+
+    class _LeakyCritic:
+        def critique(self, draft: dict) -> dict:
+            raise RuntimeError(f"auth failed with key {secret}")
+
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING):
+        DraftOutreach(fake_drafter, _repos(repos), critic=_LeakyCritic()).run(limit=1)
+
+    assert secret not in caplog.text
+    assert "RuntimeError" in caplog.text  # the type name IS logged - just not the message
 
 
 def test_critic_sees_the_validated_draft_not_the_raw_model_output(repos, ready_founder, fake_critic):

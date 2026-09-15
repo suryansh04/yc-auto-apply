@@ -120,6 +120,9 @@ CRITIC_JSON_SCHEMA: dict[str, Any] = {
         "verdict": {"type": "string", "enum": ["PASS", "NEEDS_REVISION"]},
         "concerns": {
             "type": "array",
+            # spec: "0-3 items" — Sarvam's strict JSON-schema mode actually
+            # enforces this bound server-side (fix round 1, review item #5).
+            "maxItems": 3,
             "items": {
                 "type": "object",
                 "properties": {

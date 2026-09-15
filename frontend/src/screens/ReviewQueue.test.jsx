@@ -22,6 +22,7 @@ import {
   mockEditFailure,
   mockQueue,
   mockQueueSequence,
+  mockRedraft,
 } from '../test/mocks'
 import ReviewQueue from './ReviewQueue'
 
@@ -455,4 +456,123 @@ it('navigation keys ("s"/"j"/"k") are inert while a mutation is in flight, match
 
   await userEvent.keyboard('k')
   expect(screen.getByText(/Second Co/)).toBeInTheDocument()
+})
+
+// --- fix round 3: the settledIds filter made these branches vacuous in
+// every shipped test (every test approved item 1, where
+// `visibleItems[0]` happens to *be* the true neighbour) - each test
+// below is built to make the filter-only fallback diverge from the real
+// next/previous item. -----------------------------------------------
+
+it('the optimistic advance lands on the true next item mid-list, not the start of the list', async () => {
+  const approve = mockApprove()
+  mockQueueSequence([
+    [
+      item({ outreach_id: 1, company_name: 'First Co' }),
+      item({ outreach_id: 2, company_name: 'Second Co' }),
+      item({ outreach_id: 3, company_name: 'Third Co' }),
+    ],
+    // Confirmed: item 2 (just approved) is gone.
+    [
+      item({ outreach_id: 1, company_name: 'First Co' }),
+      item({ outreach_id: 3, company_name: 'Third Co' }),
+    ],
+  ])
+  render(<ReviewQueue />)
+  await screen.findByText(/First Co/)
+  await userEvent.keyboard('j')
+  await screen.findByText(/Second Co/)
+  await userEvent.keyboard('a')
+  expect(approve).toHaveBeenCalledWith(2)
+  // The true next item is Third Co - a "fall back to the first visible
+  // item" implementation (with the advance-target logic deleted) would
+  // show First Co instead, since it happens to still be visible.
+  expect(await screen.findByText(/Third Co/)).toBeInTheDocument()
+  expect(screen.queryByText(/First Co/)).not.toBeInTheDocument()
+})
+
+it('the in-flight lock holds on a multi-item queue too - "aa" only approves once', async () => {
+  const approve = mockApprove({ delayMs: 150 })
+  mockQueue([
+    item({ outreach_id: 1, company_name: 'First Co' }),
+    item({ outreach_id: 2, company_name: 'Second Co' }),
+    item({ outreach_id: 3, company_name: 'Third Co' }),
+  ])
+  render(<ReviewQueue />)
+  await screen.findByText(/First Co/)
+  await userEvent.keyboard('aa')
+  expect(approve).toHaveBeenCalledTimes(1)
+  expect(approve).toHaveBeenCalledWith(1)
+})
+
+it('goPrev is inert while busy, even from a middle item reached by falling back past the last one', async () => {
+  const approve = mockApprove({ delayMs: 150 })
+  mockQueue([
+    item({ outreach_id: 1, company_name: 'First Co' }),
+    item({ outreach_id: 2, company_name: 'Second Co' }),
+    item({ outreach_id: 3, company_name: 'Third Co' }),
+  ])
+  render(<ReviewQueue />)
+  await screen.findByText(/First Co/)
+  await userEvent.keyboard('jj')
+  await screen.findByText(/Third Co/)
+  await userEvent.keyboard('a')
+  expect(approve).toHaveBeenCalledWith(3)
+  // Approving the last visible item falls back to the previous one -
+  // Second Co - and that approve is still in flight (150ms).
+  await screen.findByText(/Second Co/)
+  await userEvent.keyboard('k')
+  expect(screen.getByText(/Second Co/)).toBeInTheDocument()
+  expect(screen.queryByText(/First Co/)).not.toBeInTheDocument()
+})
+
+it('prunes a settled id once confirmed gone, so the same outreach_id reappearing later is visible again', async () => {
+  const redraft = mockRedraft()
+  mockQueueSequence([
+    [
+      item({ outreach_id: 1, company_name: 'First Co' }),
+      item({ outreach_id: 2, company_name: 'Second Co' }),
+    ],
+    // Confirmed: item 1 (redrafted -> READY_TO_DRAFT) is gone from the
+    // review queue.
+    [item({ outreach_id: 2, company_name: 'Second Co' })],
+    // The draft job re-drafted it - the same outreach_id re-enters
+    // PENDING_APPROVAL and shows up in /api/queue again.
+    [item({ outreach_id: 1, company_name: 'First Co' })],
+  ])
+  render(<ReviewQueue />)
+  await screen.findByText(/First Co/)
+  await userEvent.keyboard('d')
+  expect(redraft).toHaveBeenNthCalledWith(1, 1)
+  expect(await screen.findByText(/Second Co/)).toBeInTheDocument()
+
+  await userEvent.keyboard('d')
+  expect(redraft).toHaveBeenNthCalledWith(2, 2)
+  // A prune-free implementation would keep id 1 in `settledIds` forever,
+  // hiding it even after the backend confirms it is a live draft again.
+  expect(await screen.findByText(/First Co/)).toBeInTheDocument()
+})
+
+it('optional (S07): advancing past a settled item resolves the true visible neighbour, not a raw-list neighbour that lands on a hidden id', async () => {
+  mockApprove()
+  mockQueue([
+    item({ outreach_id: 1, company_name: 'First Co' }),
+    item({ outreach_id: 2, company_name: 'Second Co' }),
+    item({ outreach_id: 3, company_name: 'Third Co' }),
+    item({ outreach_id: 4, company_name: 'Fourth Co' }),
+  ])
+  render(<ReviewQueue />)
+  await screen.findByText(/First Co/)
+  await userEvent.keyboard('jj')
+  await screen.findByText(/Third Co/)
+  // Settles item 3, advances to item 4 (the true next visible item).
+  await userEvent.keyboard('a')
+  await screen.findByText(/Fourth Co/)
+  // Settles item 4. Its true previous *visible* item, skipping the
+  // already-hidden item 3, is item 2 - a raw-list neighbour lookup would
+  // land on item 3 (hidden) and fall back to the first visible item
+  // (item 1) instead.
+  await userEvent.keyboard('a')
+  expect(await screen.findByText(/Second Co/)).toBeInTheDocument()
+  expect(screen.queryByText(/First Co/)).not.toBeInTheDocument()
 })

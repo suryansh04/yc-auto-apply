@@ -166,6 +166,23 @@ export function mockApprove({ delayMs = 0 } = {}) {
 }
 
 /**
+ * Mocks a successful POST /api/outreach/:id/redraft - same shape as
+ * `mockApprove`, for tests exercising `actOn`'s shared advance/settle
+ * logic through a different action (fix round 3, F9's prune coverage).
+ */
+export function mockRedraft({ delayMs = 0 } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/redraft', async ({ params }) => {
+      spy(Number(params.id))
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+      return HttpResponse.json({ ok: true })
+    }),
+  )
+  return spy
+}
+
+/**
  * Mocks a failing POST /api/outreach/:id/approve - `status` defaults to
  * 500 (a generic failure); pass 409 with a `detail` message to simulate
  * the backend's "flagged NEEDS MANUAL WRITE" refusal

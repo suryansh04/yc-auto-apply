@@ -54,6 +54,15 @@ it('shows the published-email hint when resolve found one', async () => {
   expect(await screen.findByText(/akash@vahan\.co \(from company site\)/)).toBeInTheDocument()
 })
 
+it('renders no published-hint markup when resolve found nothing', async () => {
+  mockManual([manualItem({ outreach_id: 1, founder_name: 'Akash Gupta', published_hint: null })])
+  const { container } = render(<ManualEmail />)
+  await screen.findByText('Akash Gupta')
+  // the absent-hint branch (an em-dash placeholder), not the hint branch
+  expect(container.querySelector('.published-hint')).not.toBeInTheDocument()
+  expect(container.querySelector('.no-hint')).toBeInTheDocument()
+})
+
 it('marks a founder unresolved on give up', async () => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   const setEmail = mockSetEmail()

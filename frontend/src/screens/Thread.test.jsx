@@ -11,6 +11,7 @@ import { renderWithQuery } from '../test/render'
 import {
   message,
   mockSetLabel,
+  mockSetLabelFailure,
   mockThread,
   mockThreadNotFound,
   mockThreadSequence,
@@ -91,6 +92,23 @@ it('corrects a label in one click', async () => {
 
   expect(setLabel).toHaveBeenCalledWith(2, 'INTERESTED')
   expect(await screen.findByText(/corrected by operator/i)).toBeInTheDocument()
+})
+
+it('shows a 422 from a rejected label correction', async () => {
+  mockSetLabelFailure('invalid label: not one of the six')
+  mockThread(
+    1,
+    thread({ messages: [message({ id: 2, direction: 'inbound', body: 'hm', label: 'UNCLEAR' })] }),
+  )
+  renderThread(1)
+  await screen.findByText('UNCLEAR', { selector: '.label-name' })
+
+  await userEvent.click(screen.getByRole('button', { name: /^interested$/i }))
+
+  expect(await screen.findByText(/invalid label: not one of the six/i)).toBeInTheDocument()
+  // the rejected correction never happened - the message still shows its
+  // original label, not a phantom "INTERESTED"
+  expect(screen.getByText('UNCLEAR', { selector: '.label-name' })).toBeInTheDocument()
 })
 
 it('links out to the gmail thread', async () => {
@@ -175,11 +193,10 @@ it('posts a correction to the right message id when a thread has several, and in
 it('shows a not-found state for an unknown thread id rather than crashing', async () => {
   mockThreadNotFound(999)
   renderThread(999)
-  // useThread carries the hooks-level QUERY_DEFAULTS (retry: 1), which
-  // overrides renderWithQuery's client-level retry:false since a
-  // per-query option wins over a client default - so the 404 isn't
-  // surfaced until a real (~1s backoff) retry has also failed.
-  const link = await screen.findByRole('link', { name: /back to contacts/i }, { timeout: 3000 })
+  // T17-1: QUERY_DEFAULTS.retry never retries a 4xx ApiError, so this
+  // resolves on the first failed request - no backoff wait needed (the
+  // default findByRole timeout is enough, unlike before T17-1).
+  const link = await screen.findByRole('link', { name: /back to contacts/i })
   expect(link).toHaveAttribute('href', '/contacts')
   // A dedicated not-found state, not the generic error Banner (which
   // would also happen to contain the words "no such outreach" verbatim,

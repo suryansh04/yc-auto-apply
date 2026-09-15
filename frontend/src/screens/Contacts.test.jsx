@@ -104,3 +104,34 @@ it('sorts by clicking a column header, with a stable tie-break', async () => {
   expect(rows[0]).toHaveTextContent('Alice')
   expect(rows[1]).toHaveTextContent('Bob')
 })
+
+it('a header click actually reorders the rows, and a second click reverses them', async () => {
+  // Company-ascending (the default) and founder-ascending disagree on
+  // order here on purpose: Alpha Co/Zoe sorts before Zeta Co/Alice by
+  // company, but Alice sorts before Zoe by founder name - so clicking
+  // "Founder" only passes if the click handler actually re-sorts by a
+  // *different* column, not merely re-confirms whatever the mount-time
+  // default already produced (a no-op onClick would leave this test's
+  // first assertion already satisfied by the default sort otherwise).
+  mockContacts([
+    contact({ outreach_id: 1, company_name: 'Zeta Co', founder_name: 'Alice' }),
+    contact({ outreach_id: 2, company_name: 'Alpha Co', founder_name: 'Zoe' }),
+  ])
+  render(<Contacts />)
+  await screen.findByText('Alice')
+
+  // default sort: by company, ascending -> Alpha Co (Zoe) then Zeta Co (Alice)
+  let rows = screen.getAllByRole('row').slice(1)
+  expect(rows[0]).toHaveTextContent('Zoe')
+  expect(rows[1]).toHaveTextContent('Alice')
+
+  await userEvent.click(screen.getByRole('button', { name: /^founder/i }))
+  rows = screen.getAllByRole('row').slice(1)
+  expect(rows[0]).toHaveTextContent('Alice')
+  expect(rows[1]).toHaveTextContent('Zoe')
+
+  await userEvent.click(screen.getByRole('button', { name: /^founder/i }))
+  rows = screen.getAllByRole('row').slice(1)
+  expect(rows[0]).toHaveTextContent('Zoe')
+  expect(rows[1]).toHaveTextContent('Alice')
+})

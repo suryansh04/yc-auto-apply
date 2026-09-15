@@ -1,16 +1,30 @@
 // TanStack Query hooks over ./client.js - the one seam Tasks 15-17's
 // screens are built on. Query keys are plain arrays so invalidation below
-// can target them precisely; defaults (retry: 1, staleTime: 5000) are set
-// once here rather than per-call.
+// can target them precisely; defaults (retry: see shouldRetry below,
+// staleTime: 5000) are set once here rather than per-call.
 
 import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiGet, apiPost } from './client'
+import { ApiError, apiGet, apiPost } from './client'
+
+// T17-1 (coordinator ruling, task-17-review.md): a flat `retry: 1` retried
+// every failure once, including a 404/422/409 the backend will never stop
+// returning - measured directly on Thread's not-found screen, a genuine
+// ~1s backoff delay before the operator ever saw "no such outreach".
+// Retry once, but only for failures that might resolve on their own - a
+// network error, or a 5xx the backend might recover from - never a 4xx
+// ApiError, which is the server's final, considered answer about this
+// request and will not change on a second try.
+function shouldRetry(failureCount, error) {
+  if (failureCount >= 1) return false
+  if (error instanceof ApiError && error.status < 500) return false
+  return true
+}
 
 // Exported (not just used internally) so a test can assert the real
 // defaults directly, and so main.jsx's app-wide QueryClient and any
 // test's "real" QueryClient are built from the exact same object rather
 // than two copies that could drift apart unnoticed.
-export const QUERY_DEFAULTS = { retry: 1, staleTime: 5000 }
+export const QUERY_DEFAULTS = { retry: shouldRetry, staleTime: 5000 }
 
 /**
  * The one QueryClient factory the app itself uses (main.jsx). Tests that

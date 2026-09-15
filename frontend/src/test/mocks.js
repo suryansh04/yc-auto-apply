@@ -349,6 +349,18 @@ export function mockSetLabel() {
   return spy
 }
 
+/**
+ * Mocks POST /api/messages/:id/label rejected as an invalid label - a
+ * plain `{detail}` body (the router's own `HTTPException(422, ...)`
+ * shape, `app/api/routers/thread.py`'s `correct_label` - NOT the
+ * `{errors: [...]}` list shape queue/manual's validators use).
+ */
+export function mockSetLabelFailure(detail = 'invalid label') {
+  server.use(
+    http.post('/api/messages/:id/label', () => HttpResponse.json({ detail }, { status: 422 })),
+  )
+}
+
 // ---- Task 17: Manual email ------------------------------------------------
 // One `ManualItemOut` (backend/app/api/schemas.py), every field the
 // Manual email screen reads given a sane default.

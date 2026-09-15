@@ -1,4 +1,4 @@
-// Task 16's Review Queue screen (+ fix round 1, coordinator review
+// Task 16's Review Queue screen (+ fix rounds 1 and 2, coordinator review
 // task-16-review.md). server's listen/resetHandlers/close lifecycle is
 // owned globally by src/test/setup.js (afterEach(cleanup) too, per
 // task-15-report.md's finding) - this file only registers handlers via
@@ -326,7 +326,14 @@ it('updates the counter after an approve', async () => {
   render(<ReviewQueue />)
   await screen.findByText(/1 of 2/)
   await userEvent.keyboard('a')
-  expect(await screen.findByText(/2 of 2/)).toBeInTheDocument()
+  // Fix round 2 (T16-5/F9): the counter is honest about what is still
+  // actionable, not just what the (possibly stale) raw list still
+  // contains - First Co is settled the moment it's approved, so with
+  // one draft left to review this reads "1 of 1", not "2 of 2" (this
+  // static mock never confirms the removal via a refetch, which is
+  // exactly the "backend hasn't caught up yet" window F9 covers).
+  expect(await screen.findByText(/1 of 1/)).toBeInTheDocument()
+  expect(await screen.findByText(/Second Co/)).toBeInTheDocument()
 })
 
 it('shows the empty state once the queue is exhausted', async () => {
@@ -353,4 +360,99 @@ it('labels a sequence_step > 0 draft as a follow-up', async () => {
   render(<ReviewQueue />)
   expect(await screen.findByText(/follow-up/i)).toBeInTheDocument()
   expect(screen.getByText(/step 2/i)).toBeInTheDocument()
+})
+
+// --- fix round 2: F9 - settled ids stay hidden until the refetch lands ---
+
+it(
+  'after approving the only item, it is never re-shown (and cannot be re-approved) before the slow refetch confirms it',
+  async () => {
+    const approve = mockApprove()
+    mockQueueSequence(
+      [[item({ outreach_id: 1, company_name: 'Only Co' })], []],
+      { delayMs: 400 },
+    )
+    render(<ReviewQueue />)
+    await screen.findByText(/Only Co/)
+    await userEvent.keyboard('a')
+    expect(approve).toHaveBeenCalledTimes(1)
+
+    // In the window before the slow refetch lands, "Only Co" must not be
+    // shown as a live, actionable draft again.
+    expect(await screen.findByText(/finishing up/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Only Co/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^approve/i })).not.toBeInTheDocument()
+
+    // A second "a" in that window must not fire a second approve.
+    await userEvent.keyboard('a')
+    expect(approve).toHaveBeenCalledTimes(1)
+
+    // Once the refetch confirms the row is really gone, the real empty
+    // state takes over.
+    expect(await screen.findByText(/queue is empty/i)).toBeInTheDocument()
+  },
+  8000,
+)
+
+it(
+  'rapid approvals across a 3-item queue never re-show an already-acted-on draft while the refetch is slow',
+  async () => {
+    const approve = mockApprove()
+    mockQueueSequence(
+      [
+        [
+          item({ outreach_id: 1, company_name: 'First Co' }),
+          item({ outreach_id: 2, company_name: 'Second Co' }),
+          item({ outreach_id: 3, company_name: 'Third Co' }),
+        ],
+        [],
+      ],
+      { delayMs: 600 },
+    )
+    render(<ReviewQueue />)
+    await screen.findByText(/First Co/)
+    await userEvent.keyboard('a')
+    await screen.findByText(/Second Co/)
+    await userEvent.keyboard('a')
+    await screen.findByText(/Third Co/)
+    await userEvent.keyboard('a')
+
+    expect(approve).toHaveBeenCalledTimes(3)
+    expect(approve).toHaveBeenNthCalledWith(1, 1)
+    expect(approve).toHaveBeenNthCalledWith(2, 2)
+    expect(approve).toHaveBeenNthCalledWith(3, 3)
+
+    // None of the three already-approved drafts is ever shown again -
+    // the old bug would have re-surfaced Second Co ("2 of 3") here.
+    expect(screen.queryByText(/First Co/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Second Co/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Third Co/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/finishing up/i)).toBeInTheDocument()
+  },
+  8000,
+)
+
+// --- fix round 2: F10 - navigation keys gated on busy, like the buttons -
+
+it('navigation keys ("s"/"j"/"k") are inert while a mutation is in flight, matching the disabled Skip button', async () => {
+  mockApprove({ delayMs: 200 })
+  mockQueue([
+    item({ outreach_id: 1, company_name: 'First Co' }),
+    item({ outreach_id: 2, company_name: 'Second Co' }),
+    item({ outreach_id: 3, company_name: 'Third Co' }),
+  ])
+  render(<ReviewQueue />)
+  await screen.findByText(/First Co/)
+  await userEvent.keyboard('a')
+  await screen.findByText(/Second Co/)
+  expect(screen.getByRole('button', { name: /skip/i })).toBeDisabled()
+
+  await userEvent.keyboard('s')
+  expect(screen.getByText(/Second Co/)).toBeInTheDocument()
+
+  await userEvent.keyboard('j')
+  expect(screen.getByText(/Second Co/)).toBeInTheDocument()
+
+  await userEvent.keyboard('k')
+  expect(screen.getByText(/Second Co/)).toBeInTheDocument()
 })

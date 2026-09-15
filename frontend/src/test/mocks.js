@@ -125,12 +125,20 @@ export function mockQueue(items = []) {
  * (`app/application/review_outreach.py`) - `mockQueue`'s single static
  * list can't reproduce that shift, which is exactly what fix round 1's
  * F1 finding needed a test for. Returns the vi.fn() spy.
+ *
+ * `delayMs` (fix round 2, F9) holds every call *after* the first open
+ * for that long before responding - the initial load is instant, but
+ * every refetch triggered by an invalidation is slow, reproducing the
+ * "mutation resolved, refetch hasn't" window a settled-id filter has to
+ * survive.
  */
-export function mockQueueSequence(lists) {
+export function mockQueueSequence(lists, { delayMs = 0 } = {}) {
   let call = 0
-  const spy = vi.fn(() => {
-    const list = lists[Math.min(call, lists.length - 1)]
+  const spy = vi.fn(async () => {
+    const idx = call
     call += 1
+    const list = lists[Math.min(idx, lists.length - 1)]
+    if (delayMs > 0 && idx > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
     return HttpResponse.json(list)
   })
   server.use(http.get('/api/queue', spy))

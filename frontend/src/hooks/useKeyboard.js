@@ -3,7 +3,7 @@
 // never regress silently - the input-focus guard - has a dedicated,
 // isolated test file (useKeyboard.test.jsx) rather than only being
 // exercised indirectly through ReviewQueue.test.jsx.
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 
 const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT'])
 
@@ -43,8 +43,9 @@ function normalizeBinding(entry) {
  * map, matched against `KeyboardEvent.key` exactly as given (so pass
  * lowercase letters for letter shortcuts, `'Escape'` for Escape). It may
  * be a fresh object every render - only its latest value is read (via a
- * ref kept in sync by its own effect, never written during render), so
- * passing a new object each render never re-registers the DOM listener.
+ * ref kept in sync by its own layout effect, never written during
+ * render), so passing a new object each render never re-registers the
+ * DOM listener.
  *
  * `{ enabled: false }` suspends every binding outright (e.g. all of the
  * review-queue's action keys while a modal editor is open) - a second
@@ -55,9 +56,13 @@ export function useKeyboard(bindings, { enabled = true } = {}) {
 
   // Keep the ref in sync with the latest `bindings` without writing to it
   // during render (a lint violation, and a correctness smell - a ref
-  // write should never be able to race a concurrent render). This runs
-  // after every render, with no dependency array.
-  useEffect(() => {
+  // write should never be able to race a concurrent render). Fix round
+  // 2: `useLayoutEffect` rather than `useEffect` - both happen to work
+  // today (React flushes passive effects synchronously for the sync-lane
+  // commits this screen's updates are), but the layout effect removes
+  // the dependence on that scheduling detail entirely, at zero cost,
+  // since a keydown can never fire before the browser has painted.
+  useLayoutEffect(() => {
     bindingsRef.current = bindings
   })
 

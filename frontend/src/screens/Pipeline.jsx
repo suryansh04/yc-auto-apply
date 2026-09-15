@@ -1,12 +1,14 @@
-// Task 15: the `/` screen. Funnel counts by raw outreach state (T3-1 -
-// every state is shown, `needs_manual_email` gets its own visible row
-// since it's an action queue, not folded into "new"), one button per
-// pipeline stage that's actually wired on the backend today
-// (`JOB_KINDS` in app/api/jobs.py: sync, scrape, resolve, draft -
-// poll-replies/classify-replies/schedule-follow-ups aren't registered
-// yet), live progress while a stage runs, and the last job per kind shown
-// even when nothing is running right now - a failed job an hour ago with
-// its error is more useful than a screen that goes quiet.
+// Task 15 (+ fix round 1, after 15a registered the remaining three
+// stages on the backend): the `/` screen. Funnel counts by raw outreach
+// state (T3-1 - every state is shown, `needs_manual_email` gets its own
+// visible row since it's an action queue, not folded into "new"), one
+// button per pipeline stage the backend registers (`JOB_KINDS` in
+// app/api/jobs.py - all seven, mirrored in `STAGES` below and pinned by
+// `Pipeline.test.jsx`'s registry test so this can't silently drift again
+// the way it did between Task 15 and 15a), live progress while a stage
+// runs, and the last job per kind shown even when nothing is running
+// right now - a failed job an hour ago with its error is more useful
+// than a screen that goes quiet.
 import { useMemo } from 'react'
 import { useJobs, useStartJob, useStats } from '../api/hooks'
 import JobButton from '../components/JobButton'
@@ -35,13 +37,66 @@ const EXCEPTION_STATES = [
   ['failed', 'Failed'],
 ]
 
-// JOB_KINDS from app/api/jobs.py - only stages the backend actually
-// registers for POST /jobs/{kind} today. Starting any other kind 404s.
+// JOB_KINDS from app/api/jobs.py, mirrored exactly - there's no endpoint
+// to derive this list from, so this array (and the registry test that
+// pins it) IS the contract. Order and membership must match the
+// backend's `JOB_KINDS` dict / `test_job_kinds_has_exactly_the_seven_registered_stages`
+// or a registered stage silently has no way to start from the UI - the
+// exact gap the fix-round-1 review found (Task 15 shipped with only the
+// first four; 15a registered the other three on the backend without a
+// matching frontend edit).
+//
+// `group` splits the table into the outreach pipeline proper (find ->
+// scrape -> resolve emails -> draft) and the reply loop that runs after
+// a message is sent (poll inbox -> classify -> schedule follow-ups).
 const STAGES = [
-  ['sync', 'Sync'],
-  ['scrape', 'Scrape'],
-  ['resolve', 'Resolve'],
-  ['draft', 'Draft'],
+  {
+    kind: 'sync',
+    label: 'Sync',
+    group: 'pipeline',
+    description: 'Fetch the current YC company list and upsert it into the database.',
+  },
+  {
+    kind: 'scrape',
+    label: 'Scrape',
+    group: 'pipeline',
+    description: "Scrape each active company's YC page for founders, job postings, news and launches.",
+  },
+  {
+    kind: 'resolve',
+    label: 'Resolve',
+    group: 'pipeline',
+    description: 'Look up and verify founder email addresses against the daily verifier quota.',
+  },
+  {
+    kind: 'draft',
+    label: 'Draft',
+    group: 'pipeline',
+    description: 'Draft outreach messages for founders who are ready, with an advisory voice critic.',
+  },
+  {
+    kind: 'poll-replies',
+    label: 'Poll replies',
+    group: 'reply-loop',
+    description: 'Check the connected Gmail inbox for new replies and bounces to sent outreach.',
+  },
+  {
+    kind: 'classify-replies',
+    label: 'Classify replies',
+    group: 'reply-loop',
+    description: 'Classify newly polled replies (interested, not interested, etc.) with the LLM.',
+  },
+  {
+    kind: 'schedule-follow-ups',
+    label: 'Schedule follow-ups',
+    group: 'reply-loop',
+    description: 'Schedule or close follow-up messages based on reply classifications and elapsed time.',
+  },
+]
+
+const STAGE_GROUPS = [
+  ['pipeline', 'Outreach pipeline'],
+  ['reply-loop', 'Reply loop'],
 ]
 
 const ACTIVE_STATUSES = new Set(['queued', 'running'])
@@ -82,6 +137,48 @@ function JobStatusCell({ job }) {
   }
 
   return <span className="job-status">{job.status}</span>
+}
+
+function StageTable({ heading, stages, latest, startJob, onStart }) {
+  return (
+    <div className="stage-group">
+      <h3>{heading}</h3>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Stage</th>
+            <th scope="col">What it does</th>
+            <th scope="col">Action</th>
+            <th scope="col">Last run</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stages.map(({ kind, label, description }) => {
+            const job = latest[kind]
+            const kindRunning = job && ACTIVE_STATUSES.has(job.status)
+            const startingThisKind = startJob.isPending && startJob.variables?.kind === kind
+            return (
+              <tr key={kind}>
+                <td>{label}</td>
+                <td className="stage-description">{description}</td>
+                <td>
+                  <JobButton
+                    kind={kind}
+                    label={label}
+                    disabled={Boolean(kindRunning || startingThisKind)}
+                    onClick={() => onStart(kind)}
+                  />
+                </td>
+                <td>
+                  <JobStatusCell job={job} />
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 export default function Pipeline() {
@@ -150,39 +247,16 @@ export default function Pipeline() {
 
       <section className="stages">
         <h2>Stages</h2>
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Stage</th>
-              <th scope="col">Action</th>
-              <th scope="col">Last run</th>
-            </tr>
-          </thead>
-          <tbody>
-            {STAGES.map(([kind, label]) => {
-              const job = latest[kind]
-              const kindRunning = job && ACTIVE_STATUSES.has(job.status)
-              const startingThisKind =
-                startJob.isPending && startJob.variables?.kind === kind
-              return (
-                <tr key={kind}>
-                  <td>{label}</td>
-                  <td>
-                    <JobButton
-                      kind={kind}
-                      label={kind}
-                      disabled={Boolean(kindRunning || startingThisKind)}
-                      onClick={() => handleStart(kind)}
-                    />
-                  </td>
-                  <td>
-                    <JobStatusCell job={job} />
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        {STAGE_GROUPS.map(([groupKey, heading]) => (
+          <StageTable
+            key={groupKey}
+            heading={heading}
+            stages={STAGES.filter((s) => s.group === groupKey)}
+            latest={latest}
+            startJob={startJob}
+            onStart={handleStart}
+          />
+        ))}
       </section>
     </div>
   )

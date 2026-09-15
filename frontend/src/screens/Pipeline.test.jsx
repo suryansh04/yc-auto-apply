@@ -135,6 +135,31 @@ it('renders every funnel state even when its count is 0', async () => {
   expect(screen.getAllByText('0').length).toBeGreaterThanOrEqual(13)
 })
 
+it('renders exactly the seven registered job kinds as stage buttons, in order', async () => {
+  // Mirrors the backend's own registry test
+  // (test_job_kinds_has_exactly_the_seven_registered_stages,
+  // backend/tests/api/test_jobs_stages.py) - there's no endpoint to
+  // derive the stage list from, so this test IS the contract. Fix round
+  // 1: Task 15 shipped with only 4 of the (then still 4) registered
+  // kinds; 15a registered 3 more on the backend with no frontend test
+  // pinning the full set, so the gap went uncaught. This closes it.
+  mockStats({})
+  mockJobs([])
+  render(<Pipeline />)
+  await screen.findByText('Pipeline')
+
+  const buttons = screen.getAllByRole('button')
+  expect(buttons.map((b) => b.textContent)).toEqual([
+    'Sync',
+    'Scrape',
+    'Resolve',
+    'Draft',
+    'Poll replies',
+    'Classify replies',
+    'Schedule follow-ups',
+  ])
+})
+
 it('polls jobs at a 2000ms interval while running, not sooner', async () => {
   mockStats({})
   const spy = mockJobs([{ id: 5, kind: 'scrape', status: 'running', done: 1, total: 10 }])

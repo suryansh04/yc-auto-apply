@@ -3,10 +3,24 @@
 // can target them precisely; defaults (retry: 1, staleTime: 5000) are set
 // once here rather than per-call.
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiPost } from './client'
 
-const QUERY_DEFAULTS = { retry: 1, staleTime: 5000 }
+// Exported (not just used internally) so a test can assert the real
+// defaults directly, and so main.jsx's app-wide QueryClient and any
+// test's "real" QueryClient are built from the exact same object rather
+// than two copies that could drift apart unnoticed.
+export const QUERY_DEFAULTS = { retry: 1, staleTime: 5000 }
+
+/**
+ * The one QueryClient factory the app itself uses (main.jsx). Tests that
+ * want to assert the real defaults - as opposed to renderWithQuery's
+ * `retry: false` test client - should call this rather than building
+ * their own `new QueryClient(...)` inline, so the two never drift apart.
+ */
+export function createQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { ...QUERY_DEFAULTS } } })
+}
 
 // ---- queries ----------------------------------------------------------
 

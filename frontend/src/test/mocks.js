@@ -218,3 +218,189 @@ export function mockEditFailure(errors) {
     http.post('/api/outreach/:id/edit', () => HttpResponse.json({ errors }, { status: 422 })),
   )
 }
+
+// ---- Task 17: Contacts --------------------------------------------------
+// One `ContactOut` (backend/app/api/schemas.py) with every field the
+// Contacts screen reads given a sane default.
+export function contact(overrides = {}) {
+  return {
+    outreach_id: 1,
+    founder_name: 'Akash Gupta',
+    company_name: 'Vahan',
+    domain: 'vahan.co',
+    state: 'sent',
+    batch: 'W24',
+    team_size: 12,
+    is_hiring: true,
+    resolved_email: 'akash@vahan.co',
+    email_status: 'resolved',
+    ...overrides,
+  }
+}
+
+/**
+ * Mocks GET /api/contacts. Applies the `state`/`hiring`/`batch`/
+ * `email_status` query params to `contacts` itself, the same way the
+ * real router (app/api/routers/contacts.py) filters server-side - so a
+ * test that drives the screen's own filter controls exercises the real
+ * request/response round trip, including D19 (hiring narrows, never
+ * gates: omitting the param returns everyone, hiring and non-hiring
+ * alike). Returns the vi.fn() spy backing the handler.
+ */
+export function mockContacts(contacts = []) {
+  const spy = vi.fn(({ request }) => {
+    const url = new URL(request.url)
+    const state = url.searchParams.get('state')
+    const hiring = url.searchParams.get('hiring')
+    const batch = url.searchParams.get('batch')
+    const emailStatus = url.searchParams.get('email_status')
+    let out = contacts
+    if (state !== null) out = out.filter((c) => c.state === state)
+    if (hiring !== null) out = out.filter((c) => String(c.is_hiring) === hiring)
+    if (batch !== null) out = out.filter((c) => c.batch === batch)
+    if (emailStatus !== null) out = out.filter((c) => c.email_status === emailStatus)
+    return HttpResponse.json(out)
+  })
+  server.use(http.get('/api/contacts', spy))
+  return spy
+}
+
+// ---- Task 17: Thread ----------------------------------------------------
+// One `MessageOut` / `ThreadOut` (backend/app/api/schemas.py), every field
+// the Thread screen reads given a sane default.
+export function message(overrides = {}) {
+  return {
+    id: 1,
+    direction: 'outbound',
+    sequence_step: 0,
+    subject: 'Quick question about your internship posting',
+    body: 'Hi Akash, quick question about your internship posting.',
+    sent_at: '2026-01-01T00:00:00Z',
+    received_at: null,
+    label: null,
+    confidence: null,
+    rationale: null,
+    corrected: false,
+    ...overrides,
+  }
+}
+
+export function thread(overrides = {}) {
+  return {
+    outreach_id: 1,
+    company_name: 'Vahan',
+    founder_name: 'Akash Gupta',
+    to: 'akash@vahan.co',
+    state: 'sent',
+    gmail_url: 'https://mail.google.com/mail/u/0/#inbox/abc123',
+    messages: [message()],
+    ...overrides,
+  }
+}
+
+/** Mocks GET /api/outreach/:id/thread to always return `threadObj`. */
+export function mockThread(id, threadObj) {
+  const spy = vi.fn(() => HttpResponse.json(threadObj))
+  server.use(http.get(`/api/outreach/${id}/thread`, spy))
+  return spy
+}
+
+/**
+ * Mocks GET /api/outreach/:id/thread to return a different thread on each
+ * successive call (last entry repeats once exhausted) - models a label
+ * correction's invalidated refetch actually landing with the corrected
+ * row, the same shape `mockQueueSequence` gives Task 16's queue tests.
+ */
+export function mockThreadSequence(id, threads) {
+  let call = 0
+  const spy = vi.fn(() => {
+    const idx = call
+    call += 1
+    return HttpResponse.json(threads[Math.min(idx, threads.length - 1)])
+  })
+  server.use(http.get(`/api/outreach/${id}/thread`, spy))
+  return spy
+}
+
+/** Mocks GET /api/outreach/:id/thread -> 404, the "no such outreach" case. */
+export function mockThreadNotFound(id) {
+  server.use(
+    http.get(`/api/outreach/${id}/thread`, () =>
+      HttpResponse.json({ detail: 'no such outreach' }, { status: 404 }),
+    ),
+  )
+}
+
+/**
+ * Mocks a successful POST /api/messages/:id/label. The spy is called with
+ * `(messageId, label)` - the two things a test needs to assert a
+ * correction targeted the right row, matching `mockApprove`'s
+ * "spy called with just the meaningful values" convention.
+ */
+export function mockSetLabel() {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/messages/:id/label', async ({ params, request }) => {
+      const body = await request.json()
+      spy(Number(params.id), body.label)
+      return HttpResponse.json({ ok: true })
+    }),
+  )
+  return spy
+}
+
+// ---- Task 17: Manual email ------------------------------------------------
+// One `ManualItemOut` (backend/app/api/schemas.py), every field the
+// Manual email screen reads given a sane default.
+export function manualItem(overrides = {}) {
+  return {
+    outreach_id: 1,
+    founder_name: 'Akash Gupta',
+    company_name: 'Vahan',
+    domain: 'vahan.co',
+    linkedin_url: 'https://linkedin.com/in/akashgupta',
+    candidates: [],
+    published_hint: null,
+    ...overrides,
+  }
+}
+
+/** Mocks GET /api/manual to return `items` (ManualItemOut[]). */
+export function mockManual(items = []) {
+  const spy = vi.fn(() => HttpResponse.json(items))
+  server.use(http.get('/api/manual', spy))
+  return spy
+}
+
+/**
+ * Mocks a successful POST /api/outreach/:id/email. The spy is called with
+ * `(id, body)` where `body` is exactly what the screen posted -
+ * `{address}` for a typed submission or `{give_up: true}` for give up -
+ * so a test can assert the request shape directly.
+ */
+export function mockSetEmail() {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/email', async ({ params, request }) => {
+      const body = await request.json()
+      spy(Number(params.id), body)
+      return HttpResponse.json({ ok: true })
+    }),
+  )
+  return spy
+}
+
+/**
+ * Mocks POST /api/outreach/:id/email rejected by the validator - 422
+ * `{errors: [...]}` verbatim, per the backend's own contract
+ * (app/api/routers/manual.py raises a plain HTTPException with `detail`
+ * for the "not an email address" case, but the frontend's own edit-form
+ * error handling already reads `err.errors ?? [err.message]`, so this
+ * mirrors the queue's `mockEditFailure` shape for a consistent test
+ * story across the two forms).
+ */
+export function mockSetEmailFailure(errors) {
+  server.use(
+    http.post('/api/outreach/:id/email', () => HttpResponse.json({ errors }, { status: 422 })),
+  )
+}

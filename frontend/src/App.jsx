@@ -1,19 +1,16 @@
 import { Link, Route, Routes } from 'react-router-dom'
 import Pipeline from './screens/Pipeline'
 import ReviewQueue from './screens/ReviewQueue'
+import Contacts from './screens/Contacts'
+import Thread from './screens/Thread'
+import ManualEmail from './screens/ManualEmail'
 
-// Router shell. Task 15 fills in Pipeline; the rest are still placeholders
-// for Tasks 16-17. Spec §16's four screens plus the manual-email screen
-// Task 17 adds:
-//   Pipeline     -> GET /api/stats, /api/jobs, POST /api/jobs/{kind} (Task 15, done)
-//   Review Queue -> GET /api/queue, approve/edit/reject/redraft (Task 15)
+// Router shell. Spec §16's four screens plus the manual-email screen:
+//   Pipeline     -> GET /api/stats, /api/jobs, POST /api/jobs/{kind} (Task 15)
+//   Review Queue -> GET /api/queue, approve/edit/reject/redraft (Task 16)
 //   Contacts     -> GET /api/contacts                            (Task 17)
 //   Thread       -> GET /api/outreach/{id}/thread, POST /api/messages/{id}/label (Task 17)
-//   Manual email -> GET /api/manual, POST /api/outreach/{id}/email (Task 16)
-
-function Placeholder({ name }) {
-  return <p>{name} - not built yet (Tasks 15-17).</p>
-}
+//   Manual email -> GET /api/manual, POST /api/outreach/{id}/email (Task 17)
 
 function App() {
   return (
@@ -27,9 +24,9 @@ function App() {
       <Routes>
         <Route path="/" element={<Pipeline />} />
         <Route path="/queue" element={<ReviewQueue />} />
-        <Route path="/contacts" element={<Placeholder name="Contacts" />} />
-        <Route path="/thread/:id" element={<Placeholder name="Thread" />} />
-        <Route path="/manual" element={<Placeholder name="Manual email" />} />
+        <Route path="/contacts" element={<Contacts />} />
+        <Route path="/thread/:id" element={<Thread />} />
+        <Route path="/manual" element={<ManualEmail />} />
       </Routes>
     </>
   )

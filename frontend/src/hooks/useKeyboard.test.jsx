@@ -14,6 +14,11 @@ function Harness({ bindings, enabled }) {
     <div>
       <input aria-label="typing target" />
       <textarea aria-label="body target" />
+      <select aria-label="select target">
+        <option value="a">a</option>
+      </select>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+      <div aria-label="editable target" contentEditable="true" tabIndex={0} suppressContentEditableWarning />
     </div>
   )
 }
@@ -50,6 +55,22 @@ it('ignores keys while a textarea has focus', async () => {
   expect(onA).not.toHaveBeenCalled()
 })
 
+it('ignores keys while a select has focus', async () => {
+  const onA = vi.fn()
+  render(<Harness bindings={{ a: onA }} />)
+  await userEvent.click(screen.getByLabelText('select target'))
+  await userEvent.keyboard('a')
+  expect(onA).not.toHaveBeenCalled()
+})
+
+it('ignores keys while a contentEditable element has focus', async () => {
+  const onA = vi.fn()
+  render(<Harness bindings={{ a: onA }} />)
+  screen.getByLabelText('editable target').focus()
+  await userEvent.keyboard('a')
+  expect(onA).not.toHaveBeenCalled()
+})
+
 it('resumes handling keys once focus leaves the input', async () => {
   const onA = vi.fn()
   render(<Harness bindings={{ a: onA }} />)
@@ -77,4 +98,43 @@ it('picks up new handlers without needing to re-register the listener', async ()
   await userEvent.keyboard('a')
   expect(onA1).not.toHaveBeenCalled()
   expect(onA2).toHaveBeenCalledTimes(1)
+})
+
+// --- bypassFocusGuard (fix round 1, F6: Escape must cancel the editor
+// even with focus still inside its body textarea) --------------------
+
+it('a plain function binding is still guarded by focus (bypassFocusGuard defaults to false)', async () => {
+  const onA = vi.fn()
+  render(<Harness bindings={{ a: onA }} />)
+  await userEvent.click(screen.getByLabelText('typing target'))
+  await userEvent.keyboard('a')
+  expect(onA).not.toHaveBeenCalled()
+})
+
+it('a { handler, bypassFocusGuard: true } binding fires even with a text input focused', async () => {
+  const onEscape = vi.fn()
+  render(<Harness bindings={{ Escape: { handler: onEscape, bypassFocusGuard: true } }} />)
+  await userEvent.click(screen.getByLabelText('typing target'))
+  await userEvent.keyboard('{Escape}')
+  expect(onEscape).toHaveBeenCalledTimes(1)
+})
+
+it('a { handler, bypassFocusGuard: true } binding fires even with a textarea focused', async () => {
+  const onEscape = vi.fn()
+  render(<Harness bindings={{ Escape: { handler: onEscape, bypassFocusGuard: true } }} />)
+  await userEvent.click(screen.getByLabelText('body target'))
+  await userEvent.keyboard('{Escape}')
+  expect(onEscape).toHaveBeenCalledTimes(1)
+})
+
+it('a bypassFocusGuard binding still respects the enabled flag', async () => {
+  const onEscape = vi.fn()
+  render(
+    <Harness
+      bindings={{ Escape: { handler: onEscape, bypassFocusGuard: true } }}
+      enabled={false}
+    />,
+  )
+  await userEvent.keyboard('{Escape}')
+  expect(onEscape).not.toHaveBeenCalled()
 })

@@ -117,16 +117,40 @@ export function mockQueue(items = []) {
 }
 
 /**
+ * Mocks GET /api/queue to return a different list on each successive
+ * call, from `lists` (an array of QueueItemOut[]; the last entry repeats
+ * once exhausted). Models what the real backend does after a write: the
+ * approved/rejected/redrafted row is no longer `PENDING_APPROVAL`, so
+ * `pending()` returns a shorter list on the very next GET
+ * (`app/application/review_outreach.py`) - `mockQueue`'s single static
+ * list can't reproduce that shift, which is exactly what fix round 1's
+ * F1 finding needed a test for. Returns the vi.fn() spy.
+ */
+export function mockQueueSequence(lists) {
+  let call = 0
+  const spy = vi.fn(() => {
+    const list = lists[Math.min(call, lists.length - 1)]
+    call += 1
+    return HttpResponse.json(list)
+  })
+  server.use(http.get('/api/queue', spy))
+  return spy
+}
+
+/**
  * Mocks a successful POST /api/outreach/:id/approve. The returned spy is
  * called with just the numeric outreach id (not the raw MSW request), so
  * a test can assert `expect(approve).toHaveBeenCalledWith(1)` directly,
  * matching what the screen conceptually did ("approved outreach 1").
+ * `delayMs` (fix round 1, F5) holds the response open, for tests proving
+ * a double keypress/click while a mutation is in flight is a no-op.
  */
-export function mockApprove() {
+export function mockApprove({ delayMs = 0 } = {}) {
   const spy = vi.fn()
   server.use(
-    http.post('/api/outreach/:id/approve', ({ params }) => {
+    http.post('/api/outreach/:id/approve', async ({ params }) => {
       spy(Number(params.id))
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
       return HttpResponse.json({ ok: true })
     }),
   )

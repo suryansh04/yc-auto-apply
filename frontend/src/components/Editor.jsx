@@ -8,7 +8,7 @@
 // opened for editing.
 import { useState } from 'react'
 
-export default function Editor({ initialSubject, initialBody, errors, onSave, onCancel }) {
+export default function Editor({ initialSubject, initialBody, errors, saving, onSave, onCancel }) {
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [body, setBody] = useState(initialBody ?? '')
 
@@ -45,8 +45,8 @@ export default function Editor({ initialSubject, initialBody, errors, onSave, on
       </label>
 
       <div className="editor-actions">
-        <button type="button" onClick={() => onSave(subject, body)}>
-          Save
+        <button type="button" onClick={() => onSave(subject, body)} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
         </button>
         <button type="button" onClick={onCancel}>
           Cancel

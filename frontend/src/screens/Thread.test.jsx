@@ -179,5 +179,13 @@ it('shows a not-found state for an unknown thread id rather than crashing', asyn
   // overrides renderWithQuery's client-level retry:false since a
   // per-query option wins over a client default - so the 404 isn't
   // surfaced until a real (~1s backoff) retry has also failed.
-  expect(await screen.findByText(/no such outreach/i, {}, { timeout: 3000 })).toBeInTheDocument()
+  const link = await screen.findByRole('link', { name: /back to contacts/i }, { timeout: 3000 })
+  expect(link).toHaveAttribute('href', '/contacts')
+  // A dedicated not-found state, not the generic error Banner (which
+  // would also happen to contain the words "no such outreach" verbatim,
+  // since that's the 404's own error message - a test that only checked
+  // for that substring would pass even if the dedicated branch were
+  // deleted).
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  expect(screen.queryByText(/could not load thread/i)).not.toBeInTheDocument()
 })

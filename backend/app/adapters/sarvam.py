@@ -120,9 +120,14 @@ CRITIC_JSON_SCHEMA: dict[str, Any] = {
         "verdict": {"type": "string", "enum": ["PASS", "NEEDS_REVISION"]},
         "concerns": {
             "type": "array",
-            # spec: "0-3 items" — Sarvam's strict JSON-schema mode actually
-            # enforces this bound server-side (fix round 1, review item #5).
-            "maxItems": 3,
+            # spec: "0-3 items". NOT enforced here via `maxItems` (fix
+            # round 2, ruling T13-3): OpenAI-style strict `json_schema` mode
+            # (which this endpoint follows) excludes `maxItems` from its
+            # supported keyword subset, and Sarvam's own behaviour on it is
+            # unconfirmed — untestable offline since every adapter test
+            # here is mocked. The 0-3 bound is enforced
+            # provider-independently in `run_critic`
+            # (`app.application.critique_draft`) instead, by truncation.
             "items": {
                 "type": "object",
                 "properties": {

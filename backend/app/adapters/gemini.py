@@ -480,9 +480,14 @@ CRITIC_SCHEMA: dict[str, Any] = {
         "verdict": {"type": "STRING", "enum": ["PASS", "NEEDS_REVISION"]},
         "concerns": {
             "type": "ARRAY",
-            # spec: "0-3 items" — enforced structurally, not just by
-            # instruction (fix round 1, review item #5).
-            "maxItems": 3,
+            # spec: "0-3 items". NOT enforced here via `maxItems` (fix
+            # round 2, ruling T13-3): Gemini's `response_schema` field is
+            # documented to reject `maxItems` on ARRAY types in its legacy
+            # OpenAPI subset, which would break structured-output
+            # acceptance on every real call — untestable offline since
+            # every adapter test here is mocked. The 0-3 bound is enforced
+            # provider-independently in `run_critic`
+            # (`app.application.critique_draft`) instead, by truncation.
             "items": {
                 "type": "OBJECT",
                 "properties": {

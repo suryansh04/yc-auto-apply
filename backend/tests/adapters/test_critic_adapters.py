@@ -102,14 +102,6 @@ def test_gemini_critic_raises_on_non_json_output():
         GeminiCritic(client, model=MODEL).critique(DRAFT)
 
 
-def test_gemini_critic_schema_bounds_concerns_to_at_most_three():
-    # Fix round 1 (review item #5): the spec's "0-3 items" was previously
-    # enforced only by prompt instruction, not structurally.
-    from app.adapters.gemini import CRITIC_SCHEMA
-
-    assert CRITIC_SCHEMA["properties"]["concerns"]["maxItems"] == 3
-
-
 def test_build_critic_prompt_is_shared_verbatim_with_sarvam():
     from app.adapters import sarvam
 
@@ -164,14 +156,6 @@ def test_sarvam_critic_requests_strict_json_schema_with_the_verdict_enum():
     assert schema["required"] == ["verdict", "concerns", "overall_note"]
     assert schema["additionalProperties"] is False
     assert body["temperature"] == 0
-
-
-def test_sarvam_critic_schema_bounds_concerns_to_at_most_three():
-    # Fix round 1 (review item #5): Sarvam's strict mode actually enforces
-    # this server-side, unlike a prompt-only instruction.
-    from app.adapters.sarvam import CRITIC_JSON_SCHEMA
-
-    assert CRITIC_JSON_SCHEMA["properties"]["concerns"]["maxItems"] == 3
 
 
 @respx.mock

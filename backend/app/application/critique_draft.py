@@ -21,6 +21,19 @@ message row carries when no critic was configured at all — Task 13 disclosed
 guess: the brief allows either `None` or an explicit marker here, and a
 distinct marker is more honest to a human reviewer than reusing the
 "critic never ran" value for "critic crashed").
+
+**`concerns` is bounded to at most `MAX_CONCERNS` (3) items here, in code
+— not via a JSON-schema `maxItems` on the adapters' structured-output
+schemas (fix round 2, ruling T13-3).** Gemini's `response_schema` field
+(the legacy OpenAPI subset both adapters are built on) is documented to
+reject `maxItems` on `ARRAY` types, and OpenAI-style strict `json_schema`
+mode (which the Sarvam endpoint follows) excludes it from its supported
+keyword subset too — either would risk breaking structured-output
+acceptance on the first real call, and every adapter test in this repo is
+mocked, so nothing offline could have caught that live rejection. The
+prompt still asks the model for "0 to 3 objects"; this module is what
+actually guarantees it, provider-independently, by truncating rather than
+trusting the model to have counted correctly.
 """
 
 from __future__ import annotations
@@ -36,6 +49,10 @@ log = logging.getLogger(__name__)
 NEEDS_REVISION = "NEEDS_REVISION"
 PASS = "PASS"
 ERROR = "ERROR"  # this module's own marker for "the critic call failed"
+
+# spec: "0-3 items" (fix round 2, ruling T13-3: enforced here by
+# truncation, never via a schema maxItems — see module docstring).
+MAX_CONCERNS = 3
 
 
 @dataclass
@@ -67,8 +84,14 @@ def run_critic(critic, draft: dict) -> CritiqueResult:
 
     raw = raw if isinstance(raw, dict) else {}
     verdict = str(raw.get("verdict") or "")
+    concerns = raw.get("concerns")
+    if isinstance(concerns, list) and len(concerns) > MAX_CONCERNS:
+        # Truncate, don't reject — the critic is advisory only (D22); a
+        # model that miscounted still gets its verdict and note stored,
+        # just with only the first MAX_CONCERNS concerns kept, in order.
+        concerns = concerns[:MAX_CONCERNS]
     return CritiqueResult(
         verdict=verdict,
-        concerns=raw.get("concerns"),
+        concerns=concerns,
         overall_note=raw.get("overall_note"),
     )

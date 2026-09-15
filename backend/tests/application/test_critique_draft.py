@@ -214,6 +214,28 @@ def test_a_critic_exceptions_own_message_never_reaches_the_log(
     assert "RuntimeError" in caplog.text  # the type name IS logged - just not the message
 
 
+def test_a_critic_returning_more_than_three_concerns_is_truncated_to_three_in_order(
+    repos, ready_founder, fake_drafter,
+):
+    """Fix round 2 (ruling T13-3): the spec's "0-3 items" is enforced by
+    truncation in `run_critic`, never by a JSON-schema `maxItems` on either
+    provider's structured-output schema (that risked breaking structured-
+    output acceptance outright on a live call — see
+    `app.application.critique_draft`'s module docstring). A critic that
+    miscounts and returns five concerns must still land exactly the first
+    three, in the order it gave them, on the stored row."""
+    five_concerns = [{"span": f"phrase {i}", "issue": f"issue {i}"} for i in range(5)]
+
+    class _OvercountingCritic:
+        def critique(self, draft: dict) -> dict:
+            return {"verdict": "PASS", "concerns": five_concerns, "overall_note": "fine"}
+
+    DraftOutreach(fake_drafter, _repos(repos), critic=_OvercountingCritic()).run(limit=1)
+
+    row = repos.message.get_outbound(ready_founder.id, 0)
+    assert row.critic_concerns == five_concerns[:3]
+
+
 def test_critic_sees_the_validated_draft_not_the_raw_model_output(repos, ready_founder, fake_critic):
     raw_with_extra_field = {
         "subject": PENDING_SUBJECT, "body": PENDING_BODY,

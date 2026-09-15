@@ -524,16 +524,19 @@ def _require_send_config(settings) -> None:
 
 def _load_oauth_client(path: str) -> tuple[str, str]:
     """`client_id` / `client_secret` from a Google Cloud OAuth client JSON
-    (`{"installed": {...}}` for a Desktop app, or `{"web": {...}}`)."""
-    import json
-    from pathlib import Path
+    (`{"installed": {...}}` for a Desktop app, or `{"web": {...}}`).
+    Extracted to `app.api.deps.load_oauth_client` (Task 15a) so the UI job
+    runner's `poll-replies` stage can load the same client identity a
+    `GmailReader` needs - same extraction pattern as `_drafter`/`_critic`/
+    `_on_gemini_free_tier` above. `RuntimeError` from there is translated
+    here into `typer.BadParameter` for the CLI's own nice error
+    formatting, unchanged CLI behaviour from before the extraction."""
+    from app.api.deps import load_oauth_client
 
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    block = data.get("installed") or data.get("web") or {}
-    client_id, client_secret = block.get("client_id"), block.get("client_secret")
-    if not client_id or not client_secret:
-        raise typer.BadParameter("client secrets JSON has no installed/web client_id + client_secret")
-    return client_id, client_secret
+    try:
+        return load_oauth_client(path)
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _gmail_sender(client_id: str, client_secret: str, refresh_token: str, sender_address: str):

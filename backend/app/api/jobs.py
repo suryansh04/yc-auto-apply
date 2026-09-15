@@ -11,10 +11,11 @@ founder inside `ResolveEmails.run` itself; `scrape` commits per company;
 `sync` and `draft` commit once at the end) - `cli.py` stays the reference
 for what "correct" wiring looks like.
 
-PF-1 (controller ruling): only the four stages that exist today are
-registered. `poll-replies`, `classify-replies` and `schedule-follow-ups`
-are NOT stubbed here; Tasks 8, 9 and 11 each add their own `JOB_KINDS`
-entry when their use case lands.
+Task 15a: the three stages Tasks 8, 9 and 11 left unregistered
+(`poll-replies`, `classify-replies`, `schedule-follow-ups`) are wired in
+below, following the same pattern as the original four - own session,
+own repos, refuse loudly instead of leaking a secret, commit per unit of
+work where the use case itself doesn't already, one-line summary.
 """
 
 from __future__ import annotations
@@ -196,14 +197,113 @@ def _draft(session: Session, progress: ProgressFn) -> str:
     return summary
 
 
-# PF-1: register ONLY the stages that exist today. Do not add
-# poll-replies / classify-replies / schedule-follow-ups here - Tasks 8, 9
-# and 11 each append their own entry when their use case lands.
+def _poll_replies(session: Session, progress: ProgressFn) -> str:
+    from app.adapters.db.repositories import (
+        FounderRepo,
+        GmailCredentialRepo,
+        MessageRepo,
+        OutreachRepo,
+    )
+    from app.adapters.gmail_reader import GmailReader
+    from app.api.deps import load_oauth_client
+    from app.application.poll_replies import PollReplies, PollRepos
+    from app.config import get_settings
+
+    settings = get_settings()
+    # Refuse clearly and EARLY, before touching Gmail or building a reader
+    # - naming only what setting is missing, never a value (T8's own
+    # docstring: secrets and account identity never belong in a raised
+    # message). Mirrors `require_gmail_config`'s missing-config shape.
+    if not settings.gmail_client_secrets_path:
+        raise RuntimeError("GMAIL_CLIENT_SECRETS_PATH is not set")
+    credential_repo = GmailCredentialRepo(session)
+    if credential_repo.get_by_account_email(settings.gmail_sender_address) is None:
+        raise RuntimeError(
+            "no Gmail credential is stored for the configured account - run gmail-auth first"
+        )
+
+    # Same client-secrets JSON `cli.py send` loads via `_load_oauth_client`
+    # (now `app.api.deps.load_oauth_client`, Task 15a's extraction so this
+    # module never imports `app.cli` - `test_architecture.py` forbids
+    # that). `GmailCredential` deliberately does not store the OAuth
+    # client identity itself (see `GmailReader`'s own docstring).
+    client_id, client_secret = load_oauth_client(settings.gmail_client_secrets_path)
+    reader = GmailReader(
+        credential_repo, settings.gmail_sender_address, client_id, client_secret
+    )
+    repos = PollRepos(
+        outreach=OutreachRepo(session),
+        message=MessageRepo(session),
+        founder=FounderRepo(session),
+        credential=credential_repo,
+        session=session,
+    )
+    try:
+        result = PollReplies(reader, repos, _UTCClock()).run()
+    finally:
+        reader.close()
+
+    progress(result.fetched, None)
+    return (
+        f"fetched {result.fetched}, stored {result.stored}, "
+        f"bounced {result.bounced}, skipped {result.skipped}"
+    )
+
+
+def _classify_replies(session: Session, progress: ProgressFn) -> str:
+    from app.adapters.db.repositories import MessageRepo, OutreachRepo, SettingsRepo
+    from app.api.deps import build_classifier, on_gemini_free_tier
+    from app.application.classify_reply import ClassifyReply, ClassifyRepos
+    from app.config import get_settings
+
+    settings = get_settings()
+    if on_gemini_free_tier(settings):
+        # Founder reply text goes to the LLM here exactly as it does in
+        # `_draft` - same refusal, same reasoning (D12), no UI opt-in.
+        raise RuntimeError(
+            "refusing to classify replies on a free-tier Gemini key from the UI job runner"
+        )
+
+    classifier = build_classifier(settings)
+    repos = ClassifyRepos(
+        message=MessageRepo(session),
+        outreach=OutreachRepo(session),
+        session=session,
+        settings=SettingsRepo(session),
+    )
+    result = ClassifyReply(classifier, repos, _UTCClock()).run()
+
+    progress(result.classified + result.errors, None)
+    return (
+        f"classified {result.classified}, replied {result.replied}, "
+        f"ignored {result.ignored}, errors {result.errors}"
+    )
+
+
+def _schedule_follow_ups(session: Session, progress: ProgressFn) -> str:
+    from app.adapters.db.repositories import MessageRepo, OutreachRepo, SettingsRepo
+    from app.application.schedule_follow_ups import FollowUpRepos, ScheduleFollowUps
+
+    repos = FollowUpRepos(
+        outreach=OutreachRepo(session),
+        message=MessageRepo(session),
+        session=session,
+        settings=SettingsRepo(session),
+    )
+    result = ScheduleFollowUps(repos, _UTCClock()).run()
+
+    progress(result.scheduled + result.closed, None)
+    return f"scheduled {result.scheduled}, closed {result.closed}"
+
+
 JOB_KINDS: dict[str, Callable[[Session, ProgressFn], str]] = {
     "sync": _sync,
     "scrape": _scrape,
     "resolve": _resolve,
     "draft": _draft,
+    "poll-replies": _poll_replies,
+    "classify-replies": _classify_replies,
+    "schedule-follow-ups": _schedule_follow_ups,
 }
 
 

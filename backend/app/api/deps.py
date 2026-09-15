@@ -241,6 +241,34 @@ def require_send_config(settings: Settings) -> list[str]:
     return missing
 
 
+def load_oauth_client(path: str) -> tuple[str, str]:
+    """Task 15a: extracted from `app.cli._load_oauth_client` so
+    `app.api.jobs._poll_replies` can load the OAuth client id/secret a
+    `GmailReader` needs without `app.api/` importing `app.cli`
+    (`test_architecture.py` forbids that backwards coupling — `cli.py` is
+    the operator adapter, not a library for the API layer, mirrored from
+    the same extraction already applied to `on_gemini_free_tier`/
+    `build_drafter`/`build_classifier`/`build_critic`/
+    `require_send_config`/`require_gmail_config` above).
+
+    `client_id` / `client_secret` from a Google Cloud OAuth client JSON
+    (`{"installed": {...}}` for a Desktop app, or `{"web": {...}}`).
+    Raises a plain `RuntimeError` (never a `typer`-specific exception,
+    same discipline as `build_drafter`) naming what is wrong — never the
+    file's contents. `app.cli._load_oauth_client` now calls this and
+    translates the error into `typer.BadParameter` for its own nice CLI
+    formatting."""
+    import json
+    from pathlib import Path
+
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    block = data.get("installed") or data.get("web") or {}
+    client_id, client_secret = block.get("client_id"), block.get("client_secret")
+    if not client_id or not client_secret:
+        raise RuntimeError("client secrets JSON has no installed/web client_id + client_secret")
+    return client_id, client_secret
+
+
 def require_gmail_config(settings: Settings) -> list[str]:
     """The subset `gmail-auth` needs (fix round 1, F5, preserved from
     `app.cli`): only the sending address and the OAuth client-secrets file

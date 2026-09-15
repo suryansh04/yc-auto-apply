@@ -315,6 +315,21 @@ def _drafter():
         raise typer.BadParameter(str(exc)) from exc
 
 
+def _critic():
+    """Provider switch for the advisory `Critic` (D22, Task 13). Shared
+    with the UI job runner via `app.api.deps.build_critic`, the same
+    extraction `_drafter`/`build_drafter` above already did (T6-6/T9). Same
+    error translation as `_drafter` - but note the critic is advisory only,
+    so `draft`'s own call site never lets a `typer.BadParameter` from here
+    abort a run; see its call site below."""
+    from app.api.deps import build_critic
+
+    try:
+        return build_critic(get_settings())
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
 def _on_gemini_free_tier() -> bool:
     # Task 6 fix round 1 (ruling T6-3): shared with `app.api.jobs`'s UI
     # job runner via `app.api.deps.on_gemini_free_tier`, the same
@@ -421,6 +436,7 @@ def draft(
     settings = get_settings()
     _refuse_free_tier_for_founder_data(allow_free_tier)
     drafter = _drafter()
+    critic = _critic()  # Task 13 (D22): advisory only - shares the drafter's provider/key
     with _session() as session:
         repos = DraftRepos(
             founder=FounderRepo(session),
@@ -432,7 +448,9 @@ def draft(
             message=MessageRepo(session),
             resume_profile=ResumeProfileRepo(session),
         )
-        result = DraftOutreach(drafter, repos, keep_unverified=keep_unverified).run(limit=limit)
+        result = DraftOutreach(
+            drafter, repos, keep_unverified=keep_unverified, critic=critic,
+        ).run(limit=limit)
         session.commit()
 
     typer.echo(

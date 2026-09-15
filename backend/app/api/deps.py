@@ -187,6 +187,32 @@ def build_classifier(settings: Settings):
     return GeminiReplyClassifier(client, model=settings.gemini_model)
 
 
+def build_critic(settings: Settings):
+    """Task 13 (D22): the identical LLM-provider switch as `build_drafter`/
+    `build_classifier` above, for a `Critic` adapter (Sarvam or Gemini)
+    instead of a `Drafter`/`ReplyClassifier` — kept beside them, not
+    duplicated a sixth time, for the same reason those two already give
+    (T6-6). The critic is advisory only (D22): a caller that fails to
+    build one (missing key) should simply not pass a critic to
+    `DraftOutreach` rather than treat this as fatal the way `build_drafter`
+    is — `app.cli._critic`/the job runner decide that, not this function."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamCritic(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiCritic
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiCritic(client, model=settings.gemini_model)
+
+
 def require_send_config(settings: Settings) -> list[str]:
     """Task 5: every `Settings` field `send` needs before it may build a
     real `GmailSender` — the Gmail OAuth client config plus a real,

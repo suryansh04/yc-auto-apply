@@ -405,6 +405,9 @@ class FakeMessageRow:
     rationale: str | None = None
     classified_at: object = None
     corrected: bool = False           # Task 10: True only via an operator's hand correction
+    critic_verdict: str | None = None       # Task 13 (D22): advisory voice critic
+    critic_concerns: object = None          # list[{span, issue}] or None
+    critic_overall_note: str | None = None
 
 
 class FakeMessageRepo:

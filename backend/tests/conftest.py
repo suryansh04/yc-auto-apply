@@ -39,6 +39,7 @@ from datetime import datetime, timedelta, timezone
 
 
 from app.domain.states import OutreachState
+from tests.fakes import FakeCritic, FakeDrafter, FakeExplodingCritic
 from tests.fakes_repos import (
     MANUAL_WRITE_ERROR,
     VAHAN_DESCRIPTION,
@@ -158,6 +159,44 @@ def ready_founder(repos: FakeRepos) -> FakeFounderRow:
     repos.outreach.add(id=5, founder_id=founder.id, state=str(OutreachState.READY_TO_DRAFT))
     repos.news.add(id=1, company_id=5, title=VAHAN_NEWS, source="The Economic Times")
     return founder
+
+
+# --- Task 13 fixtures (D22 voice critic) --------------------------------------
+
+# Same body as the task-14 GOOD draft (`PENDING_BODY`/`PENDING_SUBJECT`
+# above): validates against `ready_founder`'s news source + the one resume
+# claim, so a critic test's drafter produces a draft that actually clears
+# the deterministic validator without needing its own copy of that prose.
+_GOOD_DRAFT = {"subject": PENDING_SUBJECT, "body": PENDING_BODY,
+               "research_source_type": "news", "research_source_id": 1}
+_BAD_DRAFT = {**_GOOD_DRAFT, "body": "I hope this email finds you well. Would you take an intern?"}
+
+
+@pytest.fixture
+def fake_drafter() -> FakeDrafter:
+    """A drafter that always produces the validating draft — enough
+    responses queued (two) for a critic test that triggers exactly one
+    redraft, since `FakeDrafter` falls back to a non-validating default
+    once its queue is empty."""
+    return FakeDrafter([dict(_GOOD_DRAFT), dict(_GOOD_DRAFT)])
+
+
+@pytest.fixture
+def drafter_bad_then_good() -> FakeDrafter:
+    """First attempt fails the deterministic validator (banned phrase),
+    second attempt validates — for the guard that a critic redraft is
+    revalidated deterministically before the critic is ever consulted."""
+    return FakeDrafter([dict(_BAD_DRAFT), dict(_GOOD_DRAFT)])
+
+
+@pytest.fixture
+def fake_critic() -> FakeCritic:
+    return FakeCritic()
+
+
+@pytest.fixture
+def exploding_critic() -> FakeExplodingCritic:
+    return FakeExplodingCritic()
 
 
 @pytest.fixture

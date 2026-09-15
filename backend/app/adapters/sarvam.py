@@ -39,10 +39,12 @@ from app.adapters.gemini import (
     CLAIM_KINDS,
     SOURCE_KINDS,
     _CLASSIFIER_SYSTEM,
+    _CRITIC_SYSTEM,
     _DRAFTER_SYSTEM,
     _PARSER_PROMPT,
     _decode_json,
     build_classify_prompt,
+    build_critic_prompt,
     build_draft_prompt,
 )
 from app.domain.replies import LABELS
@@ -107,6 +109,30 @@ REPLY_CLASSIFICATION_JSON_SCHEMA: dict[str, Any] = {
         "rationale": {"type": "string"},
     },
     "required": ["label", "confidence", "rationale"],
+    "additionalProperties": False,
+}
+
+# Task 13: JSON-schema (lowercase) mirror of `gemini.CRITIC_SCHEMA` — same
+# three fields, `additionalProperties: false` for strict mode.
+CRITIC_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["PASS", "NEEDS_REVISION"]},
+        "concerns": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "span": {"type": "string"},
+                    "issue": {"type": "string"},
+                },
+                "required": ["span", "issue"],
+                "additionalProperties": False,
+            },
+        },
+        "overall_note": {"type": "string"},
+    },
+    "required": ["verdict", "concerns", "overall_note"],
     "additionalProperties": False,
 }
 
@@ -290,4 +316,39 @@ class SarvamReplyClassifier:
             "label": str(data["label"]),
             "confidence": confidence,
             "rationale": str(data["rationale"]),
+        }
+
+
+class SarvamCritic:
+    """Real `Critic` port (spec "The voice critic (D22)") over Sarvam. Same
+    three-field contract as `GeminiCritic`, sharing the same prompt
+    (`_CRITIC_SYSTEM`/`build_critic_prompt`, imported from
+    `app.adapters.gemini`) so both providers judge a draft's voice against
+    exactly the same rules. Advisory only — nothing here can block or
+    approve a send."""
+
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, **chat_kwargs):
+        self._chat = _SarvamChat(api_key, model, **chat_kwargs)
+
+    def critique(self, draft: dict) -> dict:
+        content = self._chat.complete(
+            "voice critic",
+            [
+                {"role": "system", "content": _CRITIC_SYSTEM},
+                {"role": "user", "content": build_critic_prompt(draft)},
+            ],
+            CRITIC_JSON_SCHEMA,
+            "voice_critique",
+            temperature=0,
+        )
+        data = _decode_json(content, "voice critic")
+        if not isinstance(data, dict):
+            raise ValueError("voice critic: expected a JSON object")
+        missing = [k for k in ("verdict", "concerns", "overall_note") if k not in data]
+        if missing:
+            raise ValueError(f"voice critic: response missing {', '.join(missing)}")
+        return {
+            "verdict": str(data["verdict"]),
+            "concerns": data["concerns"],
+            "overall_note": str(data["overall_note"]),
         }

@@ -35,6 +35,19 @@ What happens per founder, in order:
    a drafter that cites one anyway gets the precise D23 error ("cited job
    posting is not intern-appropriate") rather than a vaguer "does not
    resolve" — the reviewer sees exactly what went wrong.
+   **The voice critic (Task 13, D22) shares this same retry budget — it is
+   not a second, independent one.** Once a draft passes the deterministic
+   validator above, and only then, `critic.critique(...)` (if a critic was
+   injected) runs on the validated draft. On `NEEDS_REVISION`, exactly one
+   more re-draft happens — but only if an attempt remains in `_MAX_ATTEMPTS`
+   — with the critic's `concerns` appended to the prompt; the re-draft goes
+   back through the deterministic validator FIRST (a tone fix could
+   introduce a banned phrase), then the critic once more. Whatever the
+   state after that, the draft moves on to `PENDING_APPROVAL` regardless —
+   the critic can never block a send and can never approve one, and an
+   exception from it is caught and recorded honestly rather than treated as
+   a `PASS` (`app.application.critique_draft.run_critic`). See that
+   module's docstring for the full contract.
 5. **Persist and transition.** Valid or not, the draft is persisted as the
    outbound `messages` row for `(outreach_id, sequence_step)` and the
    outreach moves `READY_TO_DRAFT → PENDING_APPROVAL` through
@@ -80,6 +93,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Protocol
 
+from app.application.critique_draft import CritiqueResult, run_critic
 from app.domain.entities import Draft, ResumeClaim
 from app.domain.interns import is_intern_appropriate
 from app.domain.states import OutreachState, assert_transition
@@ -147,10 +161,11 @@ class _Sources:
 
 
 class DraftOutreach:
-    def __init__(self, drafter, repos: DraftRepos, keep_unverified: bool = False):
+    def __init__(self, drafter, repos: DraftRepos, keep_unverified: bool = False, critic=None):
         self._drafter = drafter
         self._repos = repos
         self._keep_unverified = keep_unverified
+        self._critic = critic  # Task 13 (D22): advisory only, may be None
 
     def run(self, limit: int | None = None) -> DraftResult:
         result = DraftResult()
@@ -206,10 +221,11 @@ class DraftOutreach:
             draft: Draft | None = None
             errors: list[str] = []
             failure: BaseException | None = None
+            critic_result: CritiqueResult | None = None
+            retry_context: dict = {}  # fields to merge in for the NEXT attempt, if any remain
             for attempt in range(_MAX_ATTEMPTS):
                 if attempt > 0:
-                    context = {**context, "validation_errors": errors,
-                               "previous_draft": _draft_dict(draft)}
+                    context = {**context, **retry_context}
                     result.retried += 1
                 try:
                     raw = self._drafter.draft(context)
@@ -223,8 +239,27 @@ class DraftOutreach:
                     previous_body=previous_body, extra_allowed_text=extra_allowed,
                     all_publications=sources.publications,
                 )
-                if not errors:
-                    break
+                if errors:
+                    # Deterministic failure — retry (if a further attempt
+                    # remains) with the validation errors, same as before
+                    # Task 13. The critic never sees an invalid draft, and
+                    # any earlier critic verdict from a prior attempt this
+                    # run is left untouched (spec: a redraft that then
+                    # fails deterministic validation still carries the
+                    # critic's last verdict to the review queue).
+                    retry_context = {"validation_errors": errors, "previous_draft": _draft_dict(draft)}
+                    continue
+                if self._critic is None:
+                    break  # no critic injected: behaviour identical to pre-Task-13
+                # Task 13 (D22): the critic runs only on an already-valid
+                # draft, and shares this same _MAX_ATTEMPTS budget — not a
+                # second, independent retry count.
+                critic_result = run_critic(self._critic, _draft_dict(draft))
+                if critic_result.needs_revision:
+                    retry_context = {"critic_concerns": critic_result.concerns,
+                                      "previous_draft": _draft_dict(draft)}
+                    continue
+                break  # PASS (or any non-NEEDS_REVISION verdict, incl. ERROR): done
 
             if failure is not None:
                 # Fix round 1 (F3): type name only — never str(exc), which
@@ -244,7 +279,7 @@ class DraftOutreach:
                 continue  # leave READY_TO_DRAFT; resumable next run
 
             consecutive_errors = 0
-            self._finish(outreach, step, draft=draft, errors=errors)
+            self._finish(outreach, step, draft=draft, errors=errors, critic_result=critic_result)
             if errors:
                 result.manual_write += 1
             else:
@@ -300,7 +335,8 @@ class DraftOutreach:
     def _build_sources(self, company) -> _Sources:
         return build_sources(self._repos.news, self._repos.launch, self._repos.job_posting, company)
 
-    def _finish(self, outreach, step: int, draft: Draft | None, errors: list[str]) -> None:
+    def _finish(self, outreach, step: int, draft: Draft | None, errors: list[str],
+                critic_result: CritiqueResult | None = None) -> None:
         # The transition is checked BEFORE anything is written, so an
         # illegal state never gets a half-persisted draft.
         assert_transition(OutreachState(outreach.state), OutreachState.PENDING_APPROVAL)
@@ -316,6 +352,15 @@ class DraftOutreach:
                 approved_at=None,        # a redraft voids any earlier approval
                 edited_by_user=False,
             )
+            # Task 13 (D22): only written when a critic actually ran this
+            # run (`critic_result is not None`) — with no critic injected
+            # at all, these three columns are left untouched, which is
+            # what keeps `DraftOutreach(..., critic=None)` byte-for-byte
+            # unchanged from before Task 13.
+            if critic_result is not None:
+                fields["critic_verdict"] = critic_result.verdict
+                fields["critic_concerns"] = critic_result.concerns
+                fields["critic_overall_note"] = critic_result.overall_note
             existing = self._repos.message.get_outbound(outreach.id, step)
             if existing is not None:
                 fields["id"] = existing.id

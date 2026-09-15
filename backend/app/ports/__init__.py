@@ -130,6 +130,26 @@ class Drafter(Protocol):
 
 
 @runtime_checkable
+class Critic(Protocol):
+    """Task 13 (D22): the second, judgment-based pass `DraftOutreach` runs
+    after the deterministic validator (`Drafter` above) already passed a
+    draft — advisory only. `critique(draft)` takes the validated draft dict
+    (`{subject, body, research_source_type, research_source_id}`, the same
+    shape `Drafter.draft` returns) and answers
+    `{verdict: "PASS"|"NEEDS_REVISION", concerns: [{span, issue}], overall_note}`.
+
+    The critic can never block a send and can never approve one — it only
+    ever adds information for the human reviewer (D5 stays the sole gate).
+    `DraftOutreach` persists whatever it returns on the `messages` row
+    regardless of the verdict, and a `critique` call that raises must not
+    stop a draft either (see `app.application.critique_draft.run_critic`).
+    Backed by a Sarvam/Gemini adapter (configuration, not part of this
+    interface), same shape as `Drafter`/`ReplyClassifier` above."""
+
+    def critique(self, draft: dict) -> dict: ...  # {verdict, concerns, overall_note}
+
+
+@runtime_checkable
 class ResumeParser(Protocol):
     def parse(self, raw_text: str) -> list[dict]: ...  # [{kind, text, source_span}]
 

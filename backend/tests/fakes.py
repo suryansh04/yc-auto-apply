@@ -65,6 +65,46 @@ class FakeDrafter:
                 "research_source_type": "news", "research_source_id": 1}
 
 
+class FakeCritic:
+    """Task 13 (D22): fake `Critic` port. `.queue` is consumed in order,
+    one verdict dict per `critique()` call; once empty, `.next` (a single
+    dict, left in place across calls — unlike `.queue`, re-assign it to
+    change the answer) is returned instead; with neither set, defaults to
+    a plain PASS so a test that doesn't care about the critic's answer
+    still gets one. `.calls` records every `draft` dict handed in, so a
+    test can assert the critic saw the validated draft (exactly
+    `{subject, body, research_source_type, research_source_id}`), not the
+    raw model output or anything else."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+        self.next: dict | None = None
+        self.queue: list[dict] = []
+
+    def critique(self, draft: dict) -> dict:
+        self.calls.append(draft)
+        if self.queue:
+            return self.queue.pop(0)
+        if self.next is not None:
+            return self.next
+        return {"verdict": "PASS", "concerns": [], "overall_note": "fine"}
+
+
+class FakeExplodingCritic:
+    """Task 13: a `Critic` whose `critique()` always raises — for the
+    guarantee that a critic failure never blocks or corrupts a draft
+    (D22). `.calls` still records the draft it was handed, the same as
+    `FakeCritic`, so a test can confirm it was actually invoked before it
+    blew up."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def critique(self, draft: dict) -> dict:
+        self.calls.append(draft)
+        raise RuntimeError("critic exploded")
+
+
 class FakeReplyClassifier:
     """Task 9: `.next` queues the dict `classify()` returns on its NEXT
     call (cleared after use, so a test can set a different label per call

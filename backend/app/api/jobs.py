@@ -142,7 +142,7 @@ def _draft(session: Session, progress: ProgressFn) -> str:
         OutreachRepo,
         ResumeProfileRepo,
     )
-    from app.api.deps import build_drafter, on_gemini_free_tier
+    from app.api.deps import build_critic, build_drafter, on_gemini_free_tier
     from app.application.draft_outreach import DraftOutreach, DraftRepos
     from app.config import get_settings
 
@@ -162,6 +162,17 @@ def _draft(session: Session, progress: ProgressFn) -> str:
     # also what `app.cli._drafter` calls, so a new provider or a changed
     # model default is written once.
     drafter = build_drafter(settings)
+    # Task 13 (D22): the advisory voice critic, same provider switch as the
+    # drafter above (`build_critic`, shared with `app.cli._critic`, T6-6's
+    # extraction pattern). Advisory only — if it can't even be built (e.g.
+    # a provider misconfiguration that somehow only affects the critic),
+    # that must not abort a drafting run that can otherwise proceed fine
+    # without a second opinion.
+    try:
+        critic = build_critic(settings)
+    except RuntimeError as exc:
+        log.warning("voice critic unavailable, drafting without one: %s", exc)
+        critic = None
     repos = DraftRepos(
         founder=FounderRepo(session),
         company=CompanyRepo(session),
@@ -172,7 +183,7 @@ def _draft(session: Session, progress: ProgressFn) -> str:
         message=MessageRepo(session),
         resume_profile=ResumeProfileRepo(session),
     )
-    result = DraftOutreach(drafter, repos).run()
+    result = DraftOutreach(drafter, repos, critic=critic).run()
     session.commit()  # once at the end, same as `cli.py draft`
 
     progress(result.drafted + result.manual_write + result.errors, None)

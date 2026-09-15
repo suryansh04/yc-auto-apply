@@ -470,3 +470,103 @@ class GeminiReplyClassifier:
             "confidence": confidence,
             "rationale": str(data["rationale"]),
         }
+
+
+# --- Task 13: GeminiCritic (D22 voice critic) -----------------------------------
+
+CRITIC_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "verdict": {"type": "STRING", "enum": ["PASS", "NEEDS_REVISION"]},
+        "concerns": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "span": {"type": "STRING"},
+                    "issue": {"type": "STRING"},
+                },
+                "required": ["span", "issue"],
+            },
+        },
+        "overall_note": {"type": "STRING"},
+    },
+    "required": ["verdict", "concerns", "overall_note"],
+}
+
+_CRITIC_SYSTEM = """You are a second opinion on a cold internship email a student is about to
+send a startup founder. Another process already checked it mechanically -
+word counts, banned phrases, and that every specific claim is grounded in
+real material. Do not re-check any of that. Your only job is naturalness,
+specificity and concision: does this read like one specific person wrote
+it to one specific founder, or does it read generic, stiff, or like a
+template with the blanks filled in?
+
+The single most useful question: is any sentence here doing no work? A
+draft can pass every mechanical rule and still contain a sentence that
+adds nothing, restates something already said, or could be sent to any
+company with the names swapped. That is what you are here to catch.
+
+Never judge or comment on whether a fact is true, whether a claim is
+grounded, or word/sentence counts - those are already handled and are not
+your concern.
+
+Return a JSON object with:
+- "verdict": "PASS" if the email reads specific and natural, "NEEDS_REVISION"
+  if it does not.
+- "concerns": 0 to 3 objects, each with "span" (the exact phrase you are
+  flagging, quoted verbatim from the email) and "issue" (one short,
+  specific reason, e.g. "this opener could be sent to any company", "no
+  person actually writes 'the innovative work you're doing'"). Empty list
+  when there is nothing to flag.
+- "overall_note": at most 20 words, summarising your take for a human
+  reviewer who will see it next to the draft.
+"""
+
+
+def build_critic_prompt(draft: dict) -> str:
+    return (
+        "SUBJECT\n"
+        f"{draft.get('subject')}\n\n"
+        "BODY\n"
+        f"{draft.get('body')}\n"
+    )
+
+
+class GeminiCritic:
+    """Real `Critic` port (spec "The voice critic (D22)"). `critique(draft)`
+    returns `{verdict, concerns, overall_note}`; `DraftOutreach` (via
+    `app.application.critique_draft.run_critic`) is the only caller and the
+    only place that decides what the verdict means for the draft - this
+    adapter only guarantees the shape the schema promised, the same
+    division of responsibility as `GeminiDrafter`/`GeminiReplyClassifier`
+    above. Advisory only (D22): nothing here can block or approve a send."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def critique(self, draft: dict) -> dict:
+        response = _generate_with_retry(
+            self._client, self._sleep, "voice critic",
+            model=self._model,
+            contents=build_critic_prompt(draft),
+            config=types.GenerateContentConfig(
+                system_instruction=_CRITIC_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=CRITIC_SCHEMA,
+                temperature=0,
+            ),
+        )
+        data = _decode_json(response.text, "voice critic")
+        if not isinstance(data, dict):
+            raise ValueError("voice critic: expected a JSON object")
+        missing = [k for k in ("verdict", "concerns", "overall_note") if k not in data]
+        if missing:
+            raise ValueError(f"voice critic: response missing {', '.join(missing)}")
+        return {
+            "verdict": str(data["verdict"]),
+            "concerns": data["concerns"],
+            "overall_note": str(data["overall_note"]),
+        }

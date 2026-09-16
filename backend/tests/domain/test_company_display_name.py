@@ -78,3 +78,9 @@ def test_company_name_variants_are_ordered_longest_first():
     assert company_name_variants("Cashfree Payments") == ["Cashfree Payments", "Cashfree"]
     assert company_name_variants("Mudrex") == ["Mudrex"]
     assert company_name_variants("The Better Company") == ["The Better Company"]
+
+
+def test_trailing_period_in_the_stored_name_is_not_required_in_the_body():
+    # YC stores "Statiq." - a draft saying "does Statiq block the payment"
+    # names the company (live, 2026-09-16).
+    assert company_name_variants("Statiq.") == ["Statiq"]

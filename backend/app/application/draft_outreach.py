@@ -98,6 +98,7 @@ from app.domain.entities import Draft, ResumeClaim
 from app.domain.interns import is_intern_appropriate
 from app.domain.states import OutreachState, assert_transition
 from app.domain.targeting import OUT_OF_BAND_STATUS
+from app.domain.layout import normalise_paragraphs
 from app.domain.validation import SourceRow, validate_draft
 
 log = logging.getLogger(__name__)
@@ -462,7 +463,9 @@ def _to_draft(raw: dict, step: int) -> Draft:
         source_id = None
     return Draft(
         subject=str(raw.get("subject") or ""),
-        body=str(raw.get("body") or ""),
+        # Live finding (2026-09-16): repair missing paragraph breaks before
+        # validation - see app/domain/layout.py. Words are never changed.
+        body=normalise_paragraphs(str(raw.get("body") or "")),
         research_source_type=str(raw.get("research_source_type") or ""),
         research_source_id=source_id,
         sequence_step=step,

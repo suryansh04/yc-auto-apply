@@ -21,6 +21,9 @@ def dotenv_only(monkeypatch, tmp_path):
     )
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("SIGNATURE", raising=False)
+    monkeypatch.delenv("EMAIL_VERIFIER_API_KEY", raising=False)
+    monkeypatch.delenv("DAILY_SEND_CAP", raising=False)
+    monkeypatch.delenv("RESUME_PATH", raising=False)
     monkeypatch.setitem(Settings.model_config, "env_file", str(env))
     get_operator_settings.cache_clear()
     yield
@@ -41,3 +44,13 @@ def test_queue_preview_signature_comes_from_dotenv(dotenv_only, client, pending_
 
 def test_stats_verifier_configured_comes_from_dotenv(dotenv_only, client):
     assert client.get("/api/stats").json()["quota"]["configured"] is True
+
+
+def test_send_offline_path_daily_cap_comes_from_dotenv(dotenv_only, client, repos, five_approved, fake_sender):
+    """The `fake_sender`-injected offline path in `send.py` (`owns_sender`
+    is False) reads `settings.daily_send_cap` off `get_operator_settings()`,
+    not `os.environ` - `dotenv_only` writes DAILY_SEND_CAP=3 to the .env
+    file only, and never sets it as an actual environment variable."""
+    body = client.post("/api/send", json={}).json()
+    assert body["sent"] == 3
+    assert body["skipped_cap"] == 2

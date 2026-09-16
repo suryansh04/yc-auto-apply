@@ -12,7 +12,7 @@ import ManualEmail from './ManualEmail'
 
 // --- the brief's four -------------------------------------------------------
 
-it('shows the candidates already tried with their verdicts', async () => {
+it('collapses tried candidates behind a count until the reviewer expands them', async () => {
   mockManual([
     manualItem({
       outreach_id: 1,
@@ -24,10 +24,11 @@ it('shows the candidates already tried with their verdicts', async () => {
     }),
   ])
   render(<ManualEmail />)
-  expect(await screen.findByText(/akash@vahan\.co/)).toBeInTheDocument()
-  expect(screen.getByText(/invalid/)).toBeInTheDocument()
-  expect(screen.getByText(/a\.gupta@vahan\.co/)).toBeInTheDocument()
-  expect(screen.getByText(/risky/)).toBeInTheDocument()
+  const summary = await screen.findByText('2 tried')
+  expect(screen.getByText(/akash@vahan\.co/)).not.toBeVisible()
+  await userEvent.click(summary)
+  expect(screen.getByText(/akash@vahan\.co/)).toBeVisible()
+  expect(screen.getByText(/risky/)).toBeVisible()
 })
 
 it('submits a hand-typed address', async () => {

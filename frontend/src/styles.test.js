@@ -160,6 +160,21 @@ describe('long unbroken content wraps instead of being clipped', () => {
     expect(panes).toMatch(/min-width:\s*0\s*;/)
     expect(message).toMatch(/min-width:\s*0\s*;/)
   })
+
+  // V1 (T18 fix wave 2): a founder with several guessed-and-rejected
+  // candidates made the cited-source block push Approve/Reject ~1100px
+  // below the viewport. A capped, scrollable .source-text is what keeps
+  // the actions reachable without scrolling the whole page.
+  it('caps .source-text height and makes it scroll instead of pushing the page down', () => {
+    const sourceText = stripComments(
+      reviewQueueCss.slice(
+        reviewQueueCss.indexOf('.source-text {'),
+        reviewQueueCss.indexOf('}', reviewQueueCss.indexOf('.source-text {'))
+      )
+    )
+    expect(sourceText).toMatch(/max-height:\s*\d+vh\s*;/)
+    expect(sourceText).toMatch(/overflow-y:\s*auto\s*;/)
+  })
 })
 
 describe('form controls use the 14px base, not the label caption size', () => {

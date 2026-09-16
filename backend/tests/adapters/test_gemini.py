@@ -256,6 +256,30 @@ def test_system_prompt_tells_the_model_an_automated_reply_is_not_the_founder():
     assert "not the founder" in low
 
 
+def test_system_prompt_asks_for_the_curious_and_specific_voice():
+    # Live finding (2026-09-16): the operator called a real draft "very AI
+    # generated" and chose a target voice - part 1 is a real question about a
+    # mechanism or trade-off, part 2 says "resume attached", part 3 is a
+    # plain ask - with explicit anti-tell rules. Pins the guidance the model
+    # actually receives.
+    low = gemini_module._DRAFTER_SYSTEM.lower()
+    assert "curious and specific" in low
+    assert "mechanism" in low and "trade-off" in low
+    assert "resume attached" in low
+    assert "never be: praise" in low
+    assert "summarises the company back" in low
+    assert "abstract-noun" in low
+    for tell in ("genuinely", "the exact", "resonates", "aligns", "impressive",
+                 "fascinating", "incredible", "stacked adjectives", "contractions are fine"):
+        assert tell in low, tell
+    assert "tone only" in low
+    # The hard constraints from before survive the rewrite.
+    for kept in ("120", "25 words", "three paragraphs", "never mention location",
+                 "years of experience", "the source is how you learned it",
+                 "\"intern\" or \"internship\" must", "follow-ups:"):
+        assert kept in low, kept
+
+
 def test_drafter_appends_validation_errors_from_a_retry_context():
     client = FakeGenAIClient(DRAFT_JSON)
     ctx = {**CONTEXT, "validation_errors": ["banned phrase: 'reach out'", "no explicit internship ask"],

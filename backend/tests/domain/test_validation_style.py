@@ -1,6 +1,8 @@
 # backend/tests/domain/test_validation_style.py
+import pytest
+
 from app.domain.entities import Draft
-from app.domain.validation import validate_style
+from app.domain.validation import AI_TELL_PHRASES, validate_style
 
 GOOD_BODY = (
     "You're matching blue-collar workers to jobs over voice, in a dozen languages. "
@@ -118,3 +120,52 @@ def test_location_phrase_does_not_false_positive_on_partial_word():
             "Would you take an intern?")
     errs = validate_style(draft(body=body))
     assert not any("location" in e for e in errs)
+
+
+# --- Live finding 2026-09-16: "looks very AI generated" -------------------
+# The operator's chosen tone example (curious and specific: a real question
+# about the mechanism, one sentence about the student + "resume attached",
+# a plain ask). The opening question is split into two sentences relative
+# to the operator's wording because the original 31-word sentence breaks
+# the unchanged 25-word cap; nothing else differs.
+
+OPERATOR_EXAMPLE = (
+    'Quick question about RoboGPT: when someone gives a vague prompt like '
+    '"pick the red ones", where does the system push back? In the language '
+    "model, or in the planner underneath? I've been thinking about that "
+    "boundary a lot.\n\n"
+    "I'm a student looking for a software engineering internship. I built an "
+    "AI grading pipeline for WaveWatch (cut manual work ~70%), resume attached.\n\n"
+    "Would Orangewood have room for an intern this year?"
+)
+
+def test_the_operator_example_passes_style():
+    assert validate_style(draft(body=OPERATOR_EXAMPLE, subject="Intern question about RoboGPT")) == []
+
+
+def test_the_operator_example_is_the_one_in_the_drafter_prompt():
+    # The prompt's tone example and the validator's reference example are
+    # the same text - if one is edited the other must follow, or the prompt
+    # would be asking for a voice the validator rejects.
+    import re
+    from app.adapters.gemini import _DRAFTER_SYSTEM
+    squash = lambda t: re.sub(r"\s+", " ", t)
+    assert squash(OPERATOR_EXAMPLE) in squash(_DRAFTER_SYSTEM)
+
+
+@pytest.mark.parametrize("phrase", AI_TELL_PHRASES)
+def test_rejects_each_ai_tell_phrase(phrase):
+    body = f"You build voice AI and it {phrase} me. Would you take an intern?"
+    errs = validate_style(draft(body=body))
+    assert any(f"banned phrase: {phrase!r}" in e for e in errs)
+
+
+def test_the_ai_tell_list_covers_the_rejected_draft():
+    rejected = (
+        "Orangewood's RoboGPT lets anyone program a robotic arm with a text prompt. "
+        "That natural language layer feels like the exact interface small shops "
+        "need to actually adopt automation.\n\n"
+        "I cut manual grading time by 70% on WaveWatch by building an AI pipeline.\n\n"
+        "Would Orangewood take on a software engineering intern?"
+    )
+    assert any("banned phrase" in e for e in validate_style(draft(body=rejected)))

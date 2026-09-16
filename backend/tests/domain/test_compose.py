@@ -27,8 +27,11 @@ def test_opt_out_line_is_the_default_fourth_part():
 def test_opt_out_line_is_a_single_line_and_offers_a_way_out():
     assert "\n" not in OPT_OUT_LINE
     assert OPT_OUT_LINE.strip() == OPT_OUT_LINE
-    assert "reply" in OPT_OUT_LINE.lower()
-    assert "follow up" in OPT_OUT_LINE.lower()
+    # 2026-09-16: shortened at the operator's request - "no" is the whole
+    # reply, and the line must say so in one plain sentence.
+    assert '"no"' in OPT_OUT_LINE
+    assert "won't follow up" in OPT_OUT_LINE
+    assert OPT_OUT_LINE == "If not, a one-word \"no\" is fine and I won't follow up."
 
 
 def test_stored_body_is_used_verbatim_in_the_middle():

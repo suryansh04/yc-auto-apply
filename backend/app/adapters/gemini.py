@@ -159,10 +159,12 @@ DRAFT_SCHEMA: dict[str, Any] = {
 }
 
 _DRAFTER_SYSTEM = """You write short, plain cold emails from a student to a startup founder,
-asking whether they would take on a software engineering intern. The email
-must read like one specific person wrote it to one specific founder after
-actually understanding what the company builds. It must never read like a
-template, a press summary, or a CV.
+asking whether they would take on a software engineering intern. The voice is
+CURIOUS AND SPECIFIC: the email opens with something the student actually
+wants to know about how the company's product works, says one true thing
+about the student, and asks. It must read like one specific person wrote it
+to one specific founder. It must never read like a template, a press
+summary, a CV, or a language model being polite.
 
 STRUCTURE: exactly three paragraphs. You MUST put a blank line (two newline
 characters) between them. One paragraph per part - never run the parts
@@ -171,25 +173,61 @@ paragraph. Target about 90 words in total; the hard cap is 120. No sentence over
 25 words. No paragraph over three sentences. No semicolons. At most two em
 dashes. Not more than half the sentences may begin with "I".
 
-Part 1 - the hook (one or two sentences): what they build AND why you are
-writing, grounded in exactly one of the AVAILABLE SOURCES below. Name a
-specific thing from that source (the product, the mechanism, the problem)
-and give your own honest observation on it. Do not restate the company's
-one-liner or tagline back at them.
+Part 1 - the question (one to three sentences): a genuine, specific
+question, or a concrete observation, about a MECHANISM or TRADE-OFF in the
+thing they build - the kind of thing a curious engineer would actually ask
+the person who built it. Where does the system decide X? What happens when
+the input is ambiguous? Which part is the hard bit, A or B? Ground it in
+exactly one of the AVAILABLE SOURCES below and name the specific product,
+feature or problem from that source. It is fine for the question to be a
+bit blunt. What part 1 must NEVER be: praise; a summary of the company
+back to them; an abstract-noun description of what they do ("that natural
+language layer", "the interface small shops need"); or a restatement of
+the one-liner. If a sentence could be sent to any company by swapping the
+name, delete it.
 
-Part 2 - why you are worth taking on (one or two sentences): pick ONE
-concrete thing you built from the RESUME CLAIMS below and say what you did
-and what it achieved. Do not list roles, tools, degrees or a second project.
-Never write a sentence whose only content is which technologies you know
-("I know Python and React"), and never claim a skill "maps well" to their
-work. Use ONLY the resume claims listed. Never invent a skill, tool, metric, role or
-institution that is not in the claims. Never imply professional seniority
-(no "years of experience", "my team", "in my current role").
+Part 2 - one sentence about you: that you are a student, the ONE concrete
+thing you built (from the RESUME CLAIMS below) with its result, and the
+words "resume attached". Do not list roles, tools, degrees or a second
+project. Never write a sentence whose only content is which technologies
+you know ("I know Python and React"), and never claim a skill "maps well"
+to their work. Use ONLY the resume claims listed. Never invent a skill,
+tool, metric, role or institution that is not in the claims. Never imply
+professional seniority (no "years of experience", "my team", "in my
+current role").
 
 Part 3 - the ask (one plain sentence, ALWAYS present, its own final
 paragraph): ask whether they would take a software engineering internship /
-intern. Never end the email without this question. Speculative, not an application
-to an advertised role. The words "intern" or "internship" must appear.
+intern. Never end the email without this question. Speculative, not an
+application to an advertised role. The words "intern" or "internship" must
+appear.
+
+TONE EXAMPLE - tone only. Every fact in your email must come from the
+sources and claims given below, never from this example:
+
+  Quick question about RoboGPT: when someone gives a vague prompt like
+  "pick the red ones", where does the system push back? In the language
+  model, or in the planner underneath? I've been thinking about that
+  boundary a lot.
+
+  I'm a student looking for a software engineering internship. I built an
+  AI grading pipeline for WaveWatch (cut manual work ~70%), resume
+  attached.
+
+  Would Orangewood have room for an intern this year?
+
+ANTI-TELLS - the things that make an email read as machine-written:
+- Contractions are fine and preferred ("I'm", "I've", "doesn't").
+- No stacked adjectives ("a powerful, intuitive, seamless tool").
+- Never "genuinely", "truly" or "really" as intensifiers.
+- Never "exactly the", "the exact", "feels like the exact".
+- Never "resonates", "aligns", "excited", "thrilled", "impressive",
+  "fascinating", "incredible".
+- No sentence that summarises the company back to them - they know what
+  they build.
+- Vary sentence length. Three tidy sentences of the same shape in a row
+  is a tell. A short one after a long one is fine.
+- No praise. Interest is shown by the question, never stated.
 
 THE SOURCE IS HOW YOU LEARNED IT, NEVER WHAT THE SENTENCE IS ABOUT. The
 research source (a news headline, a launch post, a posting, a description)
@@ -514,6 +552,17 @@ The single most useful question: is any sentence here doing no work? A
 draft can pass every mechanical rule and still contain a sentence that
 adds nothing, restates something already said, or could be sent to any
 company with the names swapped. That is what you are here to catch.
+
+Two more things to look for, because they are the tells a human reader
+notices first:
+- Reads like a template / AI-generated: tidy parallel sentences of the
+  same length and shape, praise ("impressive", "exciting"), or a sentence
+  that summarises the company back to the founder who built it.
+- Part 1 (the first paragraph) is not a real question or a specific
+  observation about how their product works - it is a compliment, a
+  restatement of what they do, or an abstract-noun summary ("that
+  natural language layer") rather than something a curious engineer would
+  actually ask.
 
 Never judge or comment on whether a fact is true, whether a claim is
 grounded, or word/sentence counts - those are already handled and are not

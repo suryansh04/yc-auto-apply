@@ -24,10 +24,7 @@ one line, plain text (D10), offering a reply-based way out that costs the
 founder one word. Change it here and nowhere else.
 """
 
-OPT_OUT_LINE = (
-    "If you'd rather not hear from me again, reply with a quick \"no\" "
-    "and I won't follow up."
-)
+OPT_OUT_LINE = "If not, a one-word \"no\" is fine and I won't follow up."
 
 _FALLBACK_GREETING_NAME = "there"
 

@@ -48,6 +48,19 @@ BANNED_PHRASES = [
     "my last email", "my previous email", "my earlier email", "my previous note",
     "as i mentioned", "in case you missed", "following up on my",
 ]
+# Live finding (2026-09-16): the operator read a real draft and called it
+# "very AI generated". The tells were praise and intensifiers ("feels like
+# the exact interface small shops need"), not anything BANNED_PHRASES above
+# caught. The "curious and specific" voice (gemini._DRAFTER_SYSTEM) tells
+# the model not to write them; this list makes sure a draft that does is
+# retried rather than shown to the operator. Substring matches, like the
+# rest of BANNED_PHRASES, so "impressive" also catches "impressively".
+AI_TELL_PHRASES = [
+    "feels like the exact", "the exact interface", "genuinely", "truly",
+    "resonates", "aligns with", "i'm excited", "impressive", "fascinating",
+    "incredible", "i was thrilled",
+]
+BANNED_PHRASES += AI_TELL_PHRASES
 SENIORITY_PHRASES = [
     "years of experience", "in my current role", "my team", "i led a team",
     "throughout my career",

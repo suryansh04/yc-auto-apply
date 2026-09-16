@@ -93,6 +93,12 @@ class QueueItemOut(BaseModel):
     critic_verdict: str | None = None
     critic_note: str | None = None
     sequence_step: int
+    # Live finding (2026-09-16): the operator reviewed a draft and said
+    # "there is no resume attached" - it is attached at send time
+    # (`send_approved` passes `settings.resume_path`), the preview just never
+    # said so. Basename only (never the operator's filesystem path); None
+    # when RESUME_PATH is unset, which is exactly the case `send` refuses.
+    attachment_name: str | None = None
 
 
 class EditIn(BaseModel):

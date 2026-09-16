@@ -17,6 +17,7 @@ nothing on the session to commit.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -71,7 +72,11 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
     # `get_operator_settings()`, not `get_settings()`: this route needs the
     # operator's signature, not a database. Same `.env` as `send`, so the
     # preview matches the wire text exactly.
-    signature = get_operator_settings().signature
+    settings = get_operator_settings()
+    signature = settings.signature
+    # Same `.env` value `send` attaches (`settings.resume_path`); the preview
+    # shows its basename so the reviewer knows the resume goes out with it.
+    attachment_name = os.path.basename(settings.resume_path) if settings.resume_path else None
     message = item.message
     body = getattr(message, "body", None) or ""
     source = item.source
@@ -93,6 +98,7 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
         critic_verdict=getattr(message, "critic_verdict", None),
         critic_note=getattr(message, "critic_overall_note", None),
         sequence_step=int(getattr(item.outreach, "sequence_step", 0) or 0),
+        attachment_name=attachment_name,
     )
 
 

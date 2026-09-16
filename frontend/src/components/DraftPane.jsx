@@ -53,6 +53,19 @@ export default function DraftPane({ item, criticDismissed, onDismissCritic }) {
       </dl>
 
       <pre className="wire-text">{item.wire_text}</pre>
+
+      {/* Live finding (2026-09-16): the operator reviewed a draft and said
+          "there is no resume attached". It is - `send` attaches
+          RESUME_PATH - but nothing here said so. `attachment_name` is
+          null when RESUME_PATH is unset, which is exactly when `send`
+          refuses, so say that rather than showing nothing. */}
+      {item.attachment_name ? (
+        <p className="attachment">Attachment: {item.attachment_name}</p>
+      ) : (
+        <p className="attachment attachment-missing" role="alert">
+          No resume configured — send will refuse
+        </p>
+      )}
     </section>
   )
 }

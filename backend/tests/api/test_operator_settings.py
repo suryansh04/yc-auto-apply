@@ -16,7 +16,8 @@ def dotenv_only(monkeypatch, tmp_path):
     """Values present ONLY in a .env file - no DATABASE_URL anywhere."""
     env = tmp_path / ".env"
     env.write_text(
-        "SIGNATURE=Only In Dotenv\nEMAIL_VERIFIER_API_KEY=k\nDAILY_SEND_CAP=3\n",
+        "SIGNATURE=Only In Dotenv\nEMAIL_VERIFIER_API_KEY=k\nDAILY_SEND_CAP=3\n"
+        "RESUME_PATH=C:/Users/someone/Documents/Suryansh_Singh_resume.pdf\n",
         encoding="utf-8",
     )
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -54,3 +55,26 @@ def test_send_offline_path_daily_cap_comes_from_dotenv(dotenv_only, client, repo
     body = client.post("/api/send", json={}).json()
     assert body["sent"] == 3
     assert body["skipped_cap"] == 2
+
+
+def test_queue_preview_names_the_resume_attachment_from_dotenv(dotenv_only, client, pending_draft):
+    """Live finding (2026-09-16): the operator reviewed a draft and said
+    "there is no resume attached". It is - `send` attaches
+    `settings.resume_path` - but the preview never said so. Basename only:
+    the operator's filesystem path must not leak into the API."""
+    item = client.get("/api/queue").json()[0]
+    assert item["attachment_name"] == "Suryansh_Singh_resume.pdf"
+
+
+def test_queue_preview_attachment_is_null_when_no_resume_is_configured(monkeypatch, tmp_path, client, pending_draft):
+    env = tmp_path / ".env"
+    env.write_text("SIGNATURE=Only In Dotenv\n", encoding="utf-8")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("RESUME_PATH", raising=False)
+    monkeypatch.setitem(Settings.model_config, "env_file", str(env))
+    get_operator_settings.cache_clear()
+    try:
+        item = client.get("/api/queue").json()[0]
+        assert item["attachment_name"] is None
+    finally:
+        get_operator_settings.cache_clear()

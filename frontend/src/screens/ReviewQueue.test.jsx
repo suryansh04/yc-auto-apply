@@ -363,6 +363,22 @@ it('labels a sequence_step > 0 draft as a follow-up', async () => {
   expect(screen.getByText(/step 2/i)).toBeInTheDocument()
 })
 
+// --- 2026-09-16: the operator said "there is no resume attached" --------
+
+it('names the resume attachment under the composed email', async () => {
+  mockQueue([item({ attachment_name: 'Suryansh_Singh_resume.pdf' })])
+  render(<ReviewQueue />)
+  expect(await screen.findByText('Attachment: Suryansh_Singh_resume.pdf')).toBeInTheDocument()
+  expect(screen.queryByText(/No resume configured/)).not.toBeInTheDocument()
+})
+
+it('warns that send will refuse when no resume is configured (attachment_name null)', async () => {
+  mockQueue([item({ attachment_name: null })])
+  render(<ReviewQueue />)
+  expect(await screen.findByText(/No resume configured — send will refuse/)).toBeInTheDocument()
+  expect(screen.queryByText(/^Attachment:/)).not.toBeInTheDocument()
+})
+
 // --- fix round 2: F9 - settled ids stay hidden until the refetch lands ---
 
 it(

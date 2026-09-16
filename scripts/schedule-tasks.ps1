@@ -2,11 +2,19 @@
 schedule-tasks.ps1 — YC Auto Apply Phase 2 (spec A1: "scheduled trigger")
 
 What this registers, as the CURRENT Windows user (no admin required):
-  - YCAutoApply-PollReplies       every 30 minutes
+  - YCAutoApply-PollReplies       every 30 minutes (deliberate choice for
+                                   this script; spec A1's "once a day" is
+                                   only an example cadence)
   - YCAutoApply-ScheduleFollowUps daily at 9:00 AM
 
-Each task runs curl.exe against the SAME endpoint the UI's job buttons
-call:
+poll-replies only fetches/matches replies and marks bounces (Gmail's
+History API, one call, no LLM). It does NOT classify replies.
+classify-replies is a separate job kind, spends LLM calls, and is
+deliberately NOT scheduled here — trigger it from the Pipeline screen's
+Classify button.
+
+Each task runs System32\curl.exe against the SAME endpoint the UI's job
+buttons call:
   POST http://127.0.0.1:8000/api/jobs/<kind>
   body {"created_by":"schedule"}
 
@@ -64,14 +72,20 @@ function Register-JobTrigger {
     )
 
     $curlArgs = '-s -X POST http://127.0.0.1:8000/api/jobs/' + $JobKind + ' -H "Content-Type: application/json" -d "{\"created_by\":\"schedule\"}"'
-    $action = New-ScheduledTaskAction -Execute "curl.exe" -Argument $curlArgs
+    $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\curl.exe" -Argument $curlArgs
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
     Register-ScheduledTask -TaskName $TaskName -Trigger $Trigger -Action $action -Settings $settings -Force | Out-Null
     Write-Host "Registered scheduled task: $TaskName"
 }
 
-# poll-replies: frequent, so a reply doesn't sit unclassified for hours.
+# poll-replies: fetches/matches replies and marks bounces via Gmail's
+# History API (one call, no LLM) — it does NOT classify anything.
+# classify-replies is a separate job kind that spends LLM calls and is
+# deliberately NOT scheduled here; trigger it from the Pipeline screen's
+# Classify button when you want replies labelled. 30 minutes is a
+# deliberate choice for this script, not a spec requirement — spec A1's
+# "once a day" is only an example cadence.
 $pollTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration ([TimeSpan]::MaxValue)
 Register-JobTrigger -TaskName $PollTaskName -JobKind "poll-replies" -Trigger $pollTrigger
 

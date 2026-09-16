@@ -36,7 +36,20 @@ section numbers in §11 refer to the Phase 2 spec.
 ```bash
 cd backend
 python -m venv .venv
-.venv/Scripts/activate          # Windows; `source .venv/bin/activate` elsewhere
+```
+
+Activate it, then install — pick the line for your shell (do not chain
+these with `&&`; it is a parse error in Windows PowerShell 5.1):
+
+```powershell
+.venv\Scripts\Activate.ps1      # PowerShell
+```
+
+```bash
+source .venv/Scripts/activate   # Git Bash
+```
+
+```bash
 pip install -e ".[dev]"
 ```
 
@@ -198,6 +211,13 @@ secret — and a job left `running` when the API restarts is marked
 no body), `"schedule"` (§ below), or `"cli"` (reserved). See §7 of the
 Phase 2 spec for the full route table.
 
+On `GEMINI_TIER=free`, the `draft` and `classify-replies` jobs refuse to
+start — the UI has no `--allow-free-tier` equivalent (unlike the CLI's
+`draft` command, see §3), so both jobs fail immediately and the job row
+shows `failed: RuntimeError` with no further detail (the exception
+message, not shown, names which job refused). Set `GEMINI_TIER=paid` or
+`LLM_PROVIDER=sarvam` before using either job from the UI.
+
 ### Reply loop
 
 `poll-replies` uses Gmail's History API to fetch everything since the
@@ -238,7 +258,7 @@ auto-sends at any step — the human approval gate is unchanged.
 
 ### Critic
 
-A second LLM call (`app/application/run_critic.py`) reviews every draft
+A second LLM call (`app/application/critique_draft.py`) reviews every draft
 after it passes the deterministic validator and returns a verdict
 (`PASS` / `NEEDS_REVISION`) plus up to three one-line concerns, shown in
 the Review Queue as a small dismissible note. It is advisory only — it
@@ -274,10 +294,10 @@ silently and the next trigger tries again).
 ### Gmail scope (spec A2)
 
 `gmail-auth` now requests both `gmail.send` and `gmail.readonly` (Phase 2
-needs the read scope to poll replies). If your stored token predates
-Phase 2, `gmail-auth` detects the missing scope and re-runs consent for
-you automatically — re-run it once, same command as before:
-`python -m app.cli gmail-auth`.
+needs the read scope to poll replies). It does not check what scopes an
+existing token has — it always runs Google's consent flow and replaces
+the stored token. If your stored token predates Phase 2, re-run it once,
+same command as before: `python -m app.cli gmail-auth`.
 
 ### Auth (spec A3)
 

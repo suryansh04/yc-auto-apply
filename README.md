@@ -27,11 +27,16 @@ any port forward. If you ever want to expose it beyond your own laptop,
 that is a new design decision this project has not made.
 
 **Free tiers first.** MyEmailVerifier's free tier gives 100
-verifications/day; Gemini's free tier gives 20 requests/day per model
-and must not receive founder data (`GEMINI_TIER=free` refuses to draft
-unless you pass `--allow-free-tier`, and even then it only ever sees
-your own resume by default). See `backend/README.md` §3 and §7 for the
-full cost picture before switching anything to a paid tier.
+verifications/day; Gemini's free tier gives 20 requests/day per model.
+On `GEMINI_TIER=free` the CLI's `draft` command refuses to run unless
+you pass `--allow-free-tier` — and even then it *does* send founders'
+names, titles and bios to the free-tier key (`backend/README.md` §3).
+The UI is stricter: the Pipeline's `Draft` and `Classify replies` jobs
+have no `--allow-free-tier` flag and always refuse to start on
+`GEMINI_TIER=free` — the job row shows `RuntimeError` with no further
+detail. Set `GEMINI_TIER=paid` or `LLM_PROVIDER=sarvam` before using
+those two jobs from the UI. See `backend/README.md` §3, §7 and §11 for
+the full cost picture before switching anything to a paid tier.
 
 ## Phase 2 quickstart
 
@@ -44,12 +49,27 @@ From the repo root, in order:
 
 ```bash
 cd backend
-docker compose up -d                                    # Postgres on localhost:5433
-python -m venv .venv && .venv/Scripts/activate           # first time only
-pip install -e ".[dev]"                                  # first time only
-cp .env.example .env                                     # first time only — then fill it in
+docker compose up -d              # Postgres on localhost:5433
+python -m venv .venv              # first time only
+pip install -e ".[dev]"           # first time only (activate the venv first — see below)
+cp .env.example .env              # first time only — then fill it in
+# .env.example's DATABASE_URL defaults to the native-Postgres port (5432).
+# Since the command above starts Docker's Postgres instead, set in .env:
+#   DATABASE_URL=postgresql+psycopg://yc:yc@localhost:5433/ycautoapply
 python -m alembic upgrade head
 python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000
+```
+
+Activate the venv before `pip install` and before running anything below
+— pick the line for your shell (do not use `&&`, it is a parse error in
+Windows PowerShell 5.1):
+
+```powershell
+.venv\Scripts\Activate.ps1        # PowerShell
+```
+
+```bash
+source .venv/Scripts/activate     # Git Bash
 ```
 
 Leave that `uvicorn` process running — the API must stay up for the UI
@@ -75,9 +95,10 @@ the `backend` terminal, with the venv active):
 python -m app.cli gmail-auth
 ```
 
-`gmail-auth` already checks the stored token's scopes and re-runs
-consent for you automatically if it predates the read scope — this is a
-one-time step you can otherwise ignore.
+`gmail-auth` always runs Google's consent flow and replaces the stored
+token with a fresh one covering both scopes — it does not check what the
+old token already had. Re-running it once is enough; after that you can
+ignore this step.
 
 **Scheduled polling and follow-ups.** The browser being closed must not
 stop replies from being noticed or follow-ups from going out (spec A1).
@@ -88,13 +109,20 @@ own user account (no admin rights needed):
 .\scripts\schedule-tasks.ps1
 ```
 
-This registers `poll-replies` (every 30 minutes) and
+This registers `poll-replies` (every 30 minutes — a deliberate choice,
+not a spec requirement; spec A1's "once a day" is only an example) and
 `schedule-follow-ups` (daily at 9am), each calling the exact same
 `POST /api/jobs/<kind>` endpoint the UI's own buttons call — one code
 path per stage, whether a human or the scheduler started it. Re-run the
 script any time to replace the tasks; `.\scripts\schedule-tasks.ps1
 -Unregister` removes them. See the comment block at the top of the
 script for how it fails (harmlessly) when the API isn't running.
+
+**Classification is not scheduled.** `poll-replies` only fetches replies
+and marks bounces; it never calls the LLM. `classify-replies` is a
+separate job that spends LLM calls, so it is left for you to trigger —
+open the Pipeline screen and click **Classify** when you want replies
+labelled.
 
 ## Repo layout
 
@@ -108,7 +136,12 @@ docs/      design specs and SDD process artifacts
 ## Tests
 
 ```bash
-cd backend && python -m pytest -q          # offline, no DB, no network
-cd backend && python -m pytest -m integration   # needs DATABASE_URL
-cd frontend && npm test
+cd backend
+python -m pytest -q                        # offline, no DB, no network
+python -m pytest -m integration            # needs DATABASE_URL
+```
+
+```bash
+cd frontend
+npm test
 ```

@@ -45,15 +45,19 @@
   white-space: nowrap;
 }
 
-/* V2 (T18 fix wave 2): the "Set email" column is the one actionable
-   column in the Manual email table - give it enough width that the
-   input and both buttons don't clip inside `.table-scroll` at a
-   >=1100px viewport, and stop its form from wrapping onto a narrow
-   stack (label / input / Submit / Give up each on their own line, as
-   happened once the Candidates column was crowding it). */
+/* V2 (T18 fix wave 2, verified on a 1280px screenshot): the "Set email"
+   column is the one actionable column in the Manual email table. Laid
+   out in two rows - the input on top, Submit / Give up beneath - so the
+   cell needs only ~13rem and never clips inside `.table-scroll` at a
+   >=1100px viewport; a single nowrap row (input + two buttons) was
+   ~24rem and cut the buttons off at the right edge. */
 .manual-email-form {
-  flex-wrap: nowrap;
-  min-width: 20rem;
+  flex-wrap: wrap;
+  min-width: 13rem;
+}
+
+.manual-email-form label {
+  flex-basis: 100%;
 }
 
 .manual-email-form label {

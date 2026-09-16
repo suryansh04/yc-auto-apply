@@ -51,18 +51,11 @@ From the repo root, in order:
 cd backend
 docker compose up -d              # Postgres on localhost:5433
 python -m venv .venv              # first time only
-pip install -e ".[dev]"           # first time only (activate the venv first — see below)
-cp .env.example .env              # first time only — then fill it in
-# .env.example's DATABASE_URL defaults to the native-Postgres port (5432).
-# Since the command above starts Docker's Postgres instead, set in .env:
-#   DATABASE_URL=postgresql+psycopg://yc:yc@localhost:5433/ycautoapply
-python -m alembic upgrade head
-python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Activate the venv before `pip install` and before running anything below
-— pick the line for your shell (do not use `&&`, it is a parse error in
-Windows PowerShell 5.1):
+Now activate the venv — every `pip`/`python` command from here on, in this
+terminal and any later one, must run inside it. Pick the line for your
+shell (do not use `&&`, it is a parse error in Windows PowerShell 5.1):
 
 ```powershell
 .venv\Scripts\Activate.ps1        # PowerShell
@@ -70,6 +63,18 @@ Windows PowerShell 5.1):
 
 ```bash
 source .venv/Scripts/activate     # Git Bash
+```
+
+Then, still in `backend/`:
+
+```bash
+pip install -e ".[dev]"           # first time only
+cp .env.example .env              # first time only — then fill it in
+# .env.example's DATABASE_URL defaults to the native-Postgres port (5432).
+# Since the command above starts Docker's Postgres instead, set in .env:
+#   DATABASE_URL=postgresql+psycopg://yc:yc@localhost:5433/ycautoapply
+python -m alembic upgrade head
+python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000
 ```
 
 Leave that `uvicorn` process running — the API must stay up for the UI

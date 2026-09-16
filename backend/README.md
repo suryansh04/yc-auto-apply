@@ -100,14 +100,17 @@ reserve-before-send guard (§13, ruling R1).
 
 ```bash
 pytest                      # offline: no env vars, no network, no DB
-pytest -m integration       # 9 DB tests; skipped when DATABASE_URL is not set
+pytest -m integration       # 13 DB tests; skipped unless DATABASE_URL is in the environment (not just .env)
 ```
 
 The offline suite runs against in-memory fakes and covers the domain rules,
 every use case, the CLI wiring and an end-to-end run of the whole chain.
-The integration suite exercises the real repositories and constraints
-against your Postgres (run `alembic upgrade head` first); it has not yet
-been run against a live database on this branch.
+The integration suite exercises the real repositories, constraints and the
+job runner's own-session commits against your Postgres (run `alembic
+upgrade head` first). The test suite ignores `backend/.env` on purpose, so
+opt in with the variable set for that one command, e.g.
+`DATABASE_URL=postgresql+psycopg://yc:yc@localhost:5433/ycautoapply pytest -m integration`
+(PowerShell: `$env:DATABASE_URL = "..."; pytest -m integration`).
 
 ## 6. The chain, in order
 

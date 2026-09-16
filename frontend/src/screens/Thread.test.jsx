@@ -197,6 +197,35 @@ it('posts a correction to the right message id when a thread has several, and in
   await waitFor(() => expect(screen.getAllByText(/corrected by operator/i)).toHaveLength(1))
 })
 
+it('labels an outbound message "Draft" when it has not actually been sent yet', async () => {
+  mockThread(
+    1,
+    thread({
+      messages: [
+        message({ id: 1, direction: 'outbound', body: 'Not sent yet', sent_at: null }),
+      ],
+    }),
+  )
+  renderThread(1)
+  expect(await screen.findByText('Not sent yet')).toBeInTheDocument()
+  expect(screen.getByText('Draft', { selector: '.message-direction' })).toBeInTheDocument()
+  expect(screen.queryByText('Sent', { selector: '.message-direction' })).not.toBeInTheDocument()
+})
+
+it('labels an outbound message "Sent" once it actually has a sent_at', async () => {
+  mockThread(
+    1,
+    thread({
+      messages: [
+        message({ id: 1, direction: 'outbound', body: 'Already sent', sent_at: '2026-01-01T00:00:00Z' }),
+      ],
+    }),
+  )
+  renderThread(1)
+  expect(await screen.findByText('Already sent')).toBeInTheDocument()
+  expect(screen.getByText('Sent', { selector: '.message-direction' })).toBeInTheDocument()
+})
+
 it('shows a not-found state for an unknown thread id rather than crashing', async () => {
   mockThreadNotFound(999)
   renderThread(999)

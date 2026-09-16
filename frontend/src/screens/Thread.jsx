@@ -91,7 +91,15 @@ function MessageRow({ message, threadId, setLabel }) {
     <li className={`message message-${message.direction}`}>
       <div className="message-meta">
         <span className="message-direction">
-          {message.direction === 'outbound' ? 'Sent' : 'Reply'}
+          {/* V3 (T18 fix wave 2): an outbound row with no `sent_at` is
+              still pending_approval/approved - nothing was actually sent
+              yet, so labelling it "Sent" is a lie the operator would
+              act on (e.g. assuming a follow-up already went out). */}
+          {message.direction === 'outbound'
+            ? message.sent_at
+              ? 'Sent'
+              : 'Draft'
+            : 'Reply'}
         </span>
         {timestamp && <time dateTime={timestamp}>{new Date(timestamp).toLocaleString()}</time>}
       </div>

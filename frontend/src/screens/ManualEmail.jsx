@@ -10,18 +10,28 @@ import { useManual, useSetEmail } from '../api/hooks'
 import DataTable from '../components/DataTable'
 import Banner from '../components/Banner'
 
+// V2 (T18 fix wave 2): a founder with several guessed-and-rejected
+// candidates (7, for the Orangewood founders) rendered as an
+// always-open bulleted list made every row ~270px tall, pushing the one
+// actionable column ("Set email") far enough right that it clipped
+// inside `.table-scroll`. Collapsed behind <details> by default, the
+// row is one line ("N tried") unless the reviewer actually wants to
+// see what was already attempted.
 function CandidateList({ candidates }) {
   if (!candidates || candidates.length === 0) {
     return <span className="no-candidates">none tried yet</span>
   }
   return (
-    <ul className="candidate-list">
-      {candidates.map((candidate) => (
-        <li key={candidate.address}>
-          {candidate.address} &mdash; {candidate.verdict ?? 'unknown'}
-        </li>
-      ))}
-    </ul>
+    <details className="candidate-list">
+      <summary>{candidates.length} tried</summary>
+      <ul>
+        {candidates.map((candidate) => (
+          <li key={candidate.address}>
+            {candidate.address} &mdash; {candidate.verdict ?? 'unknown'}
+          </li>
+        ))}
+      </ul>
+    </details>
   )
 }
 

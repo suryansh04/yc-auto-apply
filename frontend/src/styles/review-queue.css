@@ -106,6 +106,20 @@
   padding-top: 0.5rem;
 }
 
+/* V1 (T18 fix wave 2): a real cited source can run to ~90 lines (the
+   Orangewood launch post). Left uncapped, the source pane grows taller
+   than the draft pane, and since the ActionBar sits below BOTH panes,
+   Approve/Edit/Redraft/Reject/Skip land far outside a 900px viewport -
+   the reviewer can't act without scrolling past the source first.
+   Capping just the source text (not the whole pane - company name,
+   founder/to, and the "Cited source" heading stay visible above the
+   scroll area) keeps the pane's total height bounded regardless of
+   citation length, so the ActionBar renders in the first viewport. */
+.source-text {
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
 .source-kind {
   color: var(--muted);
   text-transform: uppercase;

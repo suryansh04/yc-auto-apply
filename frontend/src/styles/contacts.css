@@ -15,9 +15,16 @@
 }
 
 .candidate-list {
-  margin: 0;
-  padding-left: 1rem;
   color: var(--muted);
+}
+
+.candidate-list summary {
+  cursor: pointer;
+}
+
+.candidate-list ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
 }
 
 .no-candidates,
@@ -28,4 +35,39 @@
 
 .published-hint {
   color: var(--ok);
+}
+
+/* V3 (T18 fix wave 2): the Batch column ("Summer 2022", "Winter 2019")
+   wraps onto two lines in every single row of the Contacts table -
+   it's the 5th column (Company, Founder, Domain, State, Batch, ...). */
+.contacts .data-table th:nth-child(5),
+.contacts .data-table td:nth-child(5) {
+  white-space: nowrap;
+}
+
+/* V2 (T18 fix wave 2): the "Set email" column is the one actionable
+   column in the Manual email table - give it enough width that the
+   input and both buttons don't clip inside `.table-scroll` at a
+   >=1100px viewport, and stop its form from wrapping onto a narrow
+   stack (label / input / Submit / Give up each on their own line, as
+   happened once the Candidates column was crowding it). */
+.manual-email-form {
+  flex-wrap: nowrap;
+  min-width: 20rem;
+}
+
+.manual-email-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.manual-email-form input[type='text'] {
+  width: 12rem;
+}
+
+.manual-email-form button {
+  white-space: nowrap;
 }

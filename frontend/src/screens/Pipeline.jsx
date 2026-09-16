@@ -84,7 +84,10 @@ const STAGES = [
     kind: 'classify-replies',
     label: 'Classify replies',
     group: 'reply-loop',
-    description: 'Classify newly polled replies (interested, not interested, etc.) with the LLM.',
+    description:
+      'Classify newly polled replies with the LLM: INTERESTED, REJECTED, REFERRAL, AUTO_REPLY, ' +
+      'OUT_OF_OFFICE, or UNCLEAR. Machine replies (auto-reply, out-of-office) never end a ' +
+      "follow-up sequence — only a founder's own words do.",
   },
   {
     kind: 'schedule-follow-ups',
@@ -143,6 +146,7 @@ function StageTable({ heading, stages, latest, startJob, onStart }) {
   return (
     <div className="stage-group">
       <h3>{heading}</h3>
+      <div className="table-scroll">
       <table>
         <thead>
           <tr>
@@ -177,6 +181,7 @@ function StageTable({ heading, stages, latest, startJob, onStart }) {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
@@ -221,6 +226,7 @@ export default function Pipeline() {
 
       <section className="funnel">
         <h2>Funnel</h2>
+        <div className="table-scroll">
         <table>
           <tbody>
             {FUNNEL_STATES.map(([key, label]) => (
@@ -231,8 +237,10 @@ export default function Pipeline() {
             ))}
           </tbody>
         </table>
+        </div>
 
         <h3>Exceptions</h3>
+        <div className="table-scroll">
         <table>
           <tbody>
             {EXCEPTION_STATES.map(([key, label]) => (
@@ -243,6 +251,7 @@ export default function Pipeline() {
             ))}
           </tbody>
         </table>
+        </div>
       </section>
 
       <section className="stages">

@@ -65,8 +65,9 @@ export default function DataTable({ columns, rows, getRowKey, defaultSortKey = n
     : rows
 
   return (
-    <table className="data-table">
-      <thead>
+    <div className="table-scroll">
+      <table className="data-table">
+        <thead>
         <tr>
           {columns.map((column) => (
             <th
@@ -100,7 +101,8 @@ export default function DataTable({ columns, rows, getRowKey, defaultSortKey = n
             ))}
           </tr>
         ))}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
   )
 }

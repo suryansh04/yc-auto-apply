@@ -1,0 +1,31 @@
+/* Task 18: Contacts and Manual email screens - shared filter/form row and
+   list styling. Tokens and generic control shape live in ../styles.css. */
+
+.contacts-filters,
+.manual-email-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+}
+
+.manual-email-form {
+  margin-bottom: 0;
+}
+
+.candidate-list {
+  margin: 0;
+  padding-left: 1rem;
+  color: var(--muted);
+}
+
+.no-candidates,
+.no-linkedin,
+.no-hint {
+  color: var(--muted);
+}
+
+.published-hint {
+  color: var(--ok);
+}

@@ -1,0 +1,168 @@
+/* Task 18: Review Queue screen (draft/source panes, editor, action bar).
+   Two columns (draft ~55%, context ~45%) at >= 900px, stacked below.
+   Tokens and generic control shape live in ../styles.css. */
+
+.review-panes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .review-panes {
+    grid-template-columns: 55fr 45fr;
+  }
+}
+
+.draft-pane,
+.source-pane {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  background: var(--bg-raised);
+}
+
+.queue-counter {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The most visible things on a flagged draft: the manual-write flag and
+   (below) the validator's own error list. */
+.needs-manual-write {
+  font-weight: 700;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: 0.5rem 0.65rem;
+}
+
+.critic-verdict-NEEDS_REVISION {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.critic-verdict-PASS {
+  color: var(--ok);
+}
+
+.critic-verdict-ERROR {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.critic-note {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+
+.draft-meta,
+.founder-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.75rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.draft-meta dd,
+.founder-details dd {
+  margin: 0;
+}
+
+.draft-meta dt,
+.founder-details dt {
+  color: var(--muted);
+}
+
+/* The composed email: readable, not monospace, line breaks preserved. */
+.wire-text {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.cited-source {
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+.source-kind {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.15rem;
+}
+
+.source-publication {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.source-text-none {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.company-one-liner {
+  color: var(--muted);
+}
+
+.sequence-step-badge {
+  display: inline-block;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.8rem;
+}
+
+.editor {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  background: var(--bg-raised);
+  max-width: 48rem;
+}
+
+.editor-field {
+  margin-bottom: 0.75rem;
+}
+
+.editor textarea {
+  resize: vertical;
+}
+
+.editor-errors {
+  list-style: none;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.action-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.action-bar kbd {
+  margin-left: 0.35rem;
+}

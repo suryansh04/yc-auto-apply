@@ -1,4 +1,4 @@
-import { Link, Route, Routes } from 'react-router-dom'
+import { NavLink, Route, Routes } from 'react-router-dom'
 import Pipeline from './screens/Pipeline'
 import ReviewQueue from './screens/ReviewQueue'
 import Contacts from './screens/Contacts'
@@ -14,21 +14,25 @@ import ManualEmail from './screens/ManualEmail'
 
 function App() {
   return (
-    <>
-      <nav>
-        <Link to="/">Pipeline</Link>
-        <Link to="/queue">Review Queue</Link>
-        <Link to="/contacts">Contacts</Link>
-        <Link to="/manual">Manual email</Link>
+    <div className="app-shell">
+      <nav className="app-nav">
+        <NavLink to="/" end>
+          Pipeline
+        </NavLink>
+        <NavLink to="/queue">Review Queue</NavLink>
+        <NavLink to="/contacts">Contacts</NavLink>
+        <NavLink to="/manual">Manual email</NavLink>
       </nav>
-      <Routes>
-        <Route path="/" element={<Pipeline />} />
-        <Route path="/queue" element={<ReviewQueue />} />
-        <Route path="/contacts" element={<Contacts />} />
-        <Route path="/thread/:id" element={<Thread />} />
-        <Route path="/manual" element={<ManualEmail />} />
-      </Routes>
-    </>
+      <main className="app-main">
+        <Routes>
+          <Route path="/" element={<Pipeline />} />
+          <Route path="/queue" element={<ReviewQueue />} />
+          <Route path="/contacts" element={<Contacts />} />
+          <Route path="/thread/:id" element={<Thread />} />
+          <Route path="/manual" element={<ManualEmail />} />
+        </Routes>
+      </main>
+    </div>
   )
 }
 

@@ -88,7 +88,10 @@ it('corrects a label in one click', async () => {
   renderThread(1)
   await screen.findByText('UNCLEAR', { selector: '.label-name' })
 
-  await userEvent.click(screen.getByRole('button', { name: /^interested$/i }))
+  await userEvent.selectOptions(
+    screen.getByRole('combobox', { name: /correct label/i }),
+    'INTERESTED',
+  )
 
   expect(setLabel).toHaveBeenCalledWith(2, 'INTERESTED')
   expect(await screen.findByText(/corrected by operator/i)).toBeInTheDocument()
@@ -103,7 +106,10 @@ it('shows a 422 from a rejected label correction', async () => {
   renderThread(1)
   await screen.findByText('UNCLEAR', { selector: '.label-name' })
 
-  await userEvent.click(screen.getByRole('button', { name: /^interested$/i }))
+  await userEvent.selectOptions(
+    screen.getByRole('combobox', { name: /correct label/i }),
+    'INTERESTED',
+  )
 
   expect(await screen.findByText(/invalid label: not one of the six/i)).toBeInTheDocument()
   // the rejected correction never happened - the message still shows its
@@ -179,8 +185,9 @@ it('posts a correction to the right message id when a thread has several, and in
   await screen.findAllByText('UNCLEAR')
 
   const items = screen.getAllByRole('listitem')
-  await userEvent.click(
-    within(items[1]).getByRole('button', { name: /^referral$/i }),
+  await userEvent.selectOptions(
+    within(items[1]).getByRole('combobox', { name: /correct label/i }),
+    'REFERRAL',
   )
 
   expect(setLabel).toHaveBeenCalledWith(20, 'REFERRAL')

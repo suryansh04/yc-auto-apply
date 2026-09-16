@@ -35,13 +35,20 @@ function LabelBadge({ label, confidence, rationale, corrected }) {
   )
 }
 
-// The one-click correction control: every label is its own button, so
-// fixing a wrong classification is a single click, not a select-then-
-// submit flow.
+// The one-click correction control: one <select> per reply (still one
+// interaction, one control) rather than six always-visible buttons -
+// twelve buttons on a two-reply thread was the problem this replaced.
+// Picking an option fires the correction immediately; the select itself
+// stays on the placeholder afterwards (it's a one-shot action menu, not
+// a persistent field showing "the current label" - that's LabelBadge's
+// job, right above it).
 function LabelCorrection({ message, threadId, setLabel }) {
   const [error, setError] = useState(null)
 
-  function correct(label) {
+  function correct(event) {
+    const label = event.target.value
+    event.target.value = ''
+    if (!label) return
     setError(null)
     setLabel.mutate(
       { messageId: message.id, label, threadId },
@@ -51,17 +58,24 @@ function LabelCorrection({ message, threadId, setLabel }) {
 
   return (
     <div className="label-correction">
-      {LABELS.map((label) => (
-        <button
-          key={label}
-          type="button"
-          aria-pressed={message.label === label}
+      <label>
+        Correct label
+        <select
+          aria-label={`Correct label for message ${message.id}`}
+          defaultValue=""
           disabled={setLabel.isPending}
-          onClick={() => correct(label)}
+          onChange={correct}
         >
-          {label}
-        </button>
-      ))}
+          <option value="" disabled>
+            Change label&hellip;
+          </option>
+          {LABELS.map((label) => (
+            <option key={label} value={label}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
       {error && (
         <p role="alert" className="field-error">
           {error}

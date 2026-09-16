@@ -160,6 +160,24 @@ it('renders exactly the seven registered job kinds as stage buttons, in order', 
   ])
 })
 
+it("describes classify-replies' machine-reply rule, not a nonexistent label", async () => {
+  // The stage list test above pins labels only. This pins the
+  // description: there is no "not interested" label (the real set is
+  // INTERESTED/REJECTED/REFERRAL/AUTO_REPLY/OUT_OF_OFFICE/UNCLEAR), and
+  // the single most important rule this stage implements - machine
+  // replies never end a follow-up sequence - has to actually be stated.
+  mockStats({})
+  mockJobs([])
+  render(<Pipeline />)
+  await screen.findByText('Pipeline')
+
+  const description = screen.getByText(/machine replies.*never end a follow-up sequence/i)
+  expect(description).toBeInTheDocument()
+  expect(description.textContent).not.toMatch(/not interested/i)
+  expect(description.textContent).toMatch(/AUTO_REPLY/)
+  expect(description.textContent).toMatch(/OUT_OF_OFFICE/)
+})
+
 it('polls jobs at a 2000ms interval while running, not sooner', async () => {
   mockStats({})
   const spy = mockJobs([{ id: 5, kind: 'scrape', status: 'running', done: 1, total: 10 }])

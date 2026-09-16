@@ -17,7 +17,6 @@ nothing on the session to commit.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,6 +27,7 @@ from app.api.schemas import EditIn, OkOut, QueueItemOut
 from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
 from app.domain.compose import compose_wire_text, first_name
 from app.domain.states import IllegalTransition
+from app.config import get_operator_settings
 
 router = APIRouter(tags=["queue"])
 
@@ -68,12 +68,10 @@ def _action_error(exc: ValueError | IllegalTransition) -> HTTPException:
 
 
 def _to_out(item: ReviewItem) -> QueueItemOut:
-    # Read directly from the environment rather than `get_settings()`
-    # (same reasoning as `app.api.routers.stats`): `Settings.database_url`
-    # has no default, so building a full `Settings` here would make GET
-    # /api/queue require a DB configured, and the offline test suite runs
-    # with no env vars at all (global constraint).
-    signature = os.environ.get("SIGNATURE", "")
+    # `get_operator_settings()`, not `get_settings()`: this route needs the
+    # operator's signature, not a database. Same `.env` as `send`, so the
+    # preview matches the wire text exactly.
+    signature = get_operator_settings().signature
     message = item.message
     body = getattr(message, "body", None) or ""
     source = item.source

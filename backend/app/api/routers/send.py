@@ -38,7 +38,6 @@ independent things would each have to fail for that to happen:
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -47,7 +46,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import Repos, get_repos, require_send_config
 from app.api.schemas import SendIn, SendResultOut
 from app.application.send_approved import SendApproved, SendRepos
-from app.config import get_settings
+from app.config import get_operator_settings, get_settings
 
 router = APIRouter(tags=["send"])
 
@@ -103,14 +102,11 @@ def send(payload: SendIn, repos: Repos = Depends(get_repos)) -> SendResultOut:
         sender = _build_real_sender(repos, settings)
         signature, attachment_path, cap = settings.signature, settings.resume_path, settings.daily_send_cap
     else:
-        # Test/offline path (a `fake_sender`-injected `Repos`): read what
-        # `SendApproved` needs straight from the environment rather than
-        # `get_settings()`, the same reasoning as `queue.py`'s `_to_out` -
-        # `Settings.database_url` has no default and this offline suite
-        # runs with no env vars at all (global constraint).
-        signature = os.environ.get("SIGNATURE", "")
-        attachment_path = os.environ.get("RESUME_PATH") or None
-        cap = int(os.environ.get("DAILY_SEND_CAP", "20"))
+        # Test/offline path (a `fake_sender`-injected `Repos`): the same
+        # operator settings, minus the DB requirement.
+        settings = get_operator_settings()
+        signature, cap = settings.signature, settings.daily_send_cap
+        attachment_path = settings.resume_path or None
 
     use_case = SendApproved(sender, _UTCClock(), _send_repos(repos),
                             signature=signature, attachment_path=attachment_path)

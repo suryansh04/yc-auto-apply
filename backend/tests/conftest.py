@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_operator_settings, get_settings
 
 
 @pytest.fixture(autouse=True)
@@ -33,8 +33,10 @@ def _ignore_operator_dotenv(monkeypatch):
     for every test; tests set what they need via monkeypatch.setenv."""
     monkeypatch.setitem(Settings.model_config, "env_file", None)
     get_settings.cache_clear()
+    get_operator_settings.cache_clear()
     yield
     get_settings.cache_clear()
+    get_operator_settings.cache_clear()
 from datetime import datetime, timedelta, timezone
 
 

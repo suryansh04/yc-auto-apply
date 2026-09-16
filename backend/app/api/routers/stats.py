@@ -4,12 +4,11 @@ logic, per `app/api/main.py`'s module docstring."""
 
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, Depends
 
 from app.api.deps import Repos, get_repos
 from app.api.schemas import JobOut, QuotaOut, StatsOut
+from app.config import get_operator_settings
 from app.domain.states import OutreachState
 
 router = APIRouter(tags=["stats"])
@@ -30,14 +29,9 @@ def get_stats(repos: Repos = Depends(get_repos)) -> StatsOut:
     # would hide exactly the action queue the dashboard exists to surface.
     counts = {state.value: len(repos.founder.list_by_state(state)) for state in OutreachState}
 
-    # Read directly from the environment rather than `get_settings()`:
-    # `Settings.database_url` has no default, so building a full `Settings`
-    # here would make this endpoint require a DB configured even though it
-    # only wants to know whether a verifier key is present (and the offline
-    # test suite runs with no env vars at all - global constraint).
     quota = QuotaOut(
         provider="email-verifier",
-        configured=bool(os.environ.get("EMAIL_VERIFIER_API_KEY")),
+        configured=bool(get_operator_settings().email_verifier_api_key),
         daily_limit=EMAIL_VERIFIER_DAILY_LIMIT,
     )
 

@@ -62,3 +62,60 @@ def test_neither_address_nor_give_up_is_422_and_changes_nothing(client, repos, m
     assert r.status_code == 422
     assert repos.outreach.get(manual_founder.outreach.id).state.value == "needs_manual_email"
     assert repos.session.commit_calls == 0
+
+
+# --- Final fix wave (F3, ruling T4-1 applied to this router) -----------------
+#
+# The 404 / 422 / 409 split is decided by exception TYPE. The first test is
+# the plain 404; the three after it each raise a message that the OLD
+# string-matching code would have mapped the other way, so they fail if the
+# router ever falls back to inspecting `str(exc)`.
+
+
+def test_a_missing_outreach_is_404_and_commits_nothing(client, repos):
+    r = client.post("/api/outreach/999999/email", json={"address": "someone@example.com"})
+    assert r.status_code == 404
+    assert repos.session.commit_calls == 0
+    r = client.post("/api/outreach/999999/email", json={"give_up": True})
+    assert r.status_code == 404
+
+
+def test_not_found_is_mapped_by_type_not_by_message_text(client, monkeypatch):
+    from app.application.resolve_manual_email import ResolveManualEmail
+    from app.application.review_outreach import OutreachNotFound
+
+    def _raise(self, outreach_id, address):
+        raise OutreachNotFound("gone")  # does NOT start with "no outreach with id"
+
+    monkeypatch.setattr(ResolveManualEmail, "set_email", _raise)
+    r = client.post("/api/outreach/1/email", json={"address": "someone@example.com"})
+    assert r.status_code == 404
+
+
+def test_invalid_address_is_mapped_by_type_not_by_message_text(client, monkeypatch):
+    from app.application.resolve_manual_email import InvalidAddress, ResolveManualEmail
+
+    def _raise(self, outreach_id, address):
+        raise InvalidAddress("rejected")  # does NOT contain "does not look like an email address"
+
+    monkeypatch.setattr(ResolveManualEmail, "set_email", _raise)
+    r = client.post("/api/outreach/1/email", json={"address": "x@y.zz"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "rejected"
+
+
+def test_a_plain_value_error_is_409_even_when_its_text_looks_like_a_404_or_422(client, monkeypatch):
+    """A refusal that merely SAYS "no outreach with id" or "does not look
+    like an email address" but is raised as a bare `ValueError` is a
+    state-machine refusal (409) - the message text carries no meaning to
+    this router."""
+    from app.application.resolve_manual_email import ResolveManualEmail
+
+    for text in ("no outreach with id 1 (but really a refusal)",
+                 "'x' does not look like an email address (but really a refusal)"):
+        def _raise(self, outreach_id, address, _text=text):
+            raise ValueError(_text)
+
+        monkeypatch.setattr(ResolveManualEmail, "set_email", _raise)
+        r = client.post("/api/outreach/1/email", json={"address": "x@y.zz"})
+        assert r.status_code == 409, text

@@ -20,7 +20,7 @@ import pytest
 
 from app.application.poll_replies import PollReplies, PollRepos
 from app.domain.states import OutreachState as S
-from app.ports import GmailError, GmailHistoryExpired
+from app.ports import GmailAuthRequired, GmailError, GmailHistoryExpired
 
 
 def _repos(repos) -> PollRepos:
@@ -317,3 +317,75 @@ def test_a_reader_with_no_account_fails_fast_at_construction(repos):
 
     with pytest.raises(ValueError, match="account"):
         PollReplies(_AccountlessReader(), _repos(repos), _clock())
+
+
+# --- Final fix wave: F1 (own-address mail) and F2 (auth failure propagates) --
+
+
+def test_the_operators_own_reply_on_a_thread_is_never_stored_or_classified(
+    repos, sent_outreach, fake_reader,
+):
+    """F1: spec §5 "Replying" has the operator answer founders FROM
+    GMAIL. That message lands on one of our threads, has no `messages`
+    row (only `SendApproved`'s sends do), and is not a bounce - so
+    without a sender check it was stored as an inbound reply, handed to
+    the classifier as if a founder wrote it, and shown on the Thread
+    screen as a founder "reply". It must be skipped: no row, no state
+    change, and the classifier never sees it."""
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="own-1",
+                    sender="me@gmail.com", body="Thanks Pratish - here is the resume again.")
+    before = len(repos.message.list_by_outreach(sent_outreach.outreach.id))
+
+    result = PollReplies(fake_reader, _repos(repos), _clock()).run()
+
+    assert (result.stored, result.bounced, result.skipped) == (0, 0, 1)
+    assert repos.message.get_by_gmail_id("own-1") is None
+    assert len(repos.message.list_by_outreach(sent_outreach.outreach.id)) == before
+    assert repos.outreach.get(sent_outreach.outreach.id).state == str(S.SENT)
+
+
+def test_the_own_address_check_is_case_insensitive(repos, sent_outreach, fake_reader):
+    """Gmail may render the operator's address with different casing in
+    the `From` header than `GMAIL_SENDER_ADDRESS` was typed with; a
+    case-sensitive comparison would let the operator's own reply through
+    on exactly the accounts where the setting was typed in caps."""
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="own-2",
+                    sender="ME@Gmail.com", body="my own words")
+    result = PollReplies(fake_reader, _repos(repos), _clock()).run()
+    assert result.stored == 0 and result.skipped == 1
+    assert repos.message.get_by_gmail_id("own-2") is None
+
+
+def test_a_founder_reply_is_still_stored_when_the_operator_also_replied(
+    repos, sent_outreach, fake_reader,
+):
+    """The own-address skip must be exact: it drops ONLY the operator's
+    message, not the whole thread. The founder's reply in the same poll
+    window is stored as before."""
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="own-3",
+                    sender="me@gmail.com", body="Sure, attached.")
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="founder-3",
+                    sender="pratish@onefin.in", body="Got it, thanks!")
+    result = PollReplies(fake_reader, _repos(repos), _clock()).run()
+    assert (result.stored, result.skipped) == (1, 1)
+    assert repos.message.get_by_gmail_id("own-3") is None
+    assert repos.message.get_by_gmail_id("founder-3") is not None
+
+
+def test_a_gmail_auth_failure_propagates_out_of_run(repos, sent_outreach, fake_reader):
+    """F2 (spec §9): `GmailAuthRequired` - a 401, a revoked refresh token,
+    no stored credential - is the one `GmailError` that must NOT be
+    swallowed into a clean zero-result run: every later poll would fail
+    the same way, silently, forever. It escapes `run()` unchanged (so the
+    job runner records `failed / GmailAuthRequired`), and the cursor is
+    not advanced."""
+    fake_reader.add(thread_id=sent_outreach.thread_id, message_id="m1", sender="a@b.com", body="yes")
+    before = repos.credential.get_by_account_email("me@gmail.com").last_history_id
+    fake_reader.fail_with_auth_required()
+
+    with pytest.raises(GmailAuthRequired) as exc_info:
+        PollReplies(fake_reader, _repos(repos), _clock()).run()
+
+    assert isinstance(exc_info.value, GmailError)  # still a GmailError, just the fatal subtype
+    assert repos.credential.get_by_account_email("me@gmail.com").last_history_id == before
+    assert repos.message.get_by_gmail_id("m1") is None

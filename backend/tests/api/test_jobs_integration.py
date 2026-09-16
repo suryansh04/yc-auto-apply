@@ -28,8 +28,9 @@ fallback check below (mirroring `tests/adapters/conftest.py`'s own
 check, kept for parity even though it can't be satisfied that way
 under pytest). `alembic upgrade head` must already have been applied -
 see `tests/adapters/conftest.py`'s docstring for the same prerequisite.
-SKIPS cleanly (not errors) when no `DATABASE_URL` is configured, same
-convention as `tests/adapters/conftest.py`. Verified passing once against
+SKIPS cleanly (not errors) when no `DATABASE_URL` is in the environment
+(`.env` alone does not count - F11), same convention as
+`tests/adapters/conftest.py`. Verified passing once against
 the Postgres on :5433 named in `backend/.env` (fix round 1)."""
 
 import os
@@ -41,16 +42,11 @@ pytestmark = pytest.mark.integration
 
 
 def _database_url_configured() -> bool:
-    if os.environ.get("DATABASE_URL"):
-        return True
-    try:
-        with open(".env", encoding="utf-8") as fh:
-            return any(
-                line.split("=", 1)[0].strip() == "DATABASE_URL" and line.split("=", 1)[1].strip()
-                for line in fh if "=" in line and not line.lstrip().startswith("#")
-            )
-    except OSError:
-        return False
+    # Environment ONLY, never `.env` (final fix wave, F11): the autouse
+    # `_ignore_operator_dotenv` fixture strips the env file from `Settings`,
+    # so a `.env`-only DATABASE_URL would pass this check and then blow up
+    # in `get_settings()` as an error instead of a clean skip.
+    return bool(os.environ.get("DATABASE_URL"))
 
 
 def test_progress_committed_by_the_job_thread_is_visible_from_a_separate_session():

@@ -166,3 +166,68 @@ def test_startup_marks_every_active_job_interrupted_regardless_of_age(all_active
 def test_startup_marks_a_job_left_running_by_a_crash_as_interrupted(stale_job_client):
     row = next(j for j in stale_job_client.get("/api/jobs").json() if j["kind"] == "scrape")
     assert row["status"] == "failed" and row["error"] == "interrupted"
+
+
+def test_a_poll_replies_job_that_hits_a_dead_gmail_credential_records_gmail_auth_required(
+    client, repos, monkeypatch,
+):
+    """Final fix wave (F2, spec §9 "Gmail 401 -> the job fails with
+    're-run gmail-auth'"): the wire contract the Pipeline banner keys on
+    is `status == "failed"` and `error == "GmailAuthRequired"` on the
+    latest poll-replies job - the exception's TYPE NAME, never its
+    message (which is the only thing the runner ever records)."""
+    import threading
+
+    from app.api import jobs as jobs_impl
+    from app.ports import GmailAuthRequired
+    from tests.conftest import _signalling_runner_factory
+
+    finished = threading.Event()
+
+    def _stage(session, progress):
+        raise GmailAuthRequired("history", status=401, reason="invalid_grant")
+
+    monkeypatch.setattr(jobs_impl, "JOB_KINDS", {**jobs_impl.JOB_KINDS, "poll-replies": _stage})
+    client.app.state.job_runner_factory = _signalling_runner_factory(repos, finished)
+
+    assert client.post("/api/jobs/poll-replies").status_code == 200
+    assert finished.wait(timeout=5)
+    row = next(j for j in client.get("/api/jobs").json() if j["kind"] == "poll-replies")
+    assert row["status"] == "failed"
+    assert row["error"] == "GmailAuthRequired"
+
+
+def test_jobs_and_stats_render_a_job_through_the_same_mapper(client, repos):
+    """Final fix wave (F8): `GET /api/jobs` and `GET /api/stats` used to
+    carry two identical ten-field `JobOut(...)` translations. Now both go
+    through `app.api.schemas.to_job_out`; the two listings of the same
+    row must be field-for-field identical."""
+    from datetime import datetime, timezone
+
+    repos.job.upsert(
+        kind="poll-replies", status="failed", created_by="schedule",
+        started_at=datetime(2026, 9, 16, 9, 0, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 9, 16, 9, 0, 5, tzinfo=timezone.utc),
+        done=0, total=None, summary=None, error="GmailAuthRequired",
+    )
+    from_jobs = client.get("/api/jobs").json()
+    from_stats = client.get("/api/stats").json()["jobs"]
+    assert from_jobs == from_stats
+    assert from_jobs[0]["error"] == "GmailAuthRequired" and from_jobs[0]["created_by"] == "schedule"
+
+
+def test_to_job_out_reads_every_field_explicitly():
+    """A row missing a column is a bug, not a default: `to_job_out` must
+    raise rather than silently emit `None` for it."""
+    from types import SimpleNamespace
+
+    import pytest
+
+    from app.api.schemas import to_job_out
+
+    complete = dict(id=1, kind="sync", status="succeeded", created_by="ui", started_at=None,
+                    finished_at=None, done=3, total=3, summary="synced 3", error=None)
+    assert to_job_out(SimpleNamespace(**complete)).model_dump() == complete
+    incomplete = {k: v for k, v in complete.items() if k != "summary"}
+    with pytest.raises(AttributeError):
+        to_job_out(SimpleNamespace(**incomplete))

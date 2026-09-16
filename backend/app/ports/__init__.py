@@ -76,6 +76,24 @@ class GmailError(Exception):
         super().__init__(" ".join(parts))
 
 
+class GmailAuthRequired(GmailError):
+    """Final fix wave (F2, spec §9 "Gmail 401 during polling -> the job
+    fails with 're-run gmail-auth'"): the subset of `GmailError` that no
+    retry can cure — Gmail answered 401 to an API call, or the OAuth token
+    endpoint refused the stored refresh token (`invalid_grant`: revoked or
+    expired) or the client identity (`invalid_client`). Raised by
+    `app.adapters.gmail.exchange_refresh_token` and
+    `app.adapters.gmail_reader.GmailReader`; `PollReplies.run` re-raises
+    it (while still swallowing every other, transient `GmailError`) so the
+    poll-replies job is recorded `failed / GmailAuthRequired` and the
+    Pipeline screen shows a "re-run gmail-auth" banner instead of a
+    silent zero-result poll.
+
+    Same constructor and message discipline as `GmailError`: built from a
+    stage label, an HTTP status and a short OAuth error code only — never
+    a token, the response body, or the account address."""
+
+
 class GmailHistoryExpired(Exception):
     """Raised by `app.adapters.gmail_reader.GmailReader.history_since` when
     Gmail answers 404 to `users.history.list`: `startHistoryId` is older

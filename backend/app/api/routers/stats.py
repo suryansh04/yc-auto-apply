@@ -7,7 +7,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.api.deps import Repos, get_repos
-from app.api.schemas import JobOut, QuotaOut, StatsOut
+from app.api.schemas import QuotaOut, StatsOut, to_job_out
 from app.config import get_operator_settings
 from app.domain.states import OutreachState
 
@@ -35,20 +35,6 @@ def get_stats(repos: Repos = Depends(get_repos)) -> StatsOut:
         daily_limit=EMAIL_VERIFIER_DAILY_LIMIT,
     )
 
-    jobs = [
-        JobOut(
-            id=j.id,
-            kind=j.kind,
-            status=j.status,
-            created_by=j.created_by,
-            started_at=j.started_at,
-            finished_at=j.finished_at,
-            done=j.done,
-            total=j.total,
-            summary=j.summary,
-            error=j.error,
-        )
-        for j in repos.job.list_recent()
-    ]
+    jobs = [to_job_out(j) for j in repos.job.list_recent()]
 
     return StatsOut(counts=counts, quota=quota, jobs=jobs)

@@ -45,7 +45,7 @@ from typing import Callable
 
 import httpx
 
-from app.ports import GmailError
+from app.ports import GmailAuthRequired, GmailError
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ _TIMEOUT_SECONDS = 30.0
 # and re-exported here (rather than removed) so every existing
 # `from app.adapters.gmail import GmailError` call site keeps working
 # unchanged — this module no longer defines its own copy.
-__all__ = ["GmailError", "GmailSender", "build_mime", "encode_raw", "exchange_refresh_token"]
+__all__ = ["GmailAuthRequired", "GmailError", "GmailSender", "build_mime", "encode_raw", "exchange_refresh_token"]
 
 
 def build_mime(sender: str, to: str, subject: str, body: str, attachment_path: str | None) -> bytes:
@@ -176,7 +176,10 @@ def exchange_refresh_token(
     `build_drafter` are each extracted to one home rather than copied).
 
     Returns `(access_token, expires_in_seconds)`. Raises `GmailError`
-    ("token refresh", ...) on any failure - transport error, non-2xx
+    ("token refresh", ...) on any failure - or its subclass
+    `GmailAuthRequired` when the failure is a dead credential (401,
+    `invalid_grant`, `invalid_client`), which callers may treat as
+    "re-run gmail-auth" rather than retry (F2) - - transport error, non-2xx
     response, or a malformed body - carrying only the HTTP status and a
     short OAuth error code (`_error_code`), never the refresh token, the
     client secret, or the response body."""
@@ -193,8 +196,14 @@ def exchange_refresh_token(
     except httpx.HTTPError as exc:
         raise GmailError("token refresh", reason=type(exc).__name__) from None
     if response.status_code >= 400:
-        raise GmailError("token refresh", status=response.status_code,
-                         reason=_error_code(response))
+        code = _error_code(response)
+        if response.status_code == 401 or code in _AUTH_ERROR_CODES:
+            # Final fix wave (F2): a refresh token Google has revoked or
+            # expired (`invalid_grant`), a wrong client identity
+            # (`invalid_client`), or a flat 401 - nothing a retry can
+            # cure; the operator must re-run `gmail-auth`.
+            raise GmailAuthRequired("token refresh", status=response.status_code, reason=code)
+        raise GmailError("token refresh", status=response.status_code, reason=code)
     try:
         payload = response.json()
         token = str(payload["access_token"])
@@ -203,6 +212,11 @@ def exchange_refresh_token(
         raise GmailError("token refresh", status=response.status_code,
                          reason="response missing access_token")
     return token, expires_in
+
+
+# OAuth token-endpoint error codes that mean "the stored credential is
+# dead" rather than "try again later" (RFC 6749 §5.2).
+_AUTH_ERROR_CODES = frozenset({"invalid_grant", "invalid_client"})
 
 
 def _error_code(response: httpx.Response) -> str | None:

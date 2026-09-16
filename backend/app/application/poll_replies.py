@@ -41,7 +41,11 @@ Order of operations per run, and why:
    full message; `OutreachRepo.get_by_thread_id` maps its `gmail_thread_id`
    back to the outreach we sent it on. No match (the operator's own
    ordinary inbox mail, or anything else not ours) — `skipped`, never
-   stored, never handed anywhere near the classifier.
+   stored, never handed anywhere near the classifier. A match whose
+   sender IS the polled account (`reader.account`, case-insensitive) is
+   the operator's own reply written in Gmail (spec §5 "Replying") — also
+   `skipped` (final fix wave, F1): it is not a founder reply, must never
+   reach the classifier, and must never move the outreach.
 5. **Bounce check by sender, before storing.** `mailer-daemon@` /
    `postmaster@` (by the address's LOCAL PART, exact, case-insensitive —
    never a substring of the whole header, so a founder legitimately named
@@ -60,20 +64,23 @@ Order of operations per run, and why:
    worst, never a skipped reply, because nothing here trusts an
    in-progress run's cursor before it is durably the new "since" point.
 
-`PollReplies.run()` catches a Gmail transport failure (a `GmailError` from
-either `history_since`/`recent_message_ids`/`get_message`, or from the
-reader's own token refresh) and ends the run cleanly with whatever partial
-`PollResult` has accumulated so far — the reader deliberately does not
-retry a 401 in-request (Task 7's own docstring), so the next *scheduled*
-poll refreshes naturally instead of this run looping or crashing the
-caller (e.g. the job runner)."""
+`PollReplies.run()` catches a transient Gmail transport failure (a
+`GmailError` from either `history_since`/`recent_message_ids`/
+`get_message`, or from the reader's own token refresh) and ends the run
+cleanly with whatever partial `PollResult` has accumulated so far, so the
+next *scheduled* poll simply retries. The one exception (final fix wave,
+F2, spec §9): `GmailAuthRequired` — a 401, a revoked/expired refresh
+token, or no stored credential at all — is re-raised, because no later
+poll can cure it; the job runner records `failed / GmailAuthRequired` and
+the Pipeline screen tells the operator to re-run `gmail-auth` instead of
+showing a green zero-result run every 30 minutes."""
 
 import logging
 from dataclasses import dataclass
 from typing import Protocol
 
 from app.domain.states import IllegalTransition, OutreachState, assert_transition
-from app.ports import GmailError, GmailHistoryExpired
+from app.ports import GmailAuthRequired, GmailError, GmailHistoryExpired
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +129,14 @@ class PollRepos:
     session: _Committable
 
 
+def _is_own_address(from_address: str, account_email: str) -> bool:
+    """Whether `from_address` is the polled mailbox itself (case-
+    insensitive, whitespace-tolerant): a message the operator sent from
+    Gmail, never a founder reply. Exact address match only - `parseaddr`
+    has already stripped any display name upstream."""
+    return (from_address or "").strip().lower() == (account_email or "").strip().lower()
+
+
 def _is_bounce(from_address: str) -> bool:
     """Bounce detection: match the LOCAL PART of the address, exactly and
     case-insensitively — never a substring of the whole header. A founder
@@ -158,6 +173,16 @@ class PollReplies:
         result = PollResult()
         try:
             self._run(result)
+        except GmailAuthRequired:
+            # Final fix wave (F2, spec §9): a dead credential is not a
+            # transient failure the next scheduled poll will fix - every
+            # later poll would fail the same way, silently, forever. Let
+            # it PROPAGATE so the job runner records
+            # `failed / GmailAuthRequired` and the UI tells the operator
+            # to re-run `gmail-auth`. Nothing is half-written: every
+            # stored message was committed per unit above, and the cursor
+            # is deliberately not advanced.
+            raise
         except GmailError as exc:
             logger.warning(
                 "poll_replies: gmail error this run (%s); ending cleanly, "
@@ -191,6 +216,18 @@ class PollReplies:
             outreach = self._repos.outreach.get_by_thread_id(msg.gmail_thread_id)
             if outreach is None:
                 result.skipped += 1  # not one of our threads — the operator's own mail
+                continue
+
+            if _is_own_address(msg.from_address, self._account_email):
+                # Final fix wave (F1): mail FROM the polled account on one
+                # of our threads is the operator's own reply, written in
+                # Gmail (spec §5 "Replying": answer founders there). It
+                # has no `messages` row (only `SendApproved`'s sends do),
+                # so dedupe never catches it - stored as inbound it would
+                # be handed to the classifier as if a founder wrote it,
+                # and a human label would close the outreach on the
+                # operator's own words. Never stored, never classified.
+                result.skipped += 1
                 continue
 
             if _is_bounce(msg.from_address):

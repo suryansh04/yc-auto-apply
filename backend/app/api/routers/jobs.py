@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import Repos, get_repos
 from app.api.jobs import JOB_KINDS, _default_runner_factory, _default_session_factory, start_job
-from app.api.schemas import JobOut, JobStartIn, JobStartOut
+from app.api.schemas import JobOut, JobStartIn, JobStartOut, to_job_out
 from app.application.run_job import JobAlreadyRunning, RunJob
 
 router = APIRouter(tags=["jobs"])
@@ -55,18 +55,4 @@ def start(
 
 @router.get("/jobs", response_model=list[JobOut])
 def list_jobs(repos: Repos = Depends(get_repos)) -> list[JobOut]:
-    return [
-        JobOut(
-            id=j.id,
-            kind=j.kind,
-            status=j.status,
-            created_by=j.created_by,
-            started_at=j.started_at,
-            finished_at=j.finished_at,
-            done=j.done,
-            total=j.total,
-            summary=j.summary,
-            error=j.error,
-        )
-        for j in repos.job.list_recent()
-    ]
+    return [to_job_out(j) for j in repos.job.list_recent()]

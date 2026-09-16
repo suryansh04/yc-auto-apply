@@ -219,3 +219,53 @@ def test_a_401_body_carrying_a_fake_refresh_token_never_leaks(reader, caplog):
     assert fake_client_secret not in str(exc_info.value)
     assert fake_client_secret not in repr(exc_info.value)
     assert fake_client_secret not in joined_logs
+
+
+# --- Final fix wave (F2, spec §9): a 401 is `GmailAuthRequired`, never a
+# plain transient error - and still never carries the token or the body.
+
+
+@respx.mock
+def test_a_401_from_gmail_is_gmail_auth_required_without_the_token(reader):
+    from app.ports import GmailAuthRequired, GmailError
+
+    respx.get(HISTORY).mock(return_value=httpx.Response(401, json={
+        "error": {"code": 401, "message": "Invalid Credentials ya29.leaked-token", "status": "UNAUTHENTICATED"},
+    }))
+    with pytest.raises(GmailAuthRequired) as exc_info:
+        reader.history_since("1")
+    assert isinstance(exc_info.value, GmailError)
+    assert exc_info.value.status == 401
+    assert "ya29" not in str(exc_info.value) and "ya29" not in repr(exc_info.value)
+    assert "Invalid Credentials" not in str(exc_info.value)
+
+
+@respx.mock
+@pytest.mark.parametrize("status", [403, 429, 500, 503])
+def test_a_non_401_failure_stays_a_plain_gmail_error(reader, status):
+    """The boundary: only a 401 means "the credential is dead". A 403
+    (quota / scope), 429 or 5xx is retried by the next scheduled poll
+    and must NOT tell the operator to re-run `gmail-auth`."""
+    from app.ports import GmailAuthRequired, GmailError
+
+    respx.get(HISTORY).mock(return_value=httpx.Response(status, json={"error": {"message": "x"}}))
+    with pytest.raises(GmailError) as exc_info:
+        reader.history_since("1")
+    assert not isinstance(exc_info.value, GmailAuthRequired)
+
+
+def test_no_stored_credential_is_gmail_auth_required():
+    """No refresh token to exchange at all (`gmail-auth` never run for
+    this account, or the row cleared): same remedy as a revoked grant,
+    same type. Message names no account address and no secret."""
+    from app.ports import GmailAuthRequired
+
+    class _EmptyRepo:
+        def get_by_account_email(self, account_email: str):
+            return None
+
+    r = GmailReader(_EmptyRepo(), ACCOUNT, CLIENT_ID, CLIENT_SECRET)
+    with pytest.raises(GmailAuthRequired) as exc_info:
+        r.history_since("1")
+    assert ACCOUNT not in str(exc_info.value)
+    assert CLIENT_SECRET not in str(exc_info.value)

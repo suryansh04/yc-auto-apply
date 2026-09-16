@@ -48,10 +48,14 @@ Secrets never leak: same discipline as `GmailSender` - the refresh token,
 client secret and access token are never logged and never placed in an
 exception message. `GmailError` carries only a stage label and HTTP
 status; the reader does not retry a 401 in-request (unlike `GmailSender`,
-whose retry matters for a user-facing send) - a poll that hits a stale
-token simply fails this run and the *next* scheduled run refreshes
-naturally, which keeps this adapter simple and avoids a second,
-observable network call on every auth failure.
+whose retry matters for a user-facing send). Final fix wave (F2, spec
+§9): a 401 from Gmail, a refused refresh-token exchange (`invalid_grant`
+/ `invalid_client`, via `exchange_refresh_token`) or a missing stored
+credential is raised as `app.ports.GmailAuthRequired` - a `GmailError`
+subclass `PollReplies` lets propagate so the poll-replies job is
+recorded `failed / GmailAuthRequired` and the UI tells the operator to
+re-run `gmail-auth`, instead of the silent zero-result poll the spec
+forbids. Every other failure stays a plain, transient `GmailError`.
 """
 
 import base64
@@ -65,7 +69,7 @@ from typing import Callable
 import httpx
 
 from app.adapters.gmail import _error_code, exchange_refresh_token
-from app.ports import GmailError, GmailHistoryExpired
+from app.ports import GmailAuthRequired, GmailError, GmailHistoryExpired
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +85,7 @@ _TIMEOUT_SECONDS = 30.0
 # `from app.adapters.gmail_reader import GmailHistoryExpired` call site
 # (this module's own docstring above, Task 7's tests) keeps working
 # unchanged — this module no longer defines its own copy of either.
-__all__ = ["GmailError", "GmailHistoryExpired", "GmailReader", "InboundMessage"]
+__all__ = ["GmailAuthRequired", "GmailError", "GmailHistoryExpired", "GmailReader", "InboundMessage"]
 
 
 @dataclass(frozen=True)
@@ -244,6 +248,15 @@ class GmailReader:
             raise GmailError(stage, reason=type(exc).__name__) from None
 
     def _raise_for_status(self, stage: str, response: httpx.Response) -> None:
+        if response.status_code == 401:
+            # Final fix wave (F2): Gmail rejected the access token outright.
+            # The reader deliberately does not retry (module docstring),
+            # and a fresh token from the same refresh token would be
+            # rejected too when the grant is dead - so this is surfaced
+            # as the "re-run gmail-auth" subtype, never swallowed into a
+            # silent zero-result poll. Message: stage + status + short
+            # OAuth code only, never the body or the token.
+            raise GmailAuthRequired(stage, status=response.status_code, reason=_error_code(response))
         if response.status_code >= 400:
             raise GmailError(stage, status=response.status_code, reason=_error_code(response))
 
@@ -256,7 +269,10 @@ class GmailReader:
     def _refresh(self) -> None:
         credential = self._credential_repo.get_by_account_email(self._account)
         if credential is None or not getattr(credential, "refresh_token", None):
-            raise GmailError("token refresh", reason="no stored credential")
+            # No refresh token to exchange at all: the operator has never
+            # run `gmail-auth` for this account (or the row was cleared) -
+            # same remedy as a revoked grant, so the same type (F2).
+            raise GmailAuthRequired("token refresh", reason="no stored credential")
         self._access_token, expires_in = exchange_refresh_token(
             self._http, self._client_id, self._client_secret, credential.refresh_token,
         )

@@ -19,7 +19,13 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import Repos, get_repos
 from app.api.schemas import ManualEmailIn, ManualItemOut, OkOut
-from app.application.resolve_manual_email import ManualEmailRepos, ManualItem, ResolveManualEmail
+from app.application.resolve_manual_email import (
+    InvalidAddress,
+    ManualEmailRepos,
+    ManualItem,
+    ResolveManualEmail,
+)
+from app.application.review_outreach import OutreachNotFound
 from app.domain.states import IllegalTransition
 
 router = APIRouter(tags=["manual"])
@@ -52,21 +58,6 @@ def _to_out(item: ManualItem) -> ManualItemOut:
     )
 
 
-def _not_found_message(exc: Exception) -> bool:
-    # `ResolveManualEmail._manual_outreach` is the single place that raises
-    # this exact message for a missing row - every other `ValueError` it
-    # raises is a refusal of an otherwise-real row (wrong state, a
-    # malformed address), which is not a 404.
-    return str(exc).startswith("no outreach with id")
-
-
-def _is_address_error(exc: Exception) -> bool:
-    # `normalise_address` is the single place that raises this message
-    # (see `resolve_manual_email.py`) - the one case that is a client
-    # input error (422), not a state-machine refusal (409).
-    return "does not look like an email address" in str(exc)
-
-
 @router.get("/manual", response_model=list[ManualItemOut])
 def list_manual(repos: Repos = Depends(get_repos)) -> list[ManualItemOut]:
     return [_to_out(item) for item in _use_case(repos).pending()]
@@ -85,13 +76,18 @@ def resolve_email(outreach_id: int, payload: ManualEmailIn, repos: Repos = Depen
             use_case.give_up(outreach_id)
         else:
             use_case.set_email(outreach_id, payload.address)
+    except OutreachNotFound:
+        # Final fix wave (F3, ruling T4-1 applied here too): the 404 / 422
+        # / 409 split is decided by exception TYPE, never by matching the
+        # message text - `OutreachNotFound` and `InvalidAddress` are both
+        # `ValueError` subclasses, so they must be caught before the
+        # catch-all below.
+        raise HTTPException(404, "no such outreach")
+    except InvalidAddress as exc:
+        raise HTTPException(422, str(exc))
     except IllegalTransition as exc:
         raise HTTPException(409, str(exc))
     except ValueError as exc:
-        if _not_found_message(exc):
-            raise HTTPException(404, "no such outreach")
-        if _is_address_error(exc):
-            raise HTTPException(422, str(exc))
         raise HTTPException(409, str(exc))
 
     repos.session.commit()

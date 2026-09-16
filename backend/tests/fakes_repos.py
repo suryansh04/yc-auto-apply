@@ -537,7 +537,7 @@ class FakeSession:
 # here is unrestricted: this is a test fixture module, not `app/domain/`
 # or `app/application/`.
 
-from app.ports import GmailError, GmailHistoryExpired
+from app.ports import GmailAuthRequired, GmailError, GmailHistoryExpired
 
 
 @dataclass
@@ -655,7 +655,16 @@ class FakeGmailReader:
     def fail_with_gmail_error(self) -> None:
         self._gmail_error_pending = True
 
+    def fail_with_auth_required(self) -> None:
+        """Final fix wave (F2): the next `history_since` raises the REAL
+        `app.ports.GmailAuthRequired` once (a 401 / revoked grant), for
+        the test proving `PollReplies` lets exactly that subtype escape."""
+        self._auth_required_pending = True
+
     def history_since(self, history_id: str) -> tuple[list[str], str]:
+        if getattr(self, "_auth_required_pending", False):
+            self._auth_required_pending = False
+            raise GmailAuthRequired("history", status=401, reason="invalid_grant")
         if self._gmail_error_pending:
             self._gmail_error_pending = False
             raise GmailError("history", status=500, reason="simulated transport failure")

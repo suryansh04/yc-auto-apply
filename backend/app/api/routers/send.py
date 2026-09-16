@@ -37,13 +37,11 @@ independent things would each have to fail for that to happen:
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import Repos, get_repos, require_send_config
+from app.api.deps import Repos, get_repos, load_oauth_client, require_send_config
 from app.api.schemas import SendIn, SendResultOut
 from app.application.send_approved import SendApproved, SendRepos
 from app.config import get_operator_settings, get_settings
@@ -62,17 +60,6 @@ def _send_repos(repos: Repos) -> SendRepos:
                      settings=getattr(repos, "settings", None))
 
 
-def _load_oauth_client(path: str) -> tuple[str, str]:
-    """`client_id` / `client_secret` from a Google Cloud OAuth client JSON
-    - mirrors `app.cli._load_oauth_client`."""
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    block = data.get("installed") or data.get("web") or {}
-    client_id, client_secret = block.get("client_id"), block.get("client_secret")
-    if not client_id or not client_secret:
-        raise HTTPException(400, "gmail client secrets file is malformed")
-    return client_id, client_secret
-
-
 def _build_real_sender(repos: Repos, settings):
     """Only reachable when `repos.sender` was not injected - see the
     module docstring's safety note. Refuses (400, naming only the missing
@@ -83,10 +70,19 @@ def _build_real_sender(repos: Repos, settings):
     missing = require_send_config(settings)
     if missing:
         raise HTTPException(400, {"error": "refusing to send: missing configuration", "missing": missing})
-    client_id, client_secret = _load_oauth_client(settings.gmail_client_secrets_path)
+    # Final fix wave (F7): the ONE loader, shared with `app.cli` and the
+    # poll-replies job (`app.api.deps.load_oauth_client`); its
+    # `RuntimeError` names what is wrong with the file, never its contents.
+    try:
+        client_id, client_secret = load_oauth_client(settings.gmail_client_secrets_path)
+    except (RuntimeError, ValueError):
+        raise HTTPException(400, "gmail client secrets file is malformed")
     cred = GmailCredentialRepo(repos.session).get_by_account_email(settings.gmail_sender_address)
     if cred is None:
-        raise HTTPException(400, f"no Gmail refresh token stored for {settings.gmail_sender_address} - "
+        # F9: a fixed message - the account address is configuration
+        # identity and never belongs in an HTTP body (T8's rule, as
+        # `app.api.jobs._poll_replies` already follows).
+        raise HTTPException(400, "no Gmail refresh token stored for the configured account - "
                                  "run `gmail-auth` first")
     return GmailSender(client_id=client_id, client_secret=client_secret,
                        refresh_token=cred.refresh_token, sender_address=settings.gmail_sender_address)

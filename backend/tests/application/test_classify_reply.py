@@ -230,3 +230,26 @@ def test_correcting_human_to_human_never_even_attempts_a_transition(repos, label
     assert repos.message.get(labelled_reply.message.id).label == "INTERESTED"
     outreach = repos.outreach.get(labelled_reply.outreach.id)
     assert outreach.state == S.REPLIED and outreach.next_action_at == before
+
+
+# --- Final fix wave (F6): only an inbound row can carry a label ------------
+
+
+def test_apply_label_refuses_an_outbound_row_by_type_and_writes_nothing(repos, unlabelled_reply, fake_classifier):
+    """An outbound row never carries a label (spec §5); running the
+    label's transition logic on the parent outreach from one would be a
+    state change with no reply behind it. `apply_label` raises the typed
+    `NotAnInboundMessage` before touching either row."""
+    from app.application.classify_reply import NotAnInboundMessage
+
+    outbound = repos.message.get_outbound(unlabelled_reply.outreach.founder_id, 0)
+    assert outbound.direction == "outbound"
+    use_case = ClassifyReply(fake_classifier, _repos(repos), _clock())
+
+    with pytest.raises(NotAnInboundMessage) as exc_info:
+        use_case.apply_label(outbound, "INTERESTED", corrected=True)
+
+    assert isinstance(exc_info.value, ValueError)
+    assert repos.message.get(outbound.id).label is None
+    outreach = repos.outreach.get(unlabelled_reply.outreach.id)
+    assert outreach.state == S.SENT and outreach.next_action_at is not None

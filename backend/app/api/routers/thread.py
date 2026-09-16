@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import Repos, get_repos
 from app.api.schemas import LabelCorrectionIn, MessageOut, OkOut, ThreadOut
-from app.application.classify_reply import ClassifyReply, ClassifyRepos
+from app.application.classify_reply import ClassifyReply, ClassifyRepos, NotAnInboundMessage
 from app.application.review_outreach import OutreachNotFound
 from app.domain.replies import LABELS
 
@@ -124,7 +124,13 @@ def correct_label(message_id: int, payload: LabelCorrectionIn, repos: Repos = De
     # automatic run loop) uses them - so a bare `ClassifyReply` built with
     # neither is exactly enough machinery for this one call.
     use_case = ClassifyReply(classifier=None, repos=_classify_repos(repos), clock=None)
-    use_case.apply_label(message, payload.label, corrected=True)
+    try:
+        use_case.apply_label(message, payload.label, corrected=True)
+    except NotAnInboundMessage as exc:
+        # Final fix wave (F6): an outbound row never carries a label. The
+        # use case refuses by TYPE (ruling T4-1) and writes nothing, so
+        # there is nothing to commit.
+        raise HTTPException(409, str(exc))
 
     repos.session.commit()
     return OkOut()

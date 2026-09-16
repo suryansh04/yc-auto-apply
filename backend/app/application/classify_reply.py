@@ -179,6 +179,16 @@ def _normalise_label(raw_label) -> str:
     return raw_label if isinstance(raw_label, str) and raw_label in LABELS else "UNCLEAR"
 
 
+class NotAnInboundMessage(ValueError):
+    """Final fix wave (F6): raised by `ClassifyReply.apply_label` when
+    asked to label a message that is not `direction == "inbound"`. Only
+    founder replies carry a label (spec §5); an outbound row never does,
+    and running the label's transition logic on the parent outreach from
+    one would be a state change with no reply behind it. Typed so
+    `app.api.routers.thread` maps it to 409 by `isinstance`, never by
+    matching the message text (ruling T4-1)."""
+
+
 class ClassifyReply:
     def __init__(self, classifier, repos: ClassifyRepos, clock):
         self._classifier = classifier
@@ -251,7 +261,15 @@ class ClassifyReply:
         when the outreach moved (`_mark_replied`/`_restore_sent` each
         return `False` when the needed `assert_transition` is illegal, or
         when the old and new label are in the same bucket and no
-        transition was ever attempted)."""
+        transition was ever attempted).
+
+        Raises `NotAnInboundMessage` for any row that is not an inbound
+        one (F6) - before anything is written."""
+        if getattr(message, "direction", None) != "inbound":
+            raise NotAnInboundMessage(
+                f"message {message.id} is {getattr(message, 'direction', None)!r}, not inbound - "
+                "only a founder's reply carries a label"
+            )
         previous_label = message.label
         self._repos.message.upsert(id=message.id, label=label, corrected=corrected, **extra_fields)
 

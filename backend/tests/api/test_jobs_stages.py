@@ -140,6 +140,65 @@ def test_poll_replies_stage_wires_gmailreader_and_pollrepos(monkeypatch, tmp_pat
     assert summary == "fetched 3, stored 2, bounced 1, skipped 0"
 
 
+def test_poll_replies_stage_lets_gmail_auth_required_propagate_and_closes_the_reader(
+    monkeypatch, tmp_path,
+):
+    """Final fix wave (F2, spec §9): the stage function must not catch
+    `GmailAuthRequired` - the job runner records `type(exc).__name__`, so
+    letting it escape is exactly what makes the job row read
+    `failed / GmailAuthRequired` for the Pipeline banner. The reader is
+    still closed on the way out."""
+    from app.ports import GmailAuthRequired
+
+    _set_base_env(monkeypatch)
+    secrets_path = tmp_path / "client_secret.json"
+    secrets_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("GMAIL_CLIENT_SECRETS_PATH", str(secrets_path))
+    monkeypatch.setenv("GMAIL_SENDER_ADDRESS", "operator@example.com")
+    get_settings.cache_clear()
+
+    from app.adapters.db import repositories
+    from app.api import deps, jobs
+
+    class _CredentialRepo:
+        def __init__(self, session):
+            pass
+
+        def get_by_account_email(self, account_email):
+            return object()
+
+    for repo_name in ("FounderRepo", "MessageRepo", "OutreachRepo"):
+        monkeypatch.setattr(repositories, repo_name, lambda session: object())
+    monkeypatch.setattr(repositories, "GmailCredentialRepo", _CredentialRepo)
+    monkeypatch.setattr(deps, "load_oauth_client", lambda path: ("cid", "csecret"))
+
+    captured = {}
+
+    class _FakeReader:
+        def __init__(self, credential_repo, account, client_id, client_secret):
+            pass
+
+        def close(self):
+            captured["closed"] = True
+
+    class _AuthFailingPollReplies:
+        def __init__(self, reader, repos, clock):
+            pass
+
+        def run(self):
+            raise GmailAuthRequired("history", status=401, reason="invalid_grant")
+
+    monkeypatch.setattr("app.adapters.gmail_reader.GmailReader", _FakeReader)
+    monkeypatch.setattr("app.application.poll_replies.PollReplies", _AuthFailingPollReplies)
+
+    import pytest
+
+    with pytest.raises(GmailAuthRequired) as exc_info:
+        jobs._poll_replies(_StubSession(), lambda done, total=None: None)
+    assert captured["closed"] is True
+    assert "operator@example.com" not in str(exc_info.value)
+
+
 # --- classify-replies --------------------------------------------------------
 
 

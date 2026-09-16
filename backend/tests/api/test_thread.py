@@ -322,3 +322,37 @@ def test_a_hand_corrected_message_is_flagged_corrected_in_the_thread(client, thr
     assert reply_out["corrected"] is True
     outbound_out = next(m for m in body["messages"] if m["direction"] == "outbound")
     assert outbound_out["corrected"] is False
+
+
+# --- Final fix wave (F6): the label route rejects outbound rows -------------
+
+
+def test_labelling_an_outbound_message_is_409_and_changes_nothing(client, repos, thread_with_reply):
+    """`POST /messages/{id}/label` on the operator's OWN outbound row must
+    be refused (409, by exception type - not by matching a message) and
+    leave both the row and the parent outreach exactly as they were: an
+    outbound row never carries a label, and a human label applied
+    through it would otherwise move the outreach to REPLIED with no
+    reply behind it."""
+    outbound = next(m for m in repos.message.list_by_outreach(thread_with_reply.outreach.id)
+                    if m.direction == "outbound")
+    before_state = repos.outreach.get(thread_with_reply.outreach.id).state
+
+    r = client.post(f"/api/messages/{outbound.id}/label", json={"label": "INTERESTED"})
+
+    assert r.status_code == 409
+    assert repos.message.get(outbound.id).label is None
+    assert repos.outreach.get(thread_with_reply.outreach.id).state == before_state
+    assert repos.session.commit_calls == 0
+
+
+def test_the_outbound_refusal_is_mapped_by_type_not_by_message_text(client, monkeypatch, thread_with_reply):
+    from app.application.classify_reply import ClassifyReply, NotAnInboundMessage
+
+    def _raise(self, message, label, corrected=False, **extra):
+        raise NotAnInboundMessage("nope")  # arbitrary text - the type alone decides the 409
+
+    monkeypatch.setattr(ClassifyReply, "apply_label", _raise)
+    r = client.post(f"/api/messages/{thread_with_reply.reply.id}/label", json={"label": "INTERESTED"})
+    assert r.status_code == 409
+    assert r.json()["detail"] == "nope"

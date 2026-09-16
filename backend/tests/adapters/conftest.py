@@ -9,10 +9,16 @@ here never affects the offline suite.
 Each test runs inside its own transaction that is rolled back on teardown,
 so tests never need to truncate tables between runs.
 
-Without a `DATABASE_URL` (env or `.env`) every test here SKIPS rather than
-errors (final fix wave, F5; spec §15 "skip cleanly without credentials") -
-the check runs before `get_settings()`, whose `ValidationError` on the
-missing field used to surface as 7 errors under `pytest -m integration`.
+Without a `DATABASE_URL` in the ENVIRONMENT every test here SKIPS rather
+than errors (Phase 1 final fix wave, F5; spec §15 "skip cleanly without
+credentials") - the check runs before `get_settings()`, whose
+`ValidationError` on the missing field used to surface as 7 errors under
+`pytest -m integration`. Phase 2 final fix wave (F11): the check reads
+`os.environ` ONLY, deliberately not `backend/.env` - `tests/conftest.py`'s
+autouse `_ignore_operator_dotenv` strips the env file from `Settings` for
+every test, so a `.env` on disk is invisible to `get_settings()` here and
+honouring it in the predicate turned "skipped" into 12 errors + 1 failure.
+Run with `DATABASE_URL=... pytest -m integration` to opt in.
 
 PREREQUISITE: `alembic upgrade head` must have been run against the target
 database before these tests are collected for real. These fixtures do not
@@ -33,17 +39,11 @@ from app.config import get_settings
 
 
 def _database_url_configured() -> bool:
-    """`DATABASE_URL` from the environment or from a `.env` in the CWD -
-    the same two places `Settings` reads it from - without instantiating
-    `Settings` (which raises when it is absent)."""
-    if os.environ.get("DATABASE_URL"):
-        return True
-    try:
-        with open(".env", encoding="utf-8") as fh:
-            return any(line.split("=", 1)[0].strip() == "DATABASE_URL" and line.split("=", 1)[1].strip()
-                       for line in fh if "=" in line and not line.lstrip().startswith("#"))
-    except OSError:
-        return False
+    """`DATABASE_URL` from the environment - the ONLY place `Settings` can
+    read it from under the suite's autouse `_ignore_operator_dotenv`
+    fixture - without instantiating `Settings` (which raises when it is
+    absent). Never consults `.env` (F11): see the module docstring."""
+    return bool(os.environ.get("DATABASE_URL"))
 
 
 @pytest.fixture

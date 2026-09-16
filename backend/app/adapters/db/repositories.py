@@ -668,40 +668,43 @@ class GmailCredentialRepo:
 
 
 class JobRepo:
-    """Phase 2 (spec §4). Uniform `upsert(**fields)` like every other repo."""
+    """Phase 2 (spec §4). Uniform `upsert(**fields)` like every other repo,
+    and (final fix wave, deferred Task 2 minor) the same `self.session` /
+    `session.execute(select(...)).scalars()` shape as every other repo in
+    this module - no behaviour change."""
 
     def __init__(self, session: Session):
-        self._session = session
+        self.session = session
 
     def upsert(self, **fields) -> Job:
         job_id = fields.pop("id", None)
-        row = self._session.get(Job, job_id) if job_id else None
+        row = self.session.get(Job, job_id) if job_id else None
         if row is None:
             row = Job(**fields)
-            self._session.add(row)
+            self.session.add(row)
         else:
             for key, value in fields.items():
                 setattr(row, key, value)
-        self._session.flush()
+        self.session.flush()
         return row
 
     def get(self, job_id: int) -> Job | None:
-        return self._session.get(Job, job_id)
+        return self.session.get(Job, job_id)
 
     def active(self, kind: str) -> Job | None:
-        return self._session.scalars(
+        return self.session.execute(
             select(Job).where(Job.kind == kind, Job.status.in_(("queued", "running")))
-        ).first()
+        ).scalars().first()
 
     def list_active(self) -> list[Job]:
-        return list(self._session.scalars(
+        return list(self.session.execute(
             select(Job).where(Job.status.in_(("queued", "running")))
-        ))
+        ).scalars())
 
     def list_recent(self, limit: int = 50) -> list[Job]:
-        return list(self._session.scalars(
+        return list(self.session.execute(
             select(Job).order_by(Job.id.desc()).limit(limit)
-        ))
+        ).scalars())
 
 
 # --- Added in Task 10 (spec §7, T9-1): the one-row `settings` table -

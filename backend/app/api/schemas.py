@@ -29,6 +29,27 @@ class JobOut(BaseModel):
     error: str | None = None
 
 
+def to_job_out(job) -> JobOut:
+    """The ONE `jobs` row -> `JobOut` translation (final fix wave, F8),
+    used by both `GET /api/jobs` (`routers.jobs`) and `GET /api/stats`
+    (`routers.stats`) so the two listings can never drift on a field.
+    Explicit attribute reads rather than `from_attributes=True`: a row
+    (or a `FakeJobRepo` row) missing one of these is a bug worth an
+    `AttributeError`, not a silent default."""
+    return JobOut(
+        id=job.id,
+        kind=job.kind,
+        status=job.status,
+        created_by=job.created_by,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        done=job.done,
+        total=job.total,
+        summary=job.summary,
+        error=job.error,
+    )
+
+
 class JobStartIn(BaseModel):
     """Body of `POST /api/jobs/{kind}` (Task 6, ruling PF-2). Optional -
     a bare POST with no body defaults to `created_by="ui"`, the browser's

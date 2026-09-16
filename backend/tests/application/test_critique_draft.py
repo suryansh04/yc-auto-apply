@@ -253,3 +253,53 @@ def test_critic_sees_the_validated_draft_not_the_raw_model_output(repos, ready_f
     assert seen["research_source_id"] == 1          # coerced to int by `_to_draft`, not the raw "1" string
     assert "some_unexpected_field" not in seen
 
+
+
+# --- Final fix wave (deferred Task 13 minor): a misbehaving critic's `concerns`
+
+
+def test_a_non_list_or_missing_concerns_from_the_critic_passes_through_without_raising():
+    """`run_critic` guards `len()`/slicing with `isinstance(concerns,
+    list)`; a critic that answers with a string, a dict or no `concerns`
+    key at all must not raise (the critic is advisory only - D22). Pins
+    the CURRENT behaviour: the value is passed through as given (`None`
+    when absent), the verdict and note are still kept."""
+    from app.application.critique_draft import run_critic
+
+    class _Critic:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def critique(self, draft: dict) -> dict:
+            return self._payload
+
+    draft = {"subject": "s", "body": "b", "research_source_type": "news", "research_source_id": 1}
+
+    result = run_critic(_Critic({"verdict": "PASS", "concerns": "not a list", "overall_note": "n"}), draft)
+    assert result.verdict == "PASS" and result.concerns == "not a list" and result.overall_note == "n"
+
+    result = run_critic(_Critic({"verdict": "NEEDS_REVISION", "concerns": None, "overall_note": "n"}), draft)
+    assert result.verdict == "NEEDS_REVISION" and result.concerns is None and result.needs_revision
+
+    result = run_critic(_Critic({"verdict": "PASS", "concerns": {"span": "x", "issue": "y"}}), draft)
+    assert result.concerns == {"span": "x", "issue": "y"}
+
+    result = run_critic(_Critic({"verdict": "PASS"}), draft)
+    assert result.verdict == "PASS" and result.concerns is None
+
+
+def test_a_non_list_concerns_still_reaches_pending_approval(repos, ready_founder, fake_drafter):
+    """End to end through `DraftOutreach`: the same misbehaving critic
+    must not stop the draft - it lands in PENDING_APPROVAL with the
+    verdict stored."""
+    from app.domain.states import OutreachState
+
+    class _StringConcernsCritic:
+        def critique(self, draft: dict) -> dict:
+            return {"verdict": "PASS", "concerns": "looks fine", "overall_note": "ok"}
+
+    DraftOutreach(fake_drafter, _repos(repos), critic=_StringConcernsCritic()).run(limit=1)
+
+    assert repos.outreach.get(ready_founder.id).state == OutreachState.PENDING_APPROVAL
+    row = repos.message.get_outbound(ready_founder.id, 0)
+    assert row.critic_verdict == "PASS"

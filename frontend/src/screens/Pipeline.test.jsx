@@ -193,3 +193,65 @@ it('polls jobs at a 2000ms interval while running, not sooner', async () => {
   // Past the 2000ms mark: exactly one more call.
   await waitFor(() => expect(spy).toHaveBeenCalledTimes(2), { timeout: 2000 })
 }, 8000)
+
+// --- Final fix wave (F2, spec §9): the "re-run gmail-auth" banner ---------
+//
+// The backend records only the exception's TYPE NAME on a failed job; the
+// banner keys on exactly `error === 'GmailAuthRequired'` for exactly the
+// latest `poll-replies` job. The three negative tests below each pin one
+// way the condition could be loosened (any failure / any kind / any
+// historical job) and fail if it is.
+
+const POLL_AUTH_FAILED = {
+  id: 20, kind: 'poll-replies', status: 'failed', done: 0, total: null, error: 'GmailAuthRequired',
+}
+
+it('shows a re-run gmail-auth banner when the latest poll-replies job failed with GmailAuthRequired', async () => {
+  mockStats({})
+  mockJobs([POLL_AUTH_FAILED])
+  render(<Pipeline />)
+  const banner = await screen.findByRole('alert')
+  expect(banner).toHaveTextContent(/Gmail authorisation expired/)
+  expect(banner).toHaveTextContent(/gmail-auth/)
+})
+
+it('does not show the gmail-auth banner for a poll-replies job that failed for another reason', async () => {
+  mockStats({})
+  mockJobs([{ ...POLL_AUTH_FAILED, error: 'RuntimeError' }])
+  render(<Pipeline />)
+  // The ordinary failed cell still renders...
+  expect(await screen.findByText(/failed: RuntimeError/)).toBeInTheDocument()
+  // ...but nothing tells the operator to re-auth.
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  expect(screen.queryByText(/gmail-auth/)).not.toBeInTheDocument()
+})
+
+it('does not show the gmail-auth banner when a NON-poll job carries that error name', async () => {
+  mockStats({})
+  mockJobs([{ ...POLL_AUTH_FAILED, kind: 'resolve' }])
+  render(<Pipeline />)
+  expect(await screen.findByText(/failed: GmailAuthRequired/)).toBeInTheDocument()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
+it('clears the gmail-auth banner once a NEWER poll-replies job succeeded', async () => {
+  mockStats({})
+  mockJobs([
+    POLL_AUTH_FAILED,
+    { id: 21, kind: 'poll-replies', status: 'succeeded', done: 2, total: null, summary: 'fetched 2, stored 1, bounced 0, skipped 1' },
+  ])
+  render(<Pipeline />)
+  expect(await screen.findByText(/fetched 2, stored 1/)).toBeInTheDocument()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
+it('does not show the gmail-auth banner for a poll-replies job that is still running', async () => {
+  mockStats({})
+  mockJobs([{ ...POLL_AUTH_FAILED, status: 'running', error: 'GmailAuthRequired' }])
+  render(<Pipeline />)
+  // Wait for the jobs response to have rendered (the running cell), so
+  // the absence of the banner is asserted against real data, not the
+  // pre-fetch empty state.
+  expect(await screen.findByText(/running/)).toBeInTheDocument()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})

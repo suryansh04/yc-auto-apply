@@ -104,6 +104,18 @@ const STAGE_GROUPS = [
 
 const ACTIVE_STATUSES = new Set(['queued', 'running'])
 
+// Final fix wave (F2, spec §9 "Gmail 401 during polling -> the job fails
+// with 're-run gmail-auth', which the UI surfaces as a banner"). The
+// backend records only the exception's TYPE NAME on a failed job, so the
+// banner keys on exactly that string for exactly the poll-replies kind -
+// any other failed job keeps its ordinary "failed: X" cell.
+export const GMAIL_AUTH_REQUIRED = 'GmailAuthRequired'
+
+export function gmailAuthExpired(latest) {
+  const job = latest?.['poll-replies']
+  return Boolean(job && job.status === 'failed' && job.error === GMAIL_AUTH_REQUIRED)
+}
+
 function latestJobByKind(jobs) {
   const latest = {}
   for (const job of jobs ?? []) {
@@ -222,6 +234,12 @@ export default function Pipeline() {
       )}
       {showStartError && (
         <Banner kind="error">Could not start job: {startJob.error.message}</Banner>
+      )}
+      {gmailAuthExpired(latest) && (
+        <Banner kind="error">
+          Gmail authorisation expired &mdash; re-run <code>python -m app.cli gmail-auth</code>,
+          then start Poll replies again.
+        </Banner>
       )}
 
       <section className="funnel">

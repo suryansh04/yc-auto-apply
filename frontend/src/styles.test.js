@@ -10,6 +10,14 @@ const css = readFileSync('src/styles.css', 'utf8')
 const reviewQueueCss = readFileSync('src/styles/review-queue.css', 'utf8')
 const threadCss = readFileSync('src/styles/thread.css', 'utf8')
 
+// Strips /* ... */ comments before a block of CSS is matched against a
+// declaration regex, so an explanatory comment that happens to mention a
+// property/value pair in prose (e.g. "min-width: 0 lets the pane shrink")
+// can't stand in for the real declaration once it's deleted.
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '')
+}
+
 it('defines the full palette on :root, not only inside a media query', () => {
   const root = css.slice(css.indexOf(':root'), css.indexOf('}', css.indexOf(':root')))
   for (const token of ['--bg', '--fg', '--muted', '--accent', '--border', '--danger']) {
@@ -120,29 +128,37 @@ describe('long unbroken content wraps instead of being clipped', () => {
   // min-width: 0 lets the grid/flex item shrink below its content's
   // intrinsic width in the first place.
   it('.wire-text and .message-body break long unbroken text instead of clipping it', () => {
-    const wireText = reviewQueueCss.slice(
-      reviewQueueCss.indexOf('.wire-text {'),
-      reviewQueueCss.indexOf('}', reviewQueueCss.indexOf('.wire-text {'))
+    const wireText = stripComments(
+      reviewQueueCss.slice(
+        reviewQueueCss.indexOf('.wire-text {'),
+        reviewQueueCss.indexOf('}', reviewQueueCss.indexOf('.wire-text {'))
+      )
     )
-    const messageBody = threadCss.slice(
-      threadCss.indexOf('.message-body {'),
-      threadCss.indexOf('}', threadCss.indexOf('.message-body {'))
+    const messageBody = stripComments(
+      threadCss.slice(
+        threadCss.indexOf('.message-body {'),
+        threadCss.indexOf('}', threadCss.indexOf('.message-body {'))
+      )
     )
-    expect(wireText).toMatch(/overflow-wrap:\s*anywhere/)
-    expect(messageBody).toMatch(/overflow-wrap:\s*anywhere/)
+    expect(wireText).toMatch(/overflow-wrap:\s*anywhere\s*;/)
+    expect(messageBody).toMatch(/overflow-wrap:\s*anywhere\s*;/)
   })
 
   it('the review-queue panes and thread message can shrink below their content width', () => {
-    const panes = reviewQueueCss.slice(
-      reviewQueueCss.indexOf('.draft-pane,'),
-      reviewQueueCss.indexOf('}', reviewQueueCss.indexOf('.draft-pane,'))
+    const panes = stripComments(
+      reviewQueueCss.slice(
+        reviewQueueCss.indexOf('.draft-pane,'),
+        reviewQueueCss.indexOf('}', reviewQueueCss.indexOf('.draft-pane,'))
+      )
     )
-    const message = threadCss.slice(
-      threadCss.indexOf('.message {'),
-      threadCss.indexOf('}', threadCss.indexOf('.message {'))
+    const message = stripComments(
+      threadCss.slice(
+        threadCss.indexOf('.message {'),
+        threadCss.indexOf('}', threadCss.indexOf('.message {'))
+      )
     )
-    expect(panes).toMatch(/min-width:\s*0/)
-    expect(message).toMatch(/min-width:\s*0/)
+    expect(panes).toMatch(/min-width:\s*0\s*;/)
+    expect(message).toMatch(/min-width:\s*0\s*;/)
   })
 })
 
@@ -159,7 +175,7 @@ describe('form controls use the 14px base, not the label caption size', () => {
     const start = source.indexOf(selectorStart)
     const openBrace = source.indexOf('{', start)
     const closeBrace = source.indexOf('}', openBrace)
-    return source.slice(openBrace + 1, closeBrace)
+    return stripComments(source.slice(openBrace + 1, closeBrace))
   }
 
   it("input/select/textarea declare an explicit 14px-equivalent font-size, not just font: inherit", () => {

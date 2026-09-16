@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,3 +34,18 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
+
+
+@lru_cache
+def get_operator_settings() -> Settings:
+    """`Settings` for reading operator preferences (signature, resume path,
+    API keys, caps) where no database is needed - e.g. the API's GET
+    /api/stats and /api/queue. Same `.env`, same precedence as
+    `get_settings()`; the only difference is `DATABASE_URL` is not required.
+
+    Live finding (2026-09-16): those routes read `os.environ` directly to
+    avoid `Settings.database_url`'s required-ness, which silently ignored
+    everything in `backend/.env` under uvicorn - the review queue previewed
+    drafts WITHOUT the signature that `send` then appended.
+    """
+    return Settings(database_url=os.environ.get("DATABASE_URL", "unused"))

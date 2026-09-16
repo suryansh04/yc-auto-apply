@@ -300,22 +300,44 @@ def _resume_parser():
 
 
 def _drafter():
-    """Provider switch: the configured LLM's `Drafter` adapter."""
-    settings = get_settings()
-    if settings.llm_provider == "sarvam":
-        from app.adapters import sarvam
+    """Provider switch: the configured LLM's `Drafter` adapter. Shared
+    with the UI job runner via `app.api.deps.build_drafter` (fix round 2,
+    ruling T6-6) - one rule, not two that can drift on a new provider or a
+    changed model default. `RuntimeError` (that shared function's only
+    failure mode, since it must stay usable with no CLI dependency) is
+    translated here into `typer.BadParameter` for the CLI's own nice error
+    formatting - unchanged CLI behaviour from before the extraction."""
+    from app.api.deps import build_drafter
 
-        if not settings.sarvam_api_key:
-            raise typer.BadParameter("SARVAM_API_KEY is not set")
-        return sarvam.SarvamDrafter(settings.sarvam_api_key, model=settings.sarvam_model)
-    from app.adapters.gemini import GeminiDrafter
+    try:
+        return build_drafter(get_settings())
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
-    return GeminiDrafter(_gemini_client(), model=settings.gemini_model)
+
+def _critic():
+    """Provider switch for the advisory `Critic` (D22, Task 13). Shared
+    with the UI job runner via `app.api.deps.build_critic`, the same
+    extraction `_drafter`/`build_drafter` above already did (T6-6/T9). Same
+    error translation as `_drafter` - but note the critic is advisory only,
+    so `draft`'s own call site never lets a `typer.BadParameter` from here
+    abort a run; see its call site below."""
+    from app.api.deps import build_critic
+
+    try:
+        return build_critic(get_settings())
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _on_gemini_free_tier() -> bool:
-    s = get_settings()
-    return s.llm_provider == "gemini" and s.gemini_tier == "free"
+    # Task 6 fix round 1 (ruling T6-3): shared with `app.api.jobs`'s UI
+    # job runner via `app.api.deps.on_gemini_free_tier`, the same
+    # extraction Task 5 did for the send guards - one rule, not two that
+    # can drift.
+    from app.api.deps import on_gemini_free_tier
+
+    return on_gemini_free_tier(get_settings())
 
 
 def _refuse_free_tier_for_founder_data(allow_free_tier: bool) -> None:
@@ -414,6 +436,7 @@ def draft(
     settings = get_settings()
     _refuse_free_tier_for_founder_data(allow_free_tier)
     drafter = _drafter()
+    critic = _critic()  # Task 13 (D22): advisory only - shares the drafter's provider/key
     with _session() as session:
         repos = DraftRepos(
             founder=FounderRepo(session),
@@ -425,7 +448,9 @@ def draft(
             message=MessageRepo(session),
             resume_profile=ResumeProfileRepo(session),
         )
-        result = DraftOutreach(drafter, repos, keep_unverified=keep_unverified).run(limit=limit)
+        result = DraftOutreach(
+            drafter, repos, keep_unverified=keep_unverified, critic=critic,
+        ).run(limit=limit)
         session.commit()
 
     typer.echo(
@@ -467,17 +492,6 @@ def _random_pause() -> None:
 _MAX_TO_SELF = 3  # fix round 1 (F8): `--to-self` copies never count toward the DB cap, but do toward Gmail's
 
 
-def _missing_gmail_config(settings) -> list[str]:
-    from pathlib import Path
-
-    missing = []
-    if not settings.gmail_sender_address:
-        missing.append("GMAIL_SENDER_ADDRESS (the Gmail account authorised by gmail-auth)")
-    if not settings.gmail_client_secrets_path or not Path(settings.gmail_client_secrets_path).is_file():
-        missing.append("GMAIL_CLIENT_SECRETS_PATH (must point at the OAuth client JSON)")
-    return missing
-
-
 def _refuse(action: str, missing: list[str]) -> None:
     if missing:
         typer.echo(f"refusing to {action}: missing configuration", err=True)
@@ -489,37 +503,40 @@ def _refuse(action: str, missing: list[str]) -> None:
 def _require_gmail_config(settings) -> None:
     """What `gmail-auth` needs (fix round 1, F5): only the sending address
     and the OAuth client-secrets file — authorising Gmail must not wait on
-    the resume or the signature being in place."""
-    _refuse("authorise gmail", _missing_gmail_config(settings))
+    the resume or the signature being in place. Shared with
+    `app.api.deps.require_gmail_config` so this rule lives in one place."""
+    from app.api.deps import require_gmail_config
+
+    _refuse("authorise gmail", require_gmail_config(settings))
 
 
 def _require_send_config(settings) -> None:
     """Refuse to build a sender until every send-side setting is present
     (all default to empty in `app.config`, so a fresh `.env` can never send
-    by accident): the Gmail settings above plus a real, non-blank signature
-    (spec §18) and an existing resume PDF."""
-    from pathlib import Path
+    by accident): the Gmail settings plus a real, non-blank signature
+    (spec §18) and an existing resume PDF. Shared with
+    `app.api.deps.require_send_config` (Task 5) so the CLI and the browser
+    send route cannot drift on what "configured enough to send" means."""
+    from app.api.deps import require_send_config
 
-    missing = _missing_gmail_config(settings)
-    if not settings.signature.strip():
-        missing.append("SIGNATURE (your sign-off; every email must carry a real signature)")
-    if not settings.resume_path or not Path(settings.resume_path).is_file():
-        missing.append("RESUME_PATH (must point at an existing PDF)")
-    _refuse("send", missing)
+    _refuse("send", require_send_config(settings))
 
 
 def _load_oauth_client(path: str) -> tuple[str, str]:
     """`client_id` / `client_secret` from a Google Cloud OAuth client JSON
-    (`{"installed": {...}}` for a Desktop app, or `{"web": {...}}`)."""
-    import json
-    from pathlib import Path
+    (`{"installed": {...}}` for a Desktop app, or `{"web": {...}}`).
+    Extracted to `app.api.deps.load_oauth_client` (Task 15a) so the UI job
+    runner's `poll-replies` stage can load the same client identity a
+    `GmailReader` needs - same extraction pattern as `_drafter`/`_critic`/
+    `_on_gemini_free_tier` above. `RuntimeError` from there is translated
+    here into `typer.BadParameter` for the CLI's own nice error
+    formatting, unchanged CLI behaviour from before the extraction."""
+    from app.api.deps import load_oauth_client
 
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    block = data.get("installed") or data.get("web") or {}
-    client_id, client_secret = block.get("client_id"), block.get("client_secret")
-    if not client_id or not client_secret:
-        raise typer.BadParameter("client secrets JSON has no installed/web client_id + client_secret")
-    return client_id, client_secret
+    try:
+        return load_oauth_client(path)
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _gmail_sender(client_id: str, client_secret: str, refresh_token: str, sender_address: str):
@@ -529,22 +546,36 @@ def _gmail_sender(client_id: str, client_secret: str, refresh_token: str, sender
                        refresh_token=refresh_token, sender_address=sender_address)
 
 
+# Task 7 (Phase 2, spec §5): `gmail-auth` now requests BOTH the send scope
+# (Task 15) and read-only (needed by `app.adapters.gmail_reader.GmailReader`
+# to poll replies). A refresh token minted under the old send-only scope
+# cannot read mail - Google enforces scopes on the token, not just on the
+# consent screen - so an operator who authorised before this change must
+# re-run `gmail-auth` once; the command prints a note about this below.
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
+
+
 @app.command("gmail-auth")
 def gmail_auth() -> None:
-    """One-time OAuth bootstrap (Task 15, spec §14): opens a browser for the
-    Google consent screen with the `gmail.send` scope only, then stores the
-    resulting REFRESH token in the `gmail_credentials` table (never in a
-    file) under GMAIL_SENDER_ADDRESS. Re-run it if `send` reports
-    `invalid_grant` (token revoked/expired). Not covered by the offline
-    suite: it needs a browser and Google's servers."""
+    """One-time OAuth bootstrap (Task 15, spec §14; widened in Task 7,
+    spec §5): opens a browser for the Google consent screen with the
+    `gmail.send` and `gmail.readonly` scopes, then stores the resulting
+    REFRESH token in the `gmail_credentials` table (never in a file) under
+    GMAIL_SENDER_ADDRESS. Re-run it if `send` reports `invalid_grant`
+    (token revoked/expired), or once after upgrading past Task 7 if the
+    stored token predates the read scope (a send-only token cannot read
+    mail; Google enforces scopes on the token itself). Not covered by the
+    offline suite: it needs a browser and Google's servers."""
     from app.adapters.db.repositories import GmailCredentialRepo
-    from app.adapters.gmail import SCOPES
 
     settings = get_settings()
     _require_gmail_config(settings)
     from google_auth_oauthlib.flow import InstalledAppFlow
 
-    flow = InstalledAppFlow.from_client_secrets_file(settings.gmail_client_secrets_path, scopes=SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(settings.gmail_client_secrets_path, scopes=GMAIL_SCOPES)
     creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
     if not creds.refresh_token:
         typer.echo("Google returned no refresh token - revoke the app's access at "
@@ -555,10 +586,14 @@ def gmail_auth() -> None:
             account_email=settings.gmail_sender_address,
             refresh_token=creds.refresh_token,
             token_uri=creds.token_uri or "https://oauth2.googleapis.com/token",
-            scopes=list(creds.scopes or SCOPES),
+            scopes=list(creds.scopes or GMAIL_SCOPES),
         )
         session.commit()
-    typer.echo(f"stored a refresh token for {settings.gmail_sender_address} (scope: gmail.send)")
+    typer.echo(f"stored a refresh token for {settings.gmail_sender_address} (scopes: gmail.send, gmail.readonly)")
+    typer.echo("NOTE: if you authorised this account before this change, that older token was "
+               "send-only and cannot read replies - this run replaced it with one covering both "
+               "scopes, so no further action is needed. If a colleague's token is still send-only, "
+               "they must run `gmail-auth` again once.")
 
 
 @app.command()
@@ -584,6 +619,7 @@ def send(
         GmailCredentialRepo,
         MessageRepo,
         OutreachRepo,
+        SettingsRepo,
     )
     from app.application.send_approved import SendApproved, SendRepos
 
@@ -602,6 +638,7 @@ def send(
             outreach=OutreachRepo(session),
             message=MessageRepo(session),
             session=session,
+            settings=SettingsRepo(session),
         )
         use_case = SendApproved(
             sender, _UTCClock(), repos,

@@ -221,6 +221,41 @@ def test_drafter_prompt_lists_every_available_source_with_kind_and_id():
     assert "long_description" in prompt
 
 
+def test_drafter_prompt_follow_up_word_target_matches_the_actual_step():
+    # Fix round 1, mutation pin (survivor 2): a hardcoded
+    # `target = FOLLOW_UP_WORD_TARGETS[1]` in `build_draft_prompt` passed
+    # the whole suite because the only existing test built a step-1 prompt.
+    from app.adapters.gemini import build_draft_prompt
+    from app.domain.validation import FOLLOW_UP_WORD_TARGETS
+
+    ctx = {**CONTEXT, "sequence_step": 2, "thread_history": [
+        {"direction": "outbound", "sequence_step": 0, "subject": "s0", "body": "b0", "label": None},
+        {"direction": "outbound", "sequence_step": 1, "subject": "s1", "body": "b1", "label": None},
+    ]}
+    prompt = build_draft_prompt(ctx)
+    assert f"{FOLLOW_UP_WORD_TARGETS[2]} words" in prompt
+    assert f"{FOLLOW_UP_WORD_TARGETS[1]} words" not in prompt
+
+
+def test_system_prompt_bans_naming_the_earlier_email_as_a_channel():
+    # Fix round 1, ruling T12-1: D29 ("the source is how you learned it,
+    # never what the sentence is about") must also cover the sender's own
+    # earlier email — "as I mentioned in my last email" is the same tell
+    # pointed at oneself.
+    low = gemini_module._DRAFTER_SYSTEM.lower()
+    assert "my last email" in low or "my previous email" in low
+    assert "as i mentioned" in low
+
+
+def test_system_prompt_tells_the_model_an_automated_reply_is_not_the_founder():
+    # Fix round 1, ruling T12-2: the only inbound row that can reach a
+    # follow-up draft is machine-labelled (AUTO_REPLY/OUT_OF_OFFICE) — the
+    # prompt must say so explicitly, not just "acknowledge their reply".
+    low = gemini_module._DRAFTER_SYSTEM.lower()
+    assert "automated reply" in low
+    assert "not the founder" in low
+
+
 def test_drafter_appends_validation_errors_from_a_retry_context():
     client = FakeGenAIClient(DRAFT_JSON)
     ctx = {**CONTEXT, "validation_errors": ["banned phrase: 'reach out'", "no explicit internship ask"],

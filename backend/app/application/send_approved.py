@@ -43,8 +43,28 @@ not optional:
    the queue (spec §13), and the reservation stays put so the next run
    surfaces it as `needs_manual_check`.
 4. **Record.** `gmail_message_id` / `gmail_thread_id` on the row,
-   `APPROVED -> SENT`, `next_action_at = sent_at + followup_day_1` (spec
-   §8 stage 7), commit.
+   `APPROVED -> SENT`, `next_action_at = sent_at + <interval>` (spec §8
+   stage 7) — `followup_day_1` when the step just sent was the initial
+   email (`sequence_step == 0`, so the next due action is follow-up 1),
+   `followup_day_2` when it was follow-up 1 itself (`sequence_step == 1`,
+   so the next due action is follow-up 2) or follow-up 2
+   (`sequence_step == 2`, spec §6 defines no third interval, so the wait
+   before `ScheduleFollowUps` closes the row out reuses `followup_day_2`
+   rather than inventing an undocumented one) — read from the `settings`
+   table (Task 10, spec §7) with `followup_day_1`/`followup_day_2` as
+   fallbacks, exactly as `ScheduleFollowUps._interval_days` reads them.
+   Then commit.
+
+Phase 1 (ruling R-C) raised `NotImplementedError` here for
+`sequence_step != 0`, deliberately, so Phase 2 would have to lift the
+guard consciously rather than drift into multi-step sending. Phase 2
+(Task 11, spec §6) lifts it: a follow-up step's `APPROVED` row is sent
+through the exact same path as the initial email — same reservation
+(`reserve_for_send` is keyed on `(outreach_id, sequence_step)`, and the
+partial unique index `uq_messages_outreach_step_outbound` scopes one
+outbound row per step, so a follow-up step's row reserves independently
+of step 0's, the double-send protection holds unchanged), same
+compose-at-send-time, same cap.
 
 `send_to_self` is the operator's smoke test (brief step 6, `send
 --to-self`): it composes and sends the first `limit` approved drafts to
@@ -62,7 +82,8 @@ from app.domain.states import OutreachState, assert_transition
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_FOLLOWUP_DAY_1 = 5  # spec §7 settings default (no AppSettings reader yet - deferred gap)
+_DEFAULT_FOLLOWUP_DAY_1 = 5   # spec §7 settings default — mirrors classify_reply.py/schedule_follow_ups.py
+_DEFAULT_FOLLOWUP_DAY_2 = 12  # spec §7 settings default
 _CAP_WINDOW = timedelta(hours=24)  # ruling R-A: rolling window for the daily cap
 
 
@@ -95,12 +116,17 @@ class _Committable(Protocol):
     def commit(self) -> None: ...
 
 
+class _SettingsRepo(Protocol):
+    def get(self): ...
+
+
 @dataclass
 class SendRepos:
     founder: _ListByState
     outreach: _OutreachRepo
     message: _MessageRepo
     session: _Committable  # the session the repos above share
+    settings: _SettingsRepo | None = None  # Task 11: followup_day_1/2 source, optional (same fallback shape as ClassifyRepos.settings)
 
 
 class SendApproved:
@@ -112,6 +138,7 @@ class SendApproved:
         signature: str = "",
         attachment_path: str | None = None,
         followup_day_1: int = _DEFAULT_FOLLOWUP_DAY_1,
+        followup_day_2: int = _DEFAULT_FOLLOWUP_DAY_2,
         pause_between_sends: Callable[[], None] | None = None,
     ):
         self._sender = sender
@@ -120,7 +147,27 @@ class SendApproved:
         self._signature = signature
         self._attachment_path = attachment_path
         self._followup_day_1 = followup_day_1
+        self._followup_day_2 = followup_day_2
         self._pause = pause_between_sends
+
+    def _followup_interval_days(self, sequence_step_just_sent: int) -> int:
+        """`followup_day_1`/`followup_day_2` from the `settings` table
+        (Task 10, spec §7), falling back to this instance's own
+        `followup_day_1`/`followup_day_2` constructor args when there is
+        no settings repo, no row, or the row's field is `None`. Mirrors
+        `ScheduleFollowUps._interval_days` and `ClassifyReply.
+        _followup_interval_days` exactly, so the three never drift on what
+        "the configured interval" means. `sequence_step_just_sent == 0`
+        (the initial email) uses `followup_day_1`; anything else (step 1
+        or step 2) uses `followup_day_2` — spec §6 defines no third
+        interval, so the wait before `ScheduleFollowUps` closes a step-2
+        row out reuses `followup_day_2`."""
+        settings_row = self._repos.settings.get() if getattr(self._repos, "settings", None) is not None else None
+        if sequence_step_just_sent <= 0:
+            configured = getattr(settings_row, "followup_day_1", None)
+            return configured if configured is not None else self._followup_day_1
+        configured = getattr(settings_row, "followup_day_2", None)
+        return configured if configured is not None else self._followup_day_2
 
     def run(self, cap: int, limit: int | None = None) -> SendResult:
         result = SendResult()
@@ -139,12 +186,6 @@ class SendApproved:
             # Sending from anything but APPROVED is impossible: checked
             # before the cap, before the reservation, before the sender.
             assert_transition(OutreachState(outreach.state), OutreachState.SENT)
-            if outreach.sequence_step != 0:
-                # Ruling R-C (fix round 1): Phase 1 sends the initial email
-                # only. Follow-ups (D6, spec §12) schedule relative to the
-                # initial send and need `followup_day_2`; failing loudly here
-                # stops Phase 2's send-worker from silently mis-scheduling.
-                raise NotImplementedError("follow-ups are Phase 2")
 
             row = self._repos.message.get_outbound(outreach.id, outreach.sequence_step)
             if row is None:
@@ -207,10 +248,11 @@ class SendApproved:
             self._repos.message.upsert(
                 id=row.id, gmail_message_id=gmail_message_id, gmail_thread_id=gmail_thread_id,
             )
+            interval_days = self._followup_interval_days(outreach.sequence_step)
             self._repos.outreach.upsert(
                 founder_id=outreach.founder_id,
                 state=str(OutreachState.SENT),
-                next_action_at=now + timedelta(days=self._followup_day_1),
+                next_action_at=now + timedelta(days=interval_days),
                 last_error=None,
             )
             self._repos.session.commit()

@@ -63,12 +63,14 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
+    AppSettings,
     Company,
     CompanyLaunch,
     CompanyNews,
     EmailCandidate,
     Founder,
     GmailCredential,
+    Job,
     JobPosting,
     Message,
     Outreach,
@@ -190,6 +192,22 @@ class OutreachRepo:
             select(Outreach).where(Outreach.founder_id == founder_id)
         ).scalar_one_or_none()
 
+    def get_by_thread_id(self, thread_id: str) -> Outreach | None:
+        """Added in Task 8 (spec §5): `PollReplies` maps an inbound Gmail
+        message's `threadId` back to the outreach it belongs to by joining
+        through `Message.gmail_thread_id` — every outbound step we send on
+        an outreach shares the same Gmail thread, so this resolves to
+        exactly one outreach even when a follow-up step has already gone
+        out. A `threadId` with no matching message (the operator's own
+        ordinary inbox mail) returns `None` — the caller's cue to skip it,
+        never storing or classifying it."""
+        return self.session.execute(
+            select(Outreach)
+            .join(Message, Message.outreach_id == Outreach.id)
+            .where(Message.gmail_thread_id == thread_id)
+            .limit(1)
+        ).scalars().first()
+
     def list_by_state(self, state: OutreachState | str) -> list[Outreach]:
         """Plain unordered `WHERE state = :state` listing — sufficient for
         Phase 1's single-process CLI, where nothing else is contending for
@@ -201,6 +219,51 @@ class OutreachRepo:
         return list(
             self.session.execute(
                 select(Outreach).where(Outreach.state == str(state))
+            ).scalars()
+        )
+
+    def all(self) -> list[Outreach]:
+        """Task 5: every outreach row, unfiltered - the contacts list's
+        base query (`GET /api/contacts` applies its own filters after this,
+        the same shape as every `list_by_state`/`list_by_status` above:
+        no ordering, no limit)."""
+        return list(self.session.execute(select(Outreach)).scalars())
+
+    def list_due(self) -> list[Outreach]:
+        """Task 11 (spec §6), narrowed in review fix round 2 (ruling
+        T11-3): every `SENT` row, full stop. Filters only on `state` —
+        `sequence_step` and `next_action_at` are both left to the
+        application layer.
+
+        Fix round 1 shipped this filtered on `next_action_at IS NOT NULL
+        AND next_action_at <= now`, which made `ScheduleFollowUps`'s live
+        settings re-check (spec §7: an operator's interval change applies
+        to pending rows) work in ONE direction only: LENGTHENING an
+        interval correctly deferred a row (the app-layer recompute says
+        not-due), but SHORTENING one could never accelerate a row ahead of
+        its stale stored `next_action_at`, because this SQL excluded the
+        row before the recompute ever ran. That defeated the whole point
+        of re-deriving due-ness live. Dropping the time filter here fixes
+        it: `ScheduleFollowUps` now sees every `SENT` row and decides
+        due-ness itself, entirely from the last outbound message's
+        `sent_at` plus the live `settings.followup_day_1`/`followup_day_2`
+        (never from this row's own `next_action_at`, which is written by
+        `SendApproved` purely for display/audit purposes now).
+
+        A `sequence_step < 2` filter was considered and rejected: a
+        `sequence_step == 2` row must still come back here so
+        `ScheduleFollowUps` can close it out (spec §6, "after step 2 with
+        no human reply, the row moves to CLOSED") — filtering it out at
+        the SQL layer would make closing unreachable.
+
+        At the pipeline's real scale (hundreds of outreach rows, spec's
+        own count) an unfiltered `state = SENT` scan costs nothing
+        measurable; there is no locking or limit here for the same reason
+        `list_by_state` has none (no concurrent worker contention yet in
+        Phase 2's single job runner)."""
+        return list(
+            self.session.execute(
+                select(Outreach).where(Outreach.state == str(OutreachState.SENT))
             ).scalars()
         )
 
@@ -236,6 +299,37 @@ class MessageRepo:
 
     def get(self, id: int) -> Message | None:
         return self.session.get(Message, id)
+
+    def get_by_gmail_id(self, gmail_message_id: str) -> Message | None:
+        """Added in Task 8 (spec §5): the dedupe check `PollReplies` runs
+        BEFORE calling `GmailReader.get_message` for a given id — backed by
+        `uq_messages_gmail_message_id` (Task 1), so re-polling the same
+        window costs no network call, not just no duplicate row."""
+        return self.session.execute(
+            select(Message).where(Message.gmail_message_id == gmail_message_id)
+        ).scalar_one_or_none()
+
+    def list_by_outreach(self, outreach_id: int) -> list[Message]:
+        """Added in Task 8: the brief's own tests call it by this name.
+        Equivalent to filtering `list_by_state`/similar by outreach id —
+        every message (outbound and inbound) belonging to one outreach."""
+        return list(
+            self.session.execute(
+                select(Message).where(Message.outreach_id == outreach_id)
+            ).scalars()
+        )
+
+    def list_unclassified_inbound(self) -> list[Message]:
+        """Added in Task 9 (spec §5): what `ClassifyReply` classifies each
+        run — every inbound reply not yet labelled. An already-labelled row
+        (a prior run, or an operator's manual correction via Task 10) is
+        never returned here, so `ClassifyReply` never even calls the
+        classifier for it, let alone overwrites it."""
+        return list(
+            self.session.execute(
+                select(Message).where(Message.direction == "inbound", Message.label.is_(None))
+            ).scalars()
+        )
 
     def get_outbound(self, outreach_id: int, sequence_step: int) -> Message | None:
         """Added in fix round 1 of Tasks 13/14 (F1, ruling R1): the
@@ -555,3 +649,78 @@ class GmailCredentialRepo:
         return self.session.execute(
             select(GmailCredential).where(GmailCredential.account_email == account_email)
         ).scalar_one_or_none()
+
+    def set_history_id(self, account_email: str, history_id: str) -> None:
+        """Task 7 (spec §5): the narrow write the reply poller (Task 8)
+        needs after a successful `GmailReader.history_since` or
+        `current_history_id()` call - update just the stored cursor
+        without touching the refresh token or scopes. Thin wrapper over
+        `upsert`, which already updates only the fields it is given;
+        deciding *when* to call this is Task 8's job, not this repo's or
+        `GmailReader`'s."""
+        self.upsert(account_email=account_email, last_history_id=history_id)
+
+
+# --- Added in Task 2 (Phase 2, spec §4): bookkeeping for a background stage
+# run, one row per invocation. Same `upsert(**fields)` shape as every repo
+# above, keyed on `id` (like `MessageRepo`) since a job has no natural key
+# beyond it; `RunJob` (app.application.run_job) is the only caller.
+
+
+class JobRepo:
+    """Phase 2 (spec §4). Uniform `upsert(**fields)` like every other repo,
+    and (final fix wave, deferred Task 2 minor) the same `self.session` /
+    `session.execute(select(...)).scalars()` shape as every other repo in
+    this module - no behaviour change."""
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    def upsert(self, **fields) -> Job:
+        job_id = fields.pop("id", None)
+        row = self.session.get(Job, job_id) if job_id else None
+        if row is None:
+            row = Job(**fields)
+            self.session.add(row)
+        else:
+            for key, value in fields.items():
+                setattr(row, key, value)
+        self.session.flush()
+        return row
+
+    def get(self, job_id: int) -> Job | None:
+        return self.session.get(Job, job_id)
+
+    def active(self, kind: str) -> Job | None:
+        return self.session.execute(
+            select(Job).where(Job.kind == kind, Job.status.in_(("queued", "running")))
+        ).scalars().first()
+
+    def list_active(self) -> list[Job]:
+        return list(self.session.execute(
+            select(Job).where(Job.status.in_(("queued", "running")))
+        ).scalars())
+
+    def list_recent(self, limit: int = 50) -> list[Job]:
+        return list(self.session.execute(
+            select(Job).order_by(Job.id.desc()).limit(limit)
+        ).scalars())
+
+
+# --- Added in Task 10 (spec §7, T9-1): the one-row `settings` table -
+# `followup_day_1`/`followup_day_2`, the source `ClassifyReply.apply_label`'s
+# restore path (a human label hand-corrected back to a machine one) reads
+# the follow-up interval from, falling back to `SendApproved`'s own
+# defaults (5/12 days) when there is no row yet.
+
+
+class SettingsRepo:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get(self) -> AppSettings | None:
+        """The single `settings` row (spec §7 describes it as a singleton
+        operator-configured table), or `None` before an operator has ever
+        saved one - callers fall back to their own defaults rather than
+        this repo inventing one."""
+        return self.session.execute(select(AppSettings)).scalars().first()

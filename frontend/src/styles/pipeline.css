@@ -1,0 +1,34 @@
+/* Task 18: Pipeline screen (funnel, exceptions, stage tables, job
+   progress). Tokens and generic table/button shape live in ../styles.css. */
+
+.stage-group {
+  margin-bottom: 1.5rem;
+}
+
+.stage-description {
+  color: var(--muted);
+  max-width: 34rem;
+}
+
+tr.is-action-queue th {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.job-status-running {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.job-status-failed {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.job-status-succeeded {
+  color: var(--ok);
+}
+
+.job-status-none {
+  color: var(--muted);
+}

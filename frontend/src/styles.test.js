@@ -7,6 +7,8 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const css = readFileSync('src/styles.css', 'utf8')
+const reviewQueueCss = readFileSync('src/styles/review-queue.css', 'utf8')
+const threadCss = readFileSync('src/styles/thread.css', 'utf8')
 
 it('defines the full palette on :root, not only inside a media query', () => {
   const root = css.slice(css.indexOf(':root'), css.indexOf('}', css.indexOf(':root')))
@@ -65,9 +67,113 @@ describe('every colour token is declared on the light :root, not only in a media
     }
   })
 
+  // The subset check above (dark ⊆ light) does not catch the dark palette
+  // being *incomplete* - e.g. deleting `--danger` from the dark block
+  // still passes it, and the app silently falls back to the light-mode
+  // red (#b3261e) on a dark background for exactly the elements
+  // (.banner-error, .field-error, .editor-errors) that most need contrast.
+  // Set equality closes that: every light token must also be re-declared
+  // in the dark block, not just "nothing extra was added".
+  it('the dark block re-declares every light token (the dark palette is complete)', () => {
+    const lightTokens = [...light.matchAll(/--[\w-]+(?=\s*:)/g)].map((m) => m[0])
+    const darkTokens = [...dark.matchAll(/--[\w-]+(?=\s*:)/g)].map((m) => m[0])
+    expect(lightTokens.length).toBeGreaterThan(0)
+    expect(new Set(darkTokens)).toEqual(new Set(lightTokens))
+  })
+
+  // The brief says the dark variant is "defined by re-declaring tokens
+  // only" - the dark :root body should contain nothing but
+  // `--token: value;` custom-property declarations plus `color-scheme`.
+  // A stray non-token rule (e.g. `body { background: #000 }`) sitting
+  // inside the @media block would not be caught by the token checks
+  // above, since they only ever look for `--*` declarations.
+  it('the dark block contains only custom-property declarations and color-scheme', () => {
+    // `dark` is everything inside the @media block's braces, which is
+    // itself a nested `:root { ... }` rule - strip that wrapper down to
+    // just its declarations before checking each one.
+    const innerStart = dark.indexOf('{')
+    const innerEnd = dark.lastIndexOf('}')
+    const declarations = dark.slice(innerStart + 1, innerEnd)
+    const body = declarations
+      .replace(/color-scheme:\s*dark;/, '')
+      .split(';')
+      .map((decl) => decl.trim())
+      .filter(Boolean)
+    expect(body.length).toBeGreaterThan(0)
+    for (const decl of body) {
+      expect(decl).toMatch(/^--[\w-]+\s*:/)
+    }
+  })
+
   it('every state colour token used by the app is present in the light palette', () => {
     for (const token of ['--ok', '--warn']) {
       expect(light).toContain(token)
     }
+  })
+})
+
+describe('long unbroken content wraps instead of being clipped', () => {
+  // html, body are overflow-x: hidden (styles.css) so a pane or message
+  // that gets forced wider than its column by a long URL doesn't show a
+  // scrollbar - it silently clips. These two rules are what actually
+  // prevent the widening: overflow-wrap lets the text itself break, and
+  // min-width: 0 lets the grid/flex item shrink below its content's
+  // intrinsic width in the first place.
+  it('.wire-text and .message-body break long unbroken text instead of clipping it', () => {
+    const wireText = reviewQueueCss.slice(
+      reviewQueueCss.indexOf('.wire-text {'),
+      reviewQueueCss.indexOf('}', reviewQueueCss.indexOf('.wire-text {'))
+    )
+    const messageBody = threadCss.slice(
+      threadCss.indexOf('.message-body {'),
+      threadCss.indexOf('}', threadCss.indexOf('.message-body {'))
+    )
+    expect(wireText).toMatch(/overflow-wrap:\s*anywhere/)
+    expect(messageBody).toMatch(/overflow-wrap:\s*anywhere/)
+  })
+
+  it('the review-queue panes and thread message can shrink below their content width', () => {
+    const panes = reviewQueueCss.slice(
+      reviewQueueCss.indexOf('.draft-pane,'),
+      reviewQueueCss.indexOf('}', reviewQueueCss.indexOf('.draft-pane,'))
+    )
+    const message = threadCss.slice(
+      threadCss.indexOf('.message {'),
+      threadCss.indexOf('}', threadCss.indexOf('.message {'))
+    )
+    expect(panes).toMatch(/min-width:\s*0/)
+    expect(message).toMatch(/min-width:\s*0/)
+  })
+})
+
+describe('form controls use the 14px base, not the label caption size', () => {
+  // Every text input, select and textarea in the app is nested inside a
+  // <label>, and label { font-size: 0.85rem } (below). `font: inherit`
+  // on the control pulls in that computed 0.85rem via inheritance, so
+  // without an explicit override the draft body the operator *edits*
+  // renders at 11.9px while the same text they *read* (.wire-text) is
+  // 13.3px. `rem` always resolves against the root font-size (14px), so
+  // an explicit `font-size: 1rem` on the control undoes the inherited
+  // label size regardless of nesting.
+  function ruleBlock(source, selectorStart) {
+    const start = source.indexOf(selectorStart)
+    const openBrace = source.indexOf('{', start)
+    const closeBrace = source.indexOf('}', openBrace)
+    return source.slice(openBrace + 1, closeBrace)
+  }
+
+  it("input/select/textarea declare an explicit 14px-equivalent font-size, not just font: inherit", () => {
+    const controls = ruleBlock(css, "input[type='text'],")
+    expect(controls).toMatch(/font-size:\s*(1rem|14px)\s*;/)
+  })
+
+  it('button declares an explicit 14px-equivalent font-size', () => {
+    const button = ruleBlock(css, 'button {')
+    expect(button).toMatch(/font-size:\s*(1rem|14px)\s*;/)
+  })
+
+  it("the label caption stays at 0.85rem (its own rule is untouched)", () => {
+    const label = ruleBlock(css, 'label {')
+    expect(label).toMatch(/font-size:\s*0\.85rem/)
   })
 })

@@ -162,6 +162,7 @@ a:visited {
 
 button {
   font: inherit;
+  font-size: 1rem;
   color: var(--fg);
   background: var(--bg-raised);
   border: 1px solid var(--border);
@@ -200,6 +201,13 @@ input[type='text'],
 select,
 textarea {
   font: inherit;
+  /* `font: inherit` above pulls in the *computed* font-size of whatever
+     element the control sits in - and every control in this app is
+     nested inside a label (whose own rule, below, sets 0.85rem).
+     `rem` is always relative to the root font-size (14px, set on :root),
+     never to the immediate parent, so this line overrides that inherited
+     0.85rem back to the app's 14px base regardless of nesting. */
+  font-size: 1rem;
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--border);

@@ -17,6 +17,13 @@
 
 .draft-pane,
 .source-pane {
+  /* Grid items default to min-width: auto, which lets their content
+     (a long URL, an unbroken token) force the pane - and the grid -
+     wider than the viewport. html, body are overflow-x: hidden, so
+     without this the overflow isn't a scrollbar, it's silently
+     clipped text. min-width: 0 lets the pane shrink to the grid
+     track and hand off to overflow-wrap below instead. */
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1rem;
@@ -81,6 +88,10 @@
 /* The composed email: readable, not monospace, line breaks preserved. */
 .wire-text {
   white-space: pre-wrap;
+  /* pre-wrap preserves line breaks but not soft-wrap unbroken words
+     (a long URL in a founder's signature): overflow-wrap lets those
+     break instead of forcing the pane wider than its column. */
+  overflow-wrap: anywhere;
   font-family: inherit;
   font-size: 0.95rem;
   line-height: 1.5;

@@ -16,6 +16,7 @@
 }
 
 .message {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.75rem;
@@ -55,6 +56,7 @@
 
 .message-body {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .label {

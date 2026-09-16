@@ -160,6 +160,14 @@ def test_rejects_each_ai_tell_phrase(phrase):
     assert any(f"banned phrase: {phrase!r}" in e for e in errs)
 
 
+def test_ai_tells_never_reject_a_company_name():
+    body = ("Incredible Health matches nurses to hospitals over one app. "
+            "Where does the matching break first, the hospitals or the nurses?\n\n"
+            "I'm a student. I built a scheduler that cut queue wait by half, resume attached.\n\n"
+            "Would Incredible Health take an intern this year?")
+    assert not [e for e in validate_style(draft(body=body)) if "banned phrase" in e]
+
+
 def test_the_ai_tell_list_covers_the_rejected_draft():
     rejected = (
         "Orangewood's RoboGPT lets anyone program a robotic arm with a text prompt. "

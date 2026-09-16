@@ -55,10 +55,14 @@ BANNED_PHRASES = [
 # the model not to write them; this list makes sure a draft that does is
 # retried rather than shown to the operator. Substring matches, like the
 # rest of BANNED_PHRASES, so "impressive" also catches "impressively".
+# Multi-word tells only. Bare adjectives ("incredible", "impressive",
+# "truly") are substring-matched and collide with company names the body is
+# REQUIRED to contain (Incredible Health is a YC company) - a draft to them
+# would fail every retry. The prompt and the critic cover single-word praise.
 AI_TELL_PHRASES = [
-    "feels like the exact", "the exact interface", "genuinely", "truly",
-    "resonates", "aligns with", "i'm excited", "impressive", "fascinating",
-    "incredible", "i was thrilled",
+    "feels like the exact", "the exact interface", "genuinely",
+    "resonates with", "aligns with", "i'm excited", "so impressive",
+    "truly impressive", "fascinating", "i was thrilled",
 ]
 BANNED_PHRASES += AI_TELL_PHRASES
 SENIORITY_PHRASES = [

@@ -435,6 +435,64 @@ def validate_claims(draft, claims, allowed_text=()) -> list[str]:
                 "asserts something found in no resume claim: "
                 f"{', '.join(dict.fromkeys(unmatched))} in {sentence[:40]!r}"
             )
+
+    errs += _unsourced_work_stories(draft, claims)
+    return errs
+
+
+# Live finding (2026-09-17): the connection template asks for "a time I hit
+# this problem myself", and with only a handful of real facts the model
+# invented one - "wiring together a small retrieval service two weekends
+# ago, when a mismatched payload schema sent the same request through
+# twice". Nothing in it is a proper noun or a number, so the checks above
+# saw nothing to match. A sentence claiming the sender DID something must
+# name something real: a project, a role or an institution from the claims.
+# The verb must belong to the SENDER: "I built ...", "I've spent ...".
+# An earlier version matched the verb anywhere in the sentence and flagged
+# "That reconciliation problem is what I keep thinking about" - a sentence
+# about THEIR problem, which is exactly what part 1 is supposed to contain.
+_WORK_VERBS = re.compile(
+    r"\b(?:I|I've|I'd|my)\b[^.?!]{0,40}?\b(?:"
+    r"built|building|wrote|writing|shipped|shipping|spent|spending|"
+    r"wired|wiring|designed|designing|implemented|implementing|hacked|"
+    r"debugged|debugging|untangled|reconciled|automated|"
+    r"worked on|working on|put together|putting together|set up|setting up|"
+    r"ran into|run into|hit that|felt that|dealt with)\b",
+    re.IGNORECASE,
+)
+_MIN_CLAIM_NAME_LEN = 4
+
+
+def _claim_names(claims) -> set[str]:
+    """Distinctive words naming a thing the sender actually did - the
+    project, employer and institution names in the claims."""
+    names: set[str] = set()
+    for c in claims:
+        # Every kind counts, not just project/role/education: an operator
+        # who edits a draft to cite a *skill* claim ("I wrote the ingest
+        # layer in Rust", kept with --keep-unverified) is naming something
+        # from the resume, and this rule must not override that choice.
+        text = _claim_field(c, "text") + " " + _claim_field(c, "source_span")
+        for word in re.findall(r"[A-Za-z][A-Za-z0-9.+#-]{2,}", text):
+            if len(word) >= _MIN_CLAIM_NAME_LEN:
+                names.add(word.lower().strip("."))
+    return names
+
+
+def _unsourced_work_stories(draft, claims) -> list[str]:
+    names = _claim_names(claims)
+    if not names:
+        return []
+    errs: list[str] = []
+    for sentence in _sentences(draft.body):
+        if not (_FIRST_PERSON.search(sentence) and _WORK_VERBS.search(sentence)):
+            continue
+        words = {w.lower().strip(".,;:!?()[]{}\"'") for w in sentence.split()}
+        if not (words & names):
+            errs.append(
+                "tells a story about the sender that names nothing from the "
+                f"resume: {sentence[:60]!r}"
+            )
     return errs
 
 

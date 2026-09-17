@@ -196,6 +196,10 @@ product: you have not, and the founder can check. Never praise in the
 abstract: no "it feels like it was built by people who understand the
 user" unless you name the exact thing that made you think so.
 
+The lesson in part 3 must come from the SAME fact group as the project
+you name there. Saying one project taught you what a different job taught
+you is a lie even though both facts are true.
+
 Part 3 - about you: your year, degree and college, then the ONE project
 most relevant to them with what it does and its result or number. Then one
 honest lesson that project taught you - a real difficulty, not a virtue
@@ -227,21 +231,18 @@ reuse its words. If your email mentions a "planner", a "planning layer",
 those things, you have copied the example and must start again.
 
   I read your launch post about turning a new pick-and-place task into a
-  sentence instead of a reprogramming job. That stuck with me because I
-  spent a chunk of my last project wiring four monitoring tools together,
-  and the painful part was never the APIs - it was making sure the same
-  incident never got processed twice.
+  sentence instead of a reprogramming job. That stuck with me because of
+  <the real project or job from the FACT GROUPS below where you hit the
+  same problem - name it, and say what actually went wrong>.
 
   I can't try a robot arm from my desk, but the choice I noticed is that
   RoboGPT takes the prompt and the vision model separately rather than
   fusing them.
 
-  I'm a third-year B.Tech Computer Science student at Manipal University
-  Jaipur. I built Lerno.ai, which turns a topic into an animated video
-  lesson, and got generation down from about 8 minutes to under 3. That
-  taught me how much of an AI product is deciding when the model is sure
-  enough to act without a human, which is the same question your planner
-  has to answer.
+  <here: your year, degree and college, the ONE project from the claims
+  that is closest to their problem, what it does, its number, and the
+  honest lesson THAT project taught you - never a lesson borrowed from a
+  different project, and never this example's words.>
 
   I'd like to join Orangewood as an SDE intern and work on that planning
   layer. It's a problem I've actually hit, on a much smaller scale.

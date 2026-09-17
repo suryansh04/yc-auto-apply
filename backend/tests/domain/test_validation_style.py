@@ -146,21 +146,12 @@ def test_location_phrase_does_not_false_positive_on_partial_word():
 
 OPERATOR_EXAMPLE = (
     "I read your launch post about turning a new pick-and-place task into a "
-    "sentence instead of a reprogramming job. That stuck with me because I "
-    "spent a chunk of my last project wiring four monitoring tools together, "
-    "and the painful part was never the APIs - it was making sure the same "
-    "incident never got processed twice.\n\n"
+    "sentence instead of a reprogramming job.\n\n"
     "I can't try a robot arm from my desk, but the choice I noticed is that "
     "RoboGPT takes the prompt and the vision model separately rather than "
     "fusing them.\n\n"
-    "I'm a third-year B.Tech Computer Science student at Manipal University "
-    "Jaipur. I built Lerno.ai, which turns a topic into an animated video "
-    "lesson, and got generation down from about 8 minutes to under 3. That "
-    "taught me how much of an AI product is deciding when the model is sure "
-    "enough to act without a human, which is the same question your planner "
-    "has to answer.\n\n"
     "I'd like to join Orangewood as an SDE intern and work on that planning "
-    "layer. It's a problem I've actually hit, on a much smaller scale.\n\n"
+    "layer.\n\n"
     "Resume is attached. Would you be open to a quick 15-minute chat?"
 )
 
@@ -168,14 +159,18 @@ def test_the_operator_example_passes_style():
     assert validate_style(draft(body=OPERATOR_EXAMPLE, subject="Intern question about RoboGPT")) == []
 
 
-def test_the_operator_example_is_the_one_in_the_drafter_prompt():
-    # The prompt's tone example and the validator's reference example are
-    # the same text - if one is edited the other must follow, or the prompt
-    # would be asking for a voice the validator rejects.
-    import re
+def test_the_prompts_tone_example_leaves_the_personal_parts_blank():
+    """Live finding (2026-09-17): the example's own sentences were coming
+    back in real emails - every founder got "that taught me how painful
+    deduplication gets", and one got "your planner" when they build
+    procurement software. The parts that must come from the sender's own
+    resume are placeholders now, so there is nothing there to copy."""
     from app.adapters.gemini import _DRAFTER_SYSTEM
-    squash = lambda t: re.sub(r"\s+", " ", t)
-    assert squash(OPERATOR_EXAMPLE) in squash(_DRAFTER_SYSTEM)
+    example = _DRAFTER_SYSTEM[_DRAFTER_SYSTEM.index("TONE EXAMPLE"):]
+    assert "<the real project or job from the FACT GROUPS" in example
+    assert "<here: your year, degree and college" in example
+    # The lesson that was being copied verbatim is gone from the example.
+    assert "deduplication" not in example.lower()
 
 
 @pytest.mark.parametrize("phrase", AI_TELL_PHRASES)

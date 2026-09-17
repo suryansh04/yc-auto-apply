@@ -85,6 +85,9 @@ SELF_PRAISE_PHRASES = [
     "without hand-holding", "work well independently", "self-starter",
     "i'd enjoy working on", "i would enjoy working on", "hard-working",
     "i'm a fast learner", "eager to learn",
+    # Asserting relevance instead of showing it (live, 2026-09-17: "That is
+    # relevant to what Mudrex is working on.").
+    "is relevant to what", "which is relevant to", "relevant to what you",
 ]
 BANNED_PHRASES += SELF_PRAISE_PHRASES
 
@@ -100,6 +103,12 @@ TRIED_IT_PHRASES = [
     "i started using", "i've been using", "i have been using",
     "when i tried", "trying it out", "i gave it a go", "i tested it",
     "created an account", "made an account",
+    # The negative form is honest but reads as an apology for homework not
+    # done (live, 2026-09-17: "I have not signed up for Mudrex, but ...").
+    # Just say what you noticed.
+    "i have not signed up", "i haven't signed up", "i could not sign up",
+    "i couldn't sign up", "i can't sign up", "i cannot sign up",
+    "have not tried", "haven't tried",
 ]
 BANNED_PHRASES += TRIED_IT_PHRASES
 

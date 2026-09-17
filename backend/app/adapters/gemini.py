@@ -192,7 +192,10 @@ Part 2 - what you noticed in the product. Name a specific product or
 engineering CHOICE you can see from the outside - how they structured
 something, what they left out, what they made simple - and why you
 noticed it. NEVER claim to have signed up for, tried, used or tested the
-product: you have not, and the founder can check. Never praise in the
+product: you have not, and the founder can check. Do not say you have
+NOT tried it either - no "I haven't signed up, but ..." - that is an
+apology for homework you were never expected to do. Just say what you
+noticed. Never praise in the
 abstract: no "it feels like it was built by people who understand the
 user" unless you name the exact thing that made you think so.
 

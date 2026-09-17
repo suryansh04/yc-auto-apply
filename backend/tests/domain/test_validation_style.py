@@ -235,3 +235,20 @@ def test_genuine_shouting_is_still_rejected():
                                 subject="URGENT HIRING REQUEST NOW"),
                           company_name="Bulk MRO Industrial Supply")
     assert any("all-caps" in e for e in errs)
+
+
+@pytest.mark.parametrize("phrase", [
+    "I have not signed up for Mudrex, but the split is interesting.",
+    "I haven't tried the product, but I noticed the API is one call.",
+])
+def test_rejects_apologising_for_not_having_used_the_product(phrase):
+    # Honest, but it reads as an apology for homework nobody asked for.
+    body = f"You build trading tools.\n\n{phrase}\n\nWould you take an intern?"
+    assert any("banned phrase" in e for e in validate_style(draft(body=body)))
+
+
+def test_rejects_asserting_relevance_instead_of_showing_it():
+    body = ("You build trading tools.\n\nI built a scheduler in Python. "
+            "That is relevant to what Mudrex is working on.\n\n"
+            "Would you take an intern?")
+    assert any("banned phrase" in e for e in validate_style(draft(body=body)))

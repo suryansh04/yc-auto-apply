@@ -174,14 +174,17 @@ def test_drafter_requests_structured_json_with_the_four_field_schema():
         assert kind in schema
 
 
-def test_drafter_prompt_states_the_three_part_structure_and_length_targets():
+def test_drafter_prompt_states_the_structure_and_a_length_range():
+    # 2026-09-17: the caps were raised and the prompt now gives a RANGE and
+    # a rhythm rule instead of hard per-sentence numbers - clipped uniform
+    # sentences were themselves the machine tell.
     client = FakeGenAIClient(DRAFT_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
     assert "three" in prompt and "part" in prompt
-    assert "90" in prompt
-    assert "120" in prompt
-    assert "25 words" in prompt
+    assert "90 to 130 words" in prompt
+    assert "rhythm" in prompt.lower()
+    assert "do not pad or clip" in prompt
 
 
 def test_drafter_prompt_says_the_source_is_never_named_in_the_body():
@@ -274,7 +277,8 @@ def test_system_prompt_asks_for_the_curious_and_specific_voice():
         assert tell in low, tell
     assert "tone only" in low
     # The hard constraints from before survive the rewrite.
-    for kept in ("120", "25 words", "three paragraphs", "never mention location",
+    for kept in ("90 to 130 words", "rhythm", "three or four paragraphs",
+                 "never mention location",
                  "years of experience", "the source is how you learned it",
                  "\"intern\" or \"internship\" must", "follow-ups:"):
         assert kept in low, kept

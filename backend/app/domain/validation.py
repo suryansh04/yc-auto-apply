@@ -6,16 +6,21 @@ from dataclasses import dataclass
 
 from app.domain.names import company_display_name, company_name_variants
 
-MAX_WORDS = 120
-MAX_SENTENCE_WORDS = 25
-MAX_PARAGRAPHS = 3
+# Operator decision (2026-09-17): the tight caps were making every email
+# sound clipped and machine-cut - the same shape every time, which is
+# itself the tell. Room to write a real sentence matters more than
+# brevity. These are now sanity bounds (nobody cold-emails a founder 200
+# words), not a style device; rhythm is the prompt's job.
+MAX_WORDS = 200
+MAX_SENTENCE_WORDS = 45
+MAX_PARAGRAPHS = 5
 # Live finding (2026-09-13): the cap alone let a one-block email through —
 # hook, pitch and ask run together in a single 3-sentence paragraph, which
 # is exactly the wall-of-text the spec's three-part structure exists to
 # prevent. Two is the floor (the ask may share a paragraph with the pitch);
 # the prompt still asks for three.
 MIN_PARAGRAPHS = 2
-MAX_SENTENCES_PER_PARAGRAPH = 3
+MAX_SENTENCES_PER_PARAGRAPH = 5
 MAX_EM_DASHES = 2
 
 # Task 12 (spec §6): a follow-up is not just "shorter than the previous
@@ -118,7 +123,7 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
         )
     for p in paragraphs:
         if len(_sentences(p)) > MAX_SENTENCES_PER_PARAGRAPH:
-            errs.append("a paragraph exceeds 3 sentences")
+            errs.append(f"a paragraph exceeds {MAX_SENTENCES_PER_PARAGRAPH} sentences")
             break
 
     if ";" in body:

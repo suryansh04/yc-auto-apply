@@ -166,14 +166,20 @@ about the student, and asks. It must read like one specific person wrote it
 to one specific founder. It must never read like a template, a press
 summary, a CV, or a language model being polite.
 
-STRUCTURE: exactly three paragraphs. You MUST put a blank line (two newline
-characters) between them. One paragraph per part - never run the parts
-together into a single block, and never exceed three sentences in any
-paragraph. Target about 90 words in total; the hard cap is 120. No sentence over
-25 words. No paragraph over three sentences. No semicolons. At most two em
-dashes. Not more than half the sentences may begin with "I".
+STRUCTURE: three or four paragraphs, with a blank line (two newline
+characters) between them. Never run the parts together into a single
+block. Write to be read in under a minute - usually 90 to 130 words - but
+do not pad or clip a sentence to hit a number. Say the thing properly and
+stop. No semicolons. At most two em dashes. Not more than half the
+sentences may begin with "I".
 
-Part 1 - the question (one to three sentences): a genuine, specific
+RHYTHM matters more than length. A real person writes an uneven email: a
+long thinking-out-loud sentence, then a short one. Three sentences of the
+same length in a row is the clearest sign a machine wrote it. Let a
+sentence run long when the thought is genuinely long, and let the next one
+be four words.
+
+Part 1 - the question (one to four sentences): a genuine, specific
 question, or a concrete observation, about a MECHANISM or TRADE-OFF in the
 thing they build - the kind of thing a curious engineer would actually ask
 the person who built it. Where does the system decide X? What happens when
@@ -186,9 +192,12 @@ language layer", "the interface small shops need"); or a restatement of
 the one-liner. If a sentence could be sent to any company by swapping the
 name, delete it.
 
-Part 2 - one sentence about you: that you are a student, the ONE concrete
-thing you built (from the RESUME CLAIMS below) with its result, and the
-words "resume attached". Do not list roles, tools, degrees or a second
+Part 2 - one or two sentences about you: that you are a student, the ONE
+concrete thing you built (from the RESUME CLAIMS below) with its result,
+and the words "resume attached". If a second sentence earns its place, it
+says WHY that project connects to the question you just asked - not a
+claim that your skills "fit", but the actual overlap in the problem. Skip
+it when there is no honest connection. Do not list roles, tools, degrees or a second
 project. Never write a sentence whose only content is which technologies
 you know ("I know Python and React"), and never claim a skill "maps well"
 to their work. Use ONLY the resume claims listed. Never invent a skill,
@@ -206,13 +215,14 @@ TONE EXAMPLE - tone only. Every fact in your email must come from the
 sources and claims given below, never from this example:
 
   Quick question about RoboGPT: when someone gives a vague prompt like
-  "pick the red ones", where does the system push back? In the language
-  model, or in the planner underneath? I've been thinking about that
-  boundary a lot.
+  "pick the red ones", where does the system push back - in the language
+  model, or in the planner underneath? That boundary is the part I keep
+  turning over.
 
-  I'm a student looking for a software engineering internship. I built an
-  AI grading pipeline for WaveWatch (cut manual work ~70%), resume
-  attached.
+  I'm a student looking for a software engineering internship, and the
+  closest thing I've built is an AI grading pipeline for WaveWatch that
+  cut manual work by about 70%. Same shape of problem, in a way: deciding
+  when the model is confident enough to act on its own. Resume attached.
 
   Would Orangewood have room for an intern this year?
 

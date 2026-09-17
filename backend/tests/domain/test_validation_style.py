@@ -2,7 +2,14 @@
 import pytest
 
 from app.domain.entities import Draft
-from app.domain.validation import AI_TELL_PHRASES, validate_style
+from app.domain.validation import (
+    AI_TELL_PHRASES,
+    MAX_PARAGRAPHS,
+    MAX_SENTENCE_WORDS,
+    MAX_SENTENCES_PER_PARAGRAPH,
+    MAX_WORDS,
+    validate_style,
+)
 
 GOOD_BODY = (
     "You're matching blue-collar workers to jobs over voice, in a dozen languages. "
@@ -19,15 +26,16 @@ def draft(body=GOOD_BODY, subject="Backend intern at Vahan", step=0):
 def test_the_reference_example_passes():
     assert validate_style(draft()) == []
 
-def test_rejects_body_over_120_words():
-    assert any("120 words" in e for e in validate_style(draft(body="word " * 121 + "intern")))
+def test_rejects_a_body_over_the_word_cap():
+    body = "word " * (MAX_WORDS + 1) + "intern"
+    assert any(f"{MAX_WORDS} words" in e for e in validate_style(draft(body=body)))
 
-def test_rejects_a_sentence_over_25_words():
-    long_sentence = " ".join(["word"] * 26) + " intern."
-    assert any("25 words" in e for e in validate_style(draft(body=long_sentence)))
+def test_rejects_a_sentence_over_the_sentence_cap():
+    long_sentence = " ".join(["word"] * (MAX_SENTENCE_WORDS + 1)) + " intern."
+    assert any(f"{MAX_SENTENCE_WORDS} words" in e for e in validate_style(draft(body=long_sentence)))
 
-def test_rejects_more_than_three_paragraphs():
-    body = "\n\n".join(["An intern ask here."] * 4)
+def test_rejects_more_paragraphs_than_the_cap():
+    body = "\n\n".join(["An intern ask here."] * (MAX_PARAGRAPHS + 1))
     assert any("paragraph" in e for e in validate_style(draft(body=body)))
 
 def test_rejects_semicolons():
@@ -66,15 +74,14 @@ def test_followup_must_be_shorter_than_previous():
 
 # --- Fix round 1 coverage (I2, I4, and cheap minors) ---
 
-def test_rejects_a_paragraph_with_more_than_three_sentences():
-    # One paragraph, four sentences, no paragraph break: isolates the
+def test_rejects_a_paragraph_with_more_sentences_than_the_cap():
+    # One paragraph, cap+1 sentences, no paragraph break: isolates the
     # per-paragraph sentence-count rule from the paragraph-COUNT rule, which
-    # the original test_rejects_more_than_three_paragraphs (four one-sentence
-    # paragraphs) never exercised.
-    body = ("You build voice AI for blue-collar workers. I think that's exciting. "
-            "I built a scheduler once. Would you take an intern?")
+    # the paragraph-count test (one-sentence paragraphs) never exercises.
+    body = (" ".join(["You build voice AI for blue-collar workers."] * MAX_SENTENCES_PER_PARAGRAPH)
+            + " Would you take an intern?")
     errs = validate_style(draft(body=body))
-    assert "a paragraph exceeds 3 sentences" in errs
+    assert f"a paragraph exceeds {MAX_SENTENCES_PER_PARAGRAPH} sentences" in errs
 
 
 def test_rejects_more_than_two_em_dashes():
@@ -124,18 +131,20 @@ def test_location_phrase_does_not_false_positive_on_partial_word():
 
 # --- Live finding 2026-09-16: "looks very AI generated" -------------------
 # The operator's chosen tone example (curious and specific: a real question
-# about the mechanism, one sentence about the student + "resume attached",
-# a plain ask). The opening question is split into two sentences relative
-# to the operator's wording because the original 31-word sentence breaks
-# the unchanged 25-word cap; nothing else differs.
+# about the mechanism, the student's one project and why it connects, a
+# plain ask). Restored to the operator's own 31-word opening sentence after
+# the 2026-09-17 decision to raise the caps - an email that has room to
+# breathe reads less machine-cut than three clipped sentences.
 
 OPERATOR_EXAMPLE = (
     'Quick question about RoboGPT: when someone gives a vague prompt like '
-    '"pick the red ones", where does the system push back? In the language '
-    "model, or in the planner underneath? I've been thinking about that "
-    "boundary a lot.\n\n"
-    "I'm a student looking for a software engineering internship. I built an "
-    "AI grading pipeline for WaveWatch (cut manual work ~70%), resume attached.\n\n"
+    '"pick the red ones", where does the system push back - in the language '
+    "model, or in the planner underneath? That boundary is the part I keep "
+    "turning over.\n\n"
+    "I'm a student looking for a software engineering internship, and the "
+    "closest thing I've built is an AI grading pipeline for WaveWatch that "
+    "cut manual work by about 70%. Same shape of problem, in a way: deciding "
+    "when the model is confident enough to act on its own. Resume attached.\n\n"
     "Would Orangewood have room for an intern this year?"
 )
 

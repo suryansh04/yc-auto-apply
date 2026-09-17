@@ -231,3 +231,16 @@ def test_two_letter_abbreviations_are_exempt():
 def test_a_three_letter_all_caps_technology_is_policed():
     body = "I run everything on AWS. Would you take an intern?"
     assert any("AWS" in e for e in validate_claims(d(body), CLAIMS))
+
+
+def test_the_templates_own_wording_is_not_an_unsupported_claim():
+    # Live finding (2026-09-17): the operator's template says "SDE intern"
+    # and "a quick 15-minute chat". Neither is a claim about the sender,
+    # but validate_claims saw an unknown proper token and a bare number and
+    # rejected every draft that used the template as written.
+    body = ("Where does RoboGPT resolve the ambiguity?\n\n"
+            "I'm a student. I built a scheduler in Python.\n\n"
+            "I'd like to join as an SDE intern.\n\n"
+            "Resume is attached. Would you be open to a quick 15-minute chat?")
+    errs = validate_claims(d(body), CLAIMS)
+    assert errs == [], errs

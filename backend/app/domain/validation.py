@@ -328,6 +328,12 @@ _PROPER_TOKEN = re.compile(r"^[A-Z][A-Za-z0-9+#]{2,}$")
 _NUMBER = re.compile(r"\d[\d,]*")
 _KNOWN_TOKEN = re.compile(r"[a-z0-9+#]+")
 _MIN_NUMBER_DIGITS = 2
+# The template's own fixed wording (2026-09-17). These are not claims
+# about the sender - "SDE intern" is the role being asked for and
+# "15-minute chat" is the ask itself - but validate_claims saw an unknown
+# proper token and an unsupported number and rejected every draft.
+TEMPLATE_VOCABULARY = "SDE intern internship 15-minute 15 minute chat resume attached"
+
 _CLAIM_STOPWORDS = frozenset({
     "january", "february", "march", "april", "may", "june", "july", "august",
     "september", "october", "november", "december",
@@ -355,6 +361,7 @@ def validate_claims(draft, claims, allowed_text=()) -> list[str]:
     known_text = " ".join(
         [_claim_field(c, "text") + " " + _claim_field(c, "source_span") for c in claims]
         + [str(t or "") for t in allowed_text]
+        + [TEMPLATE_VOCABULARY]
     ).lower()
     known_tokens = set(_KNOWN_TOKEN.findall(known_text)) | _CLAIM_STOPWORDS
     known_numbers = _numbers_in(known_text)

@@ -428,3 +428,38 @@ def test_a_follow_up_prompt_has_no_first_email_checklist():
     ctx = {**CONTEXT, "sequence_step": 1, "thread_history": []}
     GeminiDrafter(client, model=MODEL).draft(ctx)
     assert "five entries, in this order" not in _prompt_of(client)
+
+
+def test_claims_are_grouped_by_the_resume_line_they_came_from():
+    # Live finding (2026-09-17): a flat claim list let the model write "I
+    # ran into that on WaveWatch, where I had to wire four monitoring tools
+    # together" - the wiring was a different job. Grouping shows which
+    # facts belong to the same thing.
+    out = gemini_module._format_claims([
+        {"kind": "project", "text": "WaveWatch is a coastal system.", "source_span": "A"},
+        {"kind": "metric", "text": "cut grading 70%", "source_span": "A"},
+        {"kind": "role", "text": "Intern at Better", "source_span": "B"},
+    ])
+    assert "FACT GROUP 1" in out and "FACT GROUP 2" in out
+    assert out.index("WaveWatch") < out.index("FACT GROUP 2")
+    assert out.index("Intern at Better") > out.index("FACT GROUP 2")
+
+
+def test_the_prompt_forbids_mixing_two_fact_groups():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    assert "never attribute a detail from one group" in _prompt_of(client)
+
+
+def test_the_prompt_forbids_claiming_to_have_used_the_product():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    assert "never claim to have signed up for, tried, used" in _prompt_of(client)
+
+
+def test_the_tone_example_is_marked_as_not_the_company_being_written_to():
+    # The example's words ("planner", "planning layer") were appearing in
+    # emails to companies with no planner at all.
+    low = gemini_module._DRAFTER_SYSTEM.lower()
+    assert "never\nreuse its words" in low or "never reuse its words" in low
+    assert "you have copied the example" in low

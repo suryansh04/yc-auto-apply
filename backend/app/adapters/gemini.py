@@ -188,17 +188,13 @@ a course, a club, a job or an anecdote that is not in the claims. If no
 claim honestly connects to their problem, write part 1 about the problem
 itself and skip the personal example rather than making one up.
 
-Part 2 - what you noticed in the product. ONLY say you signed up for and
-tried the product when a student could actually do that for free and
-alone: a web app, a developer tool, an API, a consumer app. NEVER for
-hardware or robotics, lending or credit, payments or banking
-infrastructure, an enterprise sales product, anything needing a company
-account, a demo call, a contract or money. Getting this wrong is worse
-than saying nothing - the founder can check. When you cannot honestly
-claim to have used it, write instead about a specific product or
-engineering CHOICE you can see from the outside, and why you noticed it.
-Never praise in the abstract. No "it feels like it was built by people who
-understand the user" unless you name the exact thing that made you think so.
+Part 2 - what you noticed in the product. Name a specific product or
+engineering CHOICE you can see from the outside - how they structured
+something, what they left out, what they made simple - and why you
+noticed it. NEVER claim to have signed up for, tried, used or tested the
+product: you have not, and the founder can check. Never praise in the
+abstract: no "it feels like it was built by people who understand the
+user" unless you name the exact thing that made you think so.
 
 Part 3 - about you: your year, degree and college, then the ONE project
 most relevant to them with what it does and its result or number. Then one
@@ -223,8 +219,12 @@ The words "intern" or "internship" must appear.
 Part 5 - the close: say so in the words "resume attached" or "resume is
 attached", then ask for a concrete next step - a quick 15-minute chat.
 
-TONE EXAMPLE - tone only, and shorter than yours will be. Every fact in
-your email must come from the sources and claims given below:
+TONE EXAMPLE - TONE ONLY, and shorter than yours will be. Every fact in
+your email must come from the sources and claims given below. This example
+is about a robotics company that is NOT the one you are writing to: never
+reuse its words. If your email mentions a "planner", a "planning layer",
+"pick-and-place" or "monitoring tools" and the company below is not about
+those things, you have copied the example and must start again.
 
   I read your launch post about turning a new pick-and-place task into a
   sentence instead of a reprogramming job. That stuck with me because I
@@ -327,8 +327,31 @@ def _format_sources(sources: list[dict]) -> str:
 
 
 def _format_claims(claims: list[dict]) -> str:
-    lines = [f"- [{c.get('kind')}] {c.get('text')}" for c in claims]
-    return "\n".join(lines) if lines else "- (none)"
+    """Claims grouped by the resume line they came from.
+
+    Live finding (2026-09-17): as a flat list, the model wrote "I ran into
+    that on WaveWatch, where I had to wire four monitoring tools together"
+    - the wiring belonged to a different job and WaveWatch is a different
+    project. Two true facts fused into one false sentence. Grouping by
+    `source_span` shows which facts came from the same line of the resume,
+    so the model can see they are separate things.
+    """
+    if not claims:
+        return "- (none)"
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for c in claims:
+        key = str(c.get("source_span") or "")
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(c)
+    lines: list[str] = []
+    for n, key in enumerate(order, start=1):
+        lines.append(f"FACT GROUP {n} (one thing - never mix with another group):")
+        for c in groups[key]:
+            lines.append(f"  - [{c.get('kind')}] {c.get('text')}")
+    return "\n".join(lines)
 
 
 def _format_thread_history(history: list[dict]) -> str:
@@ -369,7 +392,11 @@ def build_draft_prompt(context: dict) -> str:
         "listed in priority order - prefer the first one that gives you something specific)",
         _format_sources(context.get("available_sources") or []),
         "",
-        "RESUME CLAIMS (the only things you may say about the sender)",
+        "RESUME CLAIMS (the only things you may say about the sender).",
+        "Each FACT GROUP is ONE thing the sender did. NEVER attribute a "
+        "detail from one group to the project named in another - saying a "
+        "project did what a different job did is a lie, even though both "
+        "facts are true on their own.",
         _format_claims(context.get("claims") or []),
     ]
     # Task 12: a follow-up (sequence_step > 0) gets its own section naming

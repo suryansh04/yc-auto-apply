@@ -202,3 +202,41 @@ def test_the_ai_tell_list_covers_the_rejected_draft():
         "Would Orangewood take on a software engineering intern?"
     )
     assert any("banned phrase" in e for e in validate_style(draft(body=rejected)))
+
+
+# --- Live findings 2026-09-17 (the connection template, on real data) -----
+
+@pytest.mark.parametrize("claim", [
+    "I signed up and tried sending a text prompt to move an object.",
+    "I tried it last week and the setup was one step.",
+    "I have used it on a side project.",
+    "I created an account to see the onboarding.",
+])
+def test_rejects_claiming_to_have_used_the_product(claim):
+    # The model wrote the first of these to a ROBOT ARM company. A founder
+    # can check their own signup list; the claim is banned outright.
+    body = f"You build robot arms.\n\n{claim}\n\nWould you take an intern?"
+    assert any("banned phrase" in e for e in validate_style(draft(body=body)))
+
+
+def test_rejects_our_internal_source_kind_names():
+    # "In your long description you said ..." - that is our database
+    # schema talking, not a person who read what they wrote.
+    body = ("In your long description you said you do procurement.\n\n"
+            "Would you take an intern?")
+    assert any("banned phrase" in e for e in validate_style(draft(body=body)))
+
+
+def test_the_company_name_acronym_is_not_shouting():
+    # "SDE internship at Bulk MRO" was rejected as shouting: two all-caps
+    # tokens, both legitimate (the role asked for, the company's own name).
+    errs = validate_style(draft("Would you take an intern? Thanks."),
+                          company_name="Bulk MRO Industrial Supply")
+    assert not any("all-caps" in e for e in errs)
+
+
+def test_genuine_shouting_is_still_rejected():
+    errs = validate_style(draft("Would you take an intern? Thanks.",
+                                subject="URGENT HIRING REQUEST NOW"),
+                          company_name="Bulk MRO Industrial Supply")
+    assert any("all-caps" in e for e in errs)

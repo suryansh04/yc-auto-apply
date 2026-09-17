@@ -87,6 +87,30 @@ SELF_PRAISE_PHRASES = [
     "i'm a fast learner", "eager to learn",
 ]
 BANNED_PHRASES += SELF_PRAISE_PHRASES
+
+# Live finding (2026-09-17): told to claim it had tried the product ONLY
+# where a student really could, the model wrote "I signed up and tried
+# sending a text prompt to move an object" - to a ROBOT ARM company. A
+# model cannot be trusted to judge its own honesty here and the founder
+# can check their own signup list, so the claim is banned outright. What
+# the sender noticed from the outside is always available and always true.
+TRIED_IT_PHRASES = [
+    "i signed up", "signed up and tried", "i tried it", "i've tried it",
+    "i have tried it", "i used it", "i've used it", "i have used it",
+    "i started using", "i've been using", "i have been using",
+    "when i tried", "trying it out", "i gave it a go", "i tested it",
+    "created an account", "made an account",
+]
+BANNED_PHRASES += TRIED_IT_PHRASES
+
+# Our internal source-kind names are plumbing, not English. "In your long
+# description you said ..." (live, 2026-09-17) tells the founder we have a
+# database schema, not that we read their words.
+INTERNAL_SOURCE_NAMES = [
+    "long description", "long_description", "one-liner", "one liner",
+    "your description", "the description", "job_posting",
+]
+BANNED_PHRASES += INTERNAL_SOURCE_NAMES
 SENIORITY_PHRASES = [
     "years of experience", "in my current role", "my team", "i led a team",
     "throughout my career",
@@ -117,7 +141,7 @@ def _hook(body: str) -> str:
     return paras[0] if paras else body
 
 
-def validate_style(draft, previous_body: str | None = None) -> list[str]:
+def validate_style(draft, previous_body: str | None = None, company_name: str = "") -> list[str]:
     errs: list[str] = []
     body = draft.body
     low = body.lower()
@@ -178,7 +202,18 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
         errs.append(
             f"subject is not between {MIN_SUBJECT_WORDS} and {MAX_SUBJECT_WORDS} words"
         )
-    caps_words = [w for w in subject_words if len(w) >= MIN_CAPS_WORD_LEN and w.isupper()]
+    # Live finding (2026-09-17): "SDE internship at Bulk MRO" was rejected as
+    # shouting - two all-caps tokens, both legitimate (the role the operator
+    # asks for, and the company's own name). Only tokens that are neither
+    # count toward the rule.
+    allowed_caps = {"SDE"} | {
+        w.upper() for v in (company_name_variants(company_name) if company_name else [])
+        for w in v.split()
+    }
+    caps_words = [
+        w for w in subject_words
+        if len(w) >= MIN_CAPS_WORD_LEN and w.isupper() and w.strip(".,") not in allowed_caps
+    ]
     if len(caps_words) >= MIN_CAPS_WORDS_TO_SHOUT:
         errs.append("subject contains an all-caps word")
     if re.search(r"[\U0001F300-\U0001FAFF☀-➿]", draft.subject):
@@ -407,7 +442,7 @@ def validate_draft(draft, source, company_name, one_liner, claims,
                    previous_body=None, extra_allowed_text=(), all_publications=()) -> list[str]:
     allowed = [company_name or "", one_liner or "", source.text if source else "",
                *extra_allowed_text]
-    return (validate_style(draft, previous_body)
+    return (validate_style(draft, previous_body, company_name=company_name or "")
             + validate_grounding(draft, source, company_name, one_liner, claims,
                                  all_publications=all_publications)
             + validate_claims(draft, claims, allowed_text=allowed))

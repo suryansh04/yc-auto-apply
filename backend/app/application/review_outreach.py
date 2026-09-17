@@ -274,7 +274,8 @@ class ReviewOutreach:
         # or a drafter citation that never resolved): grounding cannot be
         # checked, so the style and resume-claims rules stand alone.
         allowed = [name or "", one_liner or "", *extra_allowed]
-        return validate_style(draft, previous_body) + validate_claims(draft, claims, allowed_text=allowed)
+        return (validate_style(draft, previous_body, company_name=name or "")
+                + validate_claims(draft, claims, allowed_text=allowed))
 
     def _rank_key(self, item: ReviewItem):
         company = item.company

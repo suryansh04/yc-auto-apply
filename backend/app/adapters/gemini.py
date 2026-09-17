@@ -392,6 +392,23 @@ def build_draft_prompt(context: dict) -> str:
             f"subject: {previous.get('subject')}",
             f"body: {previous.get('body')}",
         ]
+    # Live finding (2026-09-17): with the four-part structure described only
+    # in the (long) system prompt, sarvam-105b-conversations returned the
+    # hook alone and dropped parts 2-4 - twice, so the retry burned too. A
+    # short checklist at the END of the user prompt, right before the
+    # instruction to write, is the part a small model actually follows.
+    if step == 0:
+        parts += [
+            "",
+            "BEFORE YOU ANSWER, check your body has all FOUR paragraphs, "
+            "separated by blank lines:",
+            "  1. the specific question about how their product works",
+            "  2. you: student + the one project with its result",
+            "  3. the ask: join as an SDE intern, on a named area of their work",
+            '  4. the close: "resume attached" + ask for a quick 15-minute chat',
+            "A body with fewer than four paragraphs is wrong. Name the company "
+            "in the body.",
+        ]
     parts += ["", "Write the email now."]
     return "\n".join(parts)
 

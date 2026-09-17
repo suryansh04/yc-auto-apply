@@ -406,3 +406,25 @@ def test_non_transient_errors_are_not_retried():
     with pytest.raises(genai_errors.APIError):
         GeminiResumeParser(client, MODEL, _sleep=lambda s: None).parse("resume")
     assert len(client.models.calls) == 1
+
+
+def test_first_email_prompt_ends_with_a_four_paragraph_checklist():
+    # Live finding (2026-09-17): the four-part structure lived only in the
+    # long system prompt and sarvam returned the hook alone, twice. The
+    # checklist goes at the END of the user prompt, where a small model
+    # still attends.
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    prompt = _prompt_of(client)
+    assert "all four paragraphs" in prompt
+    assert "15-minute chat" in prompt
+    assert prompt.index("all four paragraphs") < prompt.index("write the email now")
+
+
+def test_a_follow_up_prompt_has_no_first_email_checklist():
+    # A follow-up is one short paragraph - the four-part checklist would be
+    # actively wrong there.
+    client = FakeGenAIClient(DRAFT_JSON)
+    ctx = {**CONTEXT, "sequence_step": 1, "thread_history": []}
+    GeminiDrafter(client, model=MODEL).draft(ctx)
+    assert "all four paragraphs" not in _prompt_of(client)

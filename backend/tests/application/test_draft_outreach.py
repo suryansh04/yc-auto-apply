@@ -518,3 +518,27 @@ def test_hook_sharing_a_term_only_with_a_non_cited_outlet_name_fails_grounding(r
     result = DraftOutreach(FakeDrafter([draft, draft]), repos).run()
     assert result.manual_write == 1 and result.drafted == 0
     assert "shares no distinctive term" in repos.outreach.get(50).last_error
+
+
+# --- Live finding 2026-09-17: body as an array of paragraphs --------------
+
+def test_body_paragraph_array_is_joined_with_blank_lines():
+    from app.application.draft_outreach import _body_text
+    assert _body_text(["Hook here.", "Me here.", "Ask here.", "Close here."]) == (
+        "Hook here.\n\nMe here.\n\nAsk here.\n\nClose here."
+    )
+
+
+def test_body_still_accepts_a_plain_string():
+    from app.application.draft_outreach import _body_text
+    assert _body_text("Hook.\n\nAsk.") == "Hook.\n\nAsk."
+
+
+def test_body_array_drops_empty_entries_and_strips():
+    from app.application.draft_outreach import _body_text
+    assert _body_text(["  Hook.  ", "", "   ", "Ask."]) == "Hook.\n\nAsk."
+
+
+def test_body_none_is_empty_not_the_string_none():
+    from app.application.draft_outreach import _body_text
+    assert _body_text(None) == ""

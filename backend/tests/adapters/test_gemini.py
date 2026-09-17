@@ -416,9 +416,9 @@ def test_first_email_prompt_ends_with_a_four_paragraph_checklist():
     client = FakeGenAIClient(DRAFT_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
-    assert "all four paragraphs" in prompt
+    assert "four entries, in this order" in prompt
     assert "15-minute chat" in prompt
-    assert prompt.index("all four paragraphs") < prompt.index("write the email now")
+    assert prompt.index("four entries, in this order") < prompt.index("write the email now")
 
 
 def test_a_follow_up_prompt_has_no_first_email_checklist():
@@ -427,4 +427,4 @@ def test_a_follow_up_prompt_has_no_first_email_checklist():
     client = FakeGenAIClient(DRAFT_JSON)
     ctx = {**CONTEXT, "sequence_step": 1, "thread_history": []}
     GeminiDrafter(client, model=MODEL).draft(ctx)
-    assert "all four paragraphs" not in _prompt_of(client)
+    assert "four entries, in this order" not in _prompt_of(client)

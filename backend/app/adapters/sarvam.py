@@ -90,7 +90,9 @@ DRAFT_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "subject": {"type": "string"},
-        "body": {"type": "string"},
+        # Mirror of gemini.DRAFT_SCHEMA: one array entry per paragraph, so
+        # the four-part structure survives a model that ignores prose.
+        "body": {"type": "array", "items": {"type": "string"}},
         "research_source_type": {"type": "string", "enum": SOURCE_KINDS},
         "research_source_id": {"type": "integer"},
     },

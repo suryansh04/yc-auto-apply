@@ -151,7 +151,12 @@ DRAFT_SCHEMA: dict[str, Any] = {
     "type": "OBJECT",
     "properties": {
         "subject": {"type": "STRING"},
-        "body": {"type": "STRING"},
+        # Live finding (2026-09-17): asked for a single STRING body, the
+        # model returned all four parts run together with no blank lines,
+        # or stopped after the hook - and repeated the miss on the retry.
+        # An ARRAY makes the structure the schema's job, not prose the
+        # model may skim. `_to_draft` joins with blank lines.
+        "body": {"type": "ARRAY", "items": {"type": "STRING"}},
         "research_source_type": {"type": "STRING", "enum": SOURCE_KINDS},
         "research_source_id": {"type": "INTEGER"},
     },
@@ -400,14 +405,14 @@ def build_draft_prompt(context: dict) -> str:
     if step == 0:
         parts += [
             "",
-            "BEFORE YOU ANSWER, check your body has all FOUR paragraphs, "
-            "separated by blank lines:",
+            "\"body\" is a JSON ARRAY with one string per paragraph. For a "
+            "first email it has FOUR entries, in this order:",
             "  1. the specific question about how their product works",
             "  2. you: student + the one project with its result",
             "  3. the ask: join as an SDE intern, on a named area of their work",
             '  4. the close: "resume attached" + ask for a quick 15-minute chat',
-            "A body with fewer than four paragraphs is wrong. Name the company "
-            "in the body.",
+            "An array with fewer than four entries is wrong, and no entry may "
+            "contain a blank line. Name the company in the body.",
         ]
     parts += ["", "Write the email now."]
     return "\n".join(parts)

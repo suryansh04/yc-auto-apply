@@ -455,6 +455,14 @@ def _message_sort_key(message) -> datetime:
     return ts
 
 
+def _body_text(raw_body) -> str:
+    """The drafter's `body`: a list of paragraphs (current schema) or a
+    single string (older drafts, tolerant providers)."""
+    if isinstance(raw_body, (list, tuple)):
+        return "\n\n".join(str(p).strip() for p in raw_body if str(p).strip())
+    return str(raw_body or "")
+
+
 def _to_draft(raw: dict, step: int) -> Draft:
     source_id = raw.get("research_source_id")
     try:
@@ -463,9 +471,11 @@ def _to_draft(raw: dict, step: int) -> Draft:
         source_id = None
     return Draft(
         subject=str(raw.get("subject") or ""),
-        # Live finding (2026-09-16): repair missing paragraph breaks before
-        # validation - see app/domain/layout.py. Words are never changed.
-        body=normalise_paragraphs(str(raw.get("body") or "")),
+        # The drafter schema returns one array entry per paragraph (live
+        # finding 2026-09-17). A plain string still works - older stored
+        # drafts, and any provider that ignores the array - and then
+        # `normalise_paragraphs` repairs the breaks (2026-09-16).
+        body=normalise_paragraphs(_body_text(raw.get("body"))),
         research_source_type=str(raw.get("research_source_type") or ""),
         research_source_id=source_id,
         sequence_step=step,

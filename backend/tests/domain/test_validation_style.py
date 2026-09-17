@@ -145,17 +145,22 @@ def test_location_phrase_does_not_false_positive_on_partial_word():
 # breathe reads less machine-cut than three clipped sentences.
 
 OPERATOR_EXAMPLE = (
-    "I ended up spending way longer on RoboGPT than I meant to. The part "
-    "that got me: changing a task from a blue square to a red triangle used "
-    "to mean reprogramming the arm, and you turned it into a sentence. Where "
-    "does the ambiguity actually get resolved when someone says \"grab the red "
-    "ones\" - in the language model, or the planner underneath?\n\n"
-    "I'm a student. I built WaveWatch, a coastal risk monitoring system, and "
-    "won Smart India Hackathon 2025 with it among 68,000+ teams. Same shape "
-    "of problem as yours, in a way: deciding when a model is sure enough to "
-    "act on its own.\n\n"
-    "I'd like to join Orangewood as an SDE intern and work on the planning "
-    "layer behind RoboGPT.\n\n"
+    "I read your launch post about turning a new pick-and-place task into a "
+    "sentence instead of a reprogramming job. That stuck with me because I "
+    "spent a chunk of my last project wiring four monitoring tools together, "
+    "and the painful part was never the APIs - it was making sure the same "
+    "incident never got processed twice.\n\n"
+    "I can't try a robot arm from my desk, but the choice I noticed is that "
+    "RoboGPT takes the prompt and the vision model separately rather than "
+    "fusing them.\n\n"
+    "I'm a third-year B.Tech Computer Science student at Manipal University "
+    "Jaipur. I built Lerno.ai, which turns a topic into an animated video "
+    "lesson, and got generation down from about 8 minutes to under 3. That "
+    "taught me how much of an AI product is deciding when the model is sure "
+    "enough to act without a human, which is the same question your planner "
+    "has to answer.\n\n"
+    "I'd like to join Orangewood as an SDE intern and work on that planning "
+    "layer. It's a problem I've actually hit, on a much smaller scale.\n\n"
     "Resume is attached. Would you be open to a quick 15-minute chat?"
 )
 

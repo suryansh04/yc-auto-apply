@@ -182,7 +182,7 @@ def test_drafter_prompt_states_the_structure_and_a_length_range():
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
     assert "three" in prompt and "part" in prompt
-    assert "110 to 160 words" in prompt
+    assert "180 to 240 words" in prompt
     assert "rhythm" in prompt.lower()
     assert "do not pad or clip" in prompt
 
@@ -203,7 +203,7 @@ def test_drafter_prompt_forbids_location_and_asks_for_a_swe_internship():
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
     assert "location" in prompt and "remote" in prompt
-    assert "software engineering / sde intern" in prompt
+    assert "sde / software engineering" in prompt
 
 
 def test_drafter_prompt_restricts_claims_to_the_resume_and_forbids_greeting_and_signoff():
@@ -259,25 +259,25 @@ def test_system_prompt_tells_the_model_an_automated_reply_is_not_the_founder():
     assert "not the founder" in low
 
 
-def test_system_prompt_asks_for_the_curious_and_specific_voice():
-    # Live finding (2026-09-16): the operator called a real draft "very AI
-    # generated" and chose a target voice - part 1 is a real question about a
-    # mechanism or trade-off, part 2 says "resume attached", part 3 is a
-    # plain ask - with explicit anti-tell rules. Pins the guidance the model
-    # actually receives.
+def test_system_prompt_asks_for_the_shared_problem_voice():
+    # 2026-09-17: the operator supplied the template they want. The email
+    # works by CONNECTION - the founder's own words, the same problem the
+    # student has actually hit (from resume claims only), what they noticed
+    # in the product, then the ask. Pins the guidance the model receives.
     low = gemini_module._DRAFTER_SYSTEM.lower()
-    assert "curious and specific" in low
-    assert "mechanism" in low and "trade-off" in low
+    assert "connection" in low
+    assert "same problem" in low
+    assert "never invent" in low
+    assert "the founder can check" in low
     assert "resume attached" in low
-    assert "never be: praise" in low
+    assert "no praise" in low
     assert "summarises the company back" in low
-    assert "abstract-noun" in low
     for tell in ("genuinely", "the exact", "resonates", "aligns", "impressive",
                  "fascinating", "incredible", "stacked adjectives", "contractions are fine"):
         assert tell in low, tell
     assert "tone only" in low
     # The hard constraints from before survive the rewrite.
-    for kept in ("110 to 160 words", "rhythm", "four paragraphs",
+    for kept in ("180 to 240 words", "five paragraphs",
                  "never mention location",
                  "years of experience", "the source is how you learned it",
                  "\"intern\" or \"internship\" must", "follow-ups:"):
@@ -416,9 +416,9 @@ def test_first_email_prompt_ends_with_a_four_paragraph_checklist():
     client = FakeGenAIClient(DRAFT_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
-    assert "four entries, in this order" in prompt
+    assert "five entries, in this order" in prompt
     assert "15-minute chat" in prompt
-    assert prompt.index("four entries, in this order") < prompt.index("write the email now")
+    assert prompt.index("five entries, in this order") < prompt.index("write the email now")
 
 
 def test_a_follow_up_prompt_has_no_first_email_checklist():
@@ -427,4 +427,4 @@ def test_a_follow_up_prompt_has_no_first_email_checklist():
     client = FakeGenAIClient(DRAFT_JSON)
     ctx = {**CONTEXT, "sequence_step": 1, "thread_history": []}
     GeminiDrafter(client, model=MODEL).draft(ctx)
-    assert "four entries, in this order" not in _prompt_of(client)
+    assert "five entries, in this order" not in _prompt_of(client)

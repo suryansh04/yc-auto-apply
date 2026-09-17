@@ -11,9 +11,9 @@ from app.domain.names import company_display_name, company_name_variants
 # itself the tell. Room to write a real sentence matters more than
 # brevity. These are now sanity bounds (nobody cold-emails a founder 200
 # words), not a style device; rhythm is the prompt's job.
-MAX_WORDS = 200
+MAX_WORDS = 280
 MAX_SENTENCE_WORDS = 45
-MAX_PARAGRAPHS = 5
+MAX_PARAGRAPHS = 6
 # Live finding (2026-09-13): the cap alone let a one-block email through —
 # hook, pitch and ask run together in a single 3-sentence paragraph, which
 # is exactly the wall-of-text the spec's three-part structure exists to
@@ -27,6 +27,7 @@ MAX_SENTENCES_PER_PARAGRAPH = 5
 MIN_SUBJECT_WORDS = 3
 MAX_SUBJECT_WORDS = 10
 MAX_EM_DASHES = 2
+MAX_I_START_RATIO = 0.7
 
 # Task 12 (spec §6): a follow-up is not just "shorter than the previous
 # message" (that rule predates this task — see PF-3) but shorter on a
@@ -148,8 +149,12 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
     sents = _sentences(body)
     if sents:
         i_starts = sum(1 for s in sents if re.match(r"^I\b", s))
-        if i_starts * 2 > len(sents):
-            errs.append('more than half the sentences begin with "I"')
+        # Operator's template (2026-09-17) is a first-person story - "I've
+        # run into the same problem", "I signed up and tried it", "I
+        # recently built". Half was too strict for it; the rule still
+        # catches an email that is nothing but "I" sentences.
+        if i_starts > len(sents) * MAX_I_START_RATIO:
+            errs.append('too many sentences begin with "I"')
 
     for phrase in BANNED_PHRASES:
         if phrase in low:
@@ -197,18 +202,16 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
     return errs
 
 
+# Operator decision (2026-09-17): D29's "never name the source" is LIFTED
+# for first emails. Their template opens "I read your launch post about
+# <what you said>, and it stuck with me because I've run into the same
+# problem" - naming the channel is what makes that sentence honest rather
+# than a claim to have divined the fact. What stays banned is naming the
+# PUBLICATION (the outlet's coverage, not the founder's own words) and the
+# passive "I came across" framing the operator rejected earlier.
 SOURCE_REFERENCE_PHRASES = [
-    "saw the", "read the", "read about", "the article", "the piece",
-    "coverage", "featured in", "in the news", "press release", "came across",
-    # Live finding (2026-09-17): a draft opened "In Orangewood's launch
-    # post, you mention that ..." - it names the channel the fact came
-    # from, which is exactly what D29 forbids, and the list above only
-    # covered news-shaped wording. The other source kinds (launch posts,
-    # job postings, the YC page, the company's own site) need the same ban.
-    "launch post", "your post", "the post", "your launch", "you mention",
-    "you mentioned", "your website", "your site", "job posting",
-    "your listing", "the listing", "your yc page", "your profile",
-    "your blog", "blog post", "announcement",
+    "the article", "the piece", "coverage", "featured in", "in the news",
+    "press release", "came across",
 ]
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "at", "with",

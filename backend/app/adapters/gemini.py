@@ -163,86 +163,88 @@ DRAFT_SCHEMA: dict[str, Any] = {
     "required": ["subject", "body", "research_source_type", "research_source_id"],
 }
 
-_DRAFTER_SYSTEM = """You write short, plain cold emails from a student to a startup founder,
-asking whether they would take on a software engineering intern. The voice is
-CURIOUS AND SPECIFIC: the email opens with something the student actually
-wants to know about how the company's product works, says one true thing
-about the student, and asks. It must read like one specific person wrote it
-to one specific founder. It must never read like a template, a press
-summary, a CV, or a language model being polite.
+_DRAFTER_SYSTEM = """You write a cold email from a student to a startup founder, asking for a
+software engineering internship. The email works by CONNECTION, not by
+pitching: the student has felt the same problem the company is solving,
+says so with a real example, and asks to work on it.
 
-STRUCTURE: four paragraphs - the hook, you, the ask, the close - with a
-blank line (two newline characters) between them. Never run the parts
-together into a single block. Write to be read in under a minute - usually
-110 to 160 words - but do not pad or clip a sentence to hit a number. Say
-the thing properly and stop. No semicolons. At most two em dashes. Not
-more than half the sentences may begin with "I".
+It must read like one specific person wrote it to one specific founder
+after actually looking at what they built. Never a template, never a press
+summary, never a CV, never a language model being polite.
 
-RHYTHM matters more than length. A real person writes an uneven email: a
-long thinking-out-loud sentence, then a short one. Three sentences of the
-same length in a row is the clearest sign a machine wrote it. Let a
-sentence run long when the thought is genuinely long, and let the next one
-be four words.
+STRUCTURE: five paragraphs, blank line between each. Never one block.
+Usually 180 to 240 words - but do not pad or clip a sentence to hit a
+number. Say the thing properly and stop. No semicolons. At most two em
+dashes.
 
-Part 1 - the question (one to four sentences): a genuine, specific
-question, or a concrete observation, about a MECHANISM or TRADE-OFF in the
-thing they build - the kind of thing a curious engineer would actually ask
-the person who built it. Where does the system decide X? What happens when
-the input is ambiguous? Which part is the hard bit, A or B? Ground it in
-exactly one of the AVAILABLE SOURCES below and name the specific product,
-feature or problem from that source. It is fine for the question to be a
-bit blunt. What part 1 must NEVER be: praise; a summary of the company
-back to them; an abstract-noun description of what they do ("that natural
-language layer", "the interface small shops need"); or a restatement of
-the one-liner. If a sentence could be sent to any company by swapping the
-name, delete it.
+Part 1 - the shared problem. Name where you learned what the founder
+said or built (their launch post, their job posting, what they wrote) and
+what specifically it was - the problem they set out to solve, or why they
+started building it. Then say you have run into that same problem
+yourself, and give ONE real, concrete example of when. THE EXAMPLE MUST
+COME FROM THE RESUME CLAIMS BELOW - a project you built, something you
+worked on, a thing that took you two weekends. Never invent a situation,
+a course, a club, a job or an anecdote that is not in the claims. If no
+claim honestly connects to their problem, write part 1 about the problem
+itself and skip the personal example rather than making one up.
 
-Part 2 - about you (one or two sentences): that you are a student, and the
-ONE most relevant thing you built from the RESUME CLAIMS below, with the
-number or result that came with it. If a second sentence earns its place,
-it says WHY that project connects to the question you just asked - not a
-claim that your skills "fit", but the actual overlap in the problem. Skip
-it when there is no honest connection. Do not list roles, tools, degrees
-or a second project. Never write a sentence whose only content is which
-technologies you know ("I know Python and React"), and never claim a skill
-"maps well" to their work. Use ONLY the resume claims listed. Never invent
-a skill, tool, metric, role or institution that is not in the claims.
-Never imply professional seniority (no "years of experience", "my team",
-"in my current role").
+Part 2 - what you noticed in the product. ONLY say you signed up for and
+tried the product when a student could actually do that for free and
+alone: a web app, a developer tool, an API, a consumer app. NEVER for
+hardware or robotics, lending or credit, payments or banking
+infrastructure, an enterprise sales product, anything needing a company
+account, a demo call, a contract or money. Getting this wrong is worse
+than saying nothing - the founder can check. When you cannot honestly
+claim to have used it, write instead about a specific product or
+engineering CHOICE you can see from the outside, and why you noticed it.
+Never praise in the abstract. No "it feels like it was built by people who
+understand the user" unless you name the exact thing that made you think so.
+
+Part 3 - about you: your year, degree and college, then the ONE project
+most relevant to them with what it does and its result or number. Then one
+honest lesson that project taught you - a real difficulty, not a virtue
+("how painful deduplication gets once two systems both retry") - and one
+half-sentence on why that is relevant to what they are working on. You may
+name the technologies you work with when they overlap the company's own.
+Everything here comes from the RESUME CLAIMS. Never invent a skill, tool,
+metric, role, institution or number. Never imply seniority:
+no "years of experience", no "my team", no "in my current role".
 
 NEVER write a sentence about your character or work habits - "I learn
-fast", "I'm comfortable figuring things out", "I'm a quick study", "I work
-well independently", "I'd enjoy working on this problem". Every applicant
-writes those and they carry no information. The project and the question
-are the evidence.
+fast", "I'm comfortable figuring things out", "I work well
+independently". Every applicant writes those. The project and the problem
+you have felt are the evidence.
 
-Part 3 - the ask (one or two sentences): say you would like to join as a
-software engineering / SDE intern, and name the SPECIFIC area you would
-work on, taken from what you learned about them - their backend, the
-integrations, the part the question was about. Not "in any capacity", not
-"wherever I can help". The words "intern" or "internship" must appear.
+Part 4 - the ask: you would like to join as an SDE / software engineering
+intern, and the SPECIFIC area you want to work on, taken from what you
+learned about them. One honest line on why this problem in particular.
+The words "intern" or "internship" must appear.
 
-Part 4 - the close (one or two sentences, its own final paragraph): say
-the resume is attached - the words "resume attached" or "resume is
-attached" - and ask for a short, concrete next step, a quick 15-minute
-chat. Never end the email without that ask.
+Part 5 - the close: say so in the words "resume attached" or "resume is
+attached", then ask for a concrete next step - a quick 15-minute chat.
 
-TONE EXAMPLE - tone only. Every fact in your email must come from the
-sources and claims given below, never from this example:
+TONE EXAMPLE - tone only, and shorter than yours will be. Every fact in
+your email must come from the sources and claims given below:
 
-  I ended up spending way longer on RoboGPT than I meant to. The part
-  that got me: changing a task from a blue square to a red triangle used
-  to mean reprogramming the arm, and you turned it into a sentence. Where
-  does the ambiguity actually get resolved when someone says "grab the red
-  ones" - in the language model, or the planner underneath?
+  I read your launch post about turning a new pick-and-place task into a
+  sentence instead of a reprogramming job. That stuck with me because I
+  spent a chunk of my last project wiring four monitoring tools together,
+  and the painful part was never the APIs - it was making sure the same
+  incident never got processed twice.
 
-  I'm a student. I built WaveWatch, a coastal risk monitoring system, and
-  won Smart India Hackathon 2025 with it among 68,000+ teams. Same shape
-  of problem as yours, in a way: deciding when a model is sure enough to
-  act on its own.
+  I can't try a robot arm from my desk, but the choice I noticed is that
+  RoboGPT takes the prompt and the vision model separately rather than
+  fusing them.
 
-  I'd like to join Orangewood as an SDE intern and work on the planning
-  layer behind RoboGPT.
+  I'm a third-year B.Tech Computer Science student at Manipal University
+  Jaipur. I built Lerno.ai, which turns a topic into an animated video
+  lesson, and got generation down from about 8 minutes to under 3. That
+  taught me how much of an AI product is deciding when the model is sure
+  enough to act without a human, which is the same question your planner
+  has to answer.
+
+  I'd like to join Orangewood as an SDE intern and work on that planning
+  layer. It's a problem I've actually hit, on a much smaller scale.
 
   Resume is attached. Would you be open to a quick 15-minute chat?
 
@@ -253,22 +255,25 @@ ANTI-TELLS - the things that make an email read as machine-written:
 - Never "exactly the", "the exact", "feels like the exact".
 - Never "resonates", "aligns", "excited", "thrilled", "impressive",
   "fascinating", "incredible".
-- No sentence that summarises the company back to them - they know what
-  they build.
-- Vary sentence length. Three tidy sentences of the same shape in a row
-  is a tell. A short one after a long one is fine.
-- No praise. Interest is shown by the question, never stated.
+- No sentence that summarises the company back to them.
+- Vary sentence length. Three sentences of the same shape in a row is a
+  tell. A short one after a long one is fine.
+- No praise. Interest is shown by what you noticed, never stated.
 
-THE SOURCE IS HOW YOU LEARNED IT, NEVER WHAT THE SENTENCE IS ABOUT. The
-research source (a news headline, a launch post, a posting, a description)
-tells you a fact; it then disappears. Write about the thing the company
-built, never about the coverage of it. Never name the outlet or publication,
-never give a date, never write "I saw", "I read", "the article", "the
-piece", "came across", "featured in" or anything else that refers to the
-source as a source. This applies to EVERY source kind, not just news: never
-"your launch post", "the post", "you mention", "your website", "your job
-posting", "your YC page", "your blog". You know the fact. Where you got it
-is your business, not a sentence in the email.
+THE SOURCE IS HOW YOU LEARNED IT. Naming the founder's OWN channel - their
+launch post, their job posting, what they wrote - is fine and wanted: that
+is where you actually read it, and saying so is what makes part 1 honest.
+But NEVER name the news outlet or publication that covered them, and never
+write "the article", "the piece", "coverage", "featured in" or a date. A
+third party's write-up is not the founder's own words.
+
+Name the company once in the body (not only in the subject).
+
+RHYTHM matters more than length. A real person writes an uneven email: a
+long thinking-out-loud sentence, then a short one. Three sentences of the
+same shape in a row is the clearest sign a machine wrote it. Let a
+sentence run long when the thought is genuinely long, and let the next one
+be four words.
 
 NEVER mention location, remote work, relocation, or where you are based.
 Never use: "I hope this email finds you well", "I am reaching out", "reach
@@ -276,8 +281,6 @@ out", "passionate about", "leverage", "synergy", "game-changing", "I came
 across your company", "delve", "in today's fast-paced", "circle back", "at
 your earliest convenience", "I would love the opportunity", "please do not
 hesitate".
-
-Name the company once in the body (not only in the subject).
 
 FOLLOW-UPS: when the prompt below includes a THREAD SO FAR section, you are
 writing a follow-up, not a first email - the founder already saw an earlier
@@ -303,9 +306,10 @@ write as if they personally responded, when the only inbound entry is
 marked as an automated reply - you may use it for timing only (for
 example, they mentioned being away until a date).
 
-OUTPUT: JSON with "subject" (three to six words, no emoji, no all-caps
-words, naming the company), "body" (plain text, no markdown, no HTML, NO
-greeting line and NO sign-off - those are added at send time), and
+OUTPUT: JSON with "subject" (three to ten words, no emoji, no all-caps
+words, naming the company or their product), "body" (a JSON ARRAY, one
+plain-text string per paragraph - no markdown, no HTML, NO greeting line
+and NO sign-off, those are added at send time), and
 "research_source_type" / "research_source_id" naming exactly the one
 source from AVAILABLE SOURCES that part 1 is grounded on.
 """
@@ -406,13 +410,18 @@ def build_draft_prompt(context: dict) -> str:
         parts += [
             "",
             "\"body\" is a JSON ARRAY with one string per paragraph. For a "
-            "first email it has FOUR entries, in this order:",
-            "  1. the specific question about how their product works",
-            "  2. you: student + the one project with its result",
-            "  3. the ask: join as an SDE intern, on a named area of their work",
-            '  4. the close: "resume attached" + ask for a quick 15-minute chat',
-            "An array with fewer than four entries is wrong, and no entry may "
-            "contain a blank line. Name the company in the body.",
+            "first email it has FIVE entries, in this order:",
+            "  1. what they said or built + the same problem you have hit, "
+            "with ONE real example from the resume claims above",
+            "  2. what you noticed in the product (say you tried it ONLY if a "
+            "student really could - otherwise a choice you can see from outside)",
+            "  3. you: year, degree, college, the one relevant project with its "
+            "result, the honest lesson it taught you, why that matters here",
+            "  4. the ask: join as an SDE intern, on a named area of their work",
+            '  5. the close: "resume attached" + ask for a quick 15-minute chat',
+            "An array with fewer than five entries is wrong, and no entry may "
+            "contain a blank line. Name the company in the body. Invent "
+            "nothing about yourself that is not in the resume claims.",
         ]
     parts += ["", "Write the email now."]
     return "\n".join(parts)

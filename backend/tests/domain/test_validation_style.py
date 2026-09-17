@@ -7,6 +7,7 @@ from app.domain.validation import (
     MAX_PARAGRAPHS,
     MAX_SENTENCE_WORDS,
     MAX_SENTENCES_PER_PARAGRAPH,
+    MAX_SUBJECT_WORDS,
     MAX_WORDS,
     validate_style,
 )
@@ -64,8 +65,15 @@ def test_rejects_missing_internship_ask():
 
 def test_rejects_bad_subject_length():
     assert any("subject" in e for e in validate_style(draft(subject="Hi")))
-    assert any("subject" in e for e in validate_style(
-        draft(subject="A rather long subject line about interning here")))
+    too_long = " ".join(["word"] * (MAX_SUBJECT_WORDS + 1))
+    assert any("subject" in e for e in validate_style(draft(subject=too_long)))
+
+
+def test_accepts_the_operators_seven_word_subject_style():
+    # "SDE intern who's been poking around RoboGPT" - the operator's own
+    # template (2026-09-17); the old 6-word cap rejected it.
+    assert validate_style(
+        draft(subject="SDE intern who's been poking around RoboGPT")) == []
 
 def test_followup_must_be_shorter_than_previous():
     errs = validate_style(draft(step=1), previous_body="short intern ask")
@@ -137,15 +145,18 @@ def test_location_phrase_does_not_false_positive_on_partial_word():
 # breathe reads less machine-cut than three clipped sentences.
 
 OPERATOR_EXAMPLE = (
-    'Quick question about RoboGPT: when someone gives a vague prompt like '
-    '"pick the red ones", where does the system push back - in the language '
-    "model, or in the planner underneath? That boundary is the part I keep "
-    "turning over.\n\n"
-    "I'm a student looking for a software engineering internship, and the "
-    "closest thing I've built is an AI grading pipeline for WaveWatch that "
-    "cut manual work by about 70%. Same shape of problem, in a way: deciding "
-    "when the model is confident enough to act on its own. Resume attached.\n\n"
-    "Would Orangewood have room for an intern this year?"
+    "I ended up spending way longer on RoboGPT than I meant to. The part "
+    "that got me: changing a task from a blue square to a red triangle used "
+    "to mean reprogramming the arm, and you turned it into a sentence. Where "
+    "does the ambiguity actually get resolved when someone says \"grab the red "
+    "ones\" - in the language model, or the planner underneath?\n\n"
+    "I'm a student. I built WaveWatch, a coastal risk monitoring system, and "
+    "won Smart India Hackathon 2025 with it among 68,000+ teams. Same shape "
+    "of problem as yours, in a way: deciding when a model is sure enough to "
+    "act on its own.\n\n"
+    "I'd like to join Orangewood as an SDE intern and work on the planning "
+    "layer behind RoboGPT.\n\n"
+    "Resume is attached. Would you be open to a quick 15-minute chat?"
 )
 
 def test_the_operator_example_passes_style():

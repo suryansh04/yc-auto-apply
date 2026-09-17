@@ -21,6 +21,11 @@ MAX_PARAGRAPHS = 5
 # the prompt still asks for three.
 MIN_PARAGRAPHS = 2
 MAX_SENTENCES_PER_PARAGRAPH = 5
+# Operator's template (2026-09-17) uses subjects like "SDE intern who's
+# been poking around RoboGPT" - seven words. The rule exists to stop
+# sprawling subject lines, not to force telegram-style ones.
+MIN_SUBJECT_WORDS = 3
+MAX_SUBJECT_WORDS = 10
 MAX_EM_DASHES = 2
 
 # Task 12 (spec §6): a follow-up is not just "shorter than the previous
@@ -70,6 +75,17 @@ AI_TELL_PHRASES = [
     "truly impressive", "fascinating", "i was thrilled",
 ]
 BANNED_PHRASES += AI_TELL_PHRASES
+# Operator decision (2026-09-17): every cold email claims these, so they
+# carry no information and read as filler - the project and the question
+# are the evidence. Cut from the operator's own template on their say-so.
+SELF_PRAISE_PHRASES = [
+    "i learn fast", "learn quickly", "quick study", "quick learner",
+    "comfortable figuring things out", "without much hand-holding",
+    "without hand-holding", "work well independently", "self-starter",
+    "i'd enjoy working on", "i would enjoy working on", "hard-working",
+    "i'm a fast learner", "eager to learn",
+]
+BANNED_PHRASES += SELF_PRAISE_PHRASES
 SENIORITY_PHRASES = [
     "years of experience", "in my current role", "my team", "i led a team",
     "throughout my career",
@@ -153,8 +169,10 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
         errs.append("more than two em dashes")
 
     subject_words = _words(draft.subject)
-    if not 3 <= len(subject_words) <= 6:
-        errs.append("subject is not between three and six words")
+    if not MIN_SUBJECT_WORDS <= len(subject_words) <= MAX_SUBJECT_WORDS:
+        errs.append(
+            f"subject is not between {MIN_SUBJECT_WORDS} and {MAX_SUBJECT_WORDS} words"
+        )
     caps_words = [w for w in subject_words if len(w) >= MIN_CAPS_WORD_LEN and w.isupper()]
     if len(caps_words) >= MIN_CAPS_WORDS_TO_SHOUT:
         errs.append("subject contains an all-caps word")

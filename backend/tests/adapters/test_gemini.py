@@ -182,7 +182,7 @@ def test_drafter_prompt_states_the_structure_and_a_length_range():
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
     assert "three" in prompt and "part" in prompt
-    assert "90 to 130 words" in prompt
+    assert "110 to 160 words" in prompt
     assert "rhythm" in prompt.lower()
     assert "do not pad or clip" in prompt
 
@@ -203,7 +203,7 @@ def test_drafter_prompt_forbids_location_and_asks_for_a_swe_internship():
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
     assert "location" in prompt and "remote" in prompt
-    assert "software engineering internship" in prompt
+    assert "software engineering / sde intern" in prompt
 
 
 def test_drafter_prompt_restricts_claims_to_the_resume_and_forbids_greeting_and_signoff():
@@ -277,7 +277,7 @@ def test_system_prompt_asks_for_the_curious_and_specific_voice():
         assert tell in low, tell
     assert "tone only" in low
     # The hard constraints from before survive the rewrite.
-    for kept in ("90 to 130 words", "rhythm", "three or four paragraphs",
+    for kept in ("110 to 160 words", "rhythm", "four paragraphs",
                  "never mention location",
                  "years of experience", "the source is how you learned it",
                  "\"intern\" or \"internship\" must", "follow-ups:"):

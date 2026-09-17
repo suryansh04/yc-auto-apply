@@ -166,12 +166,12 @@ about the student, and asks. It must read like one specific person wrote it
 to one specific founder. It must never read like a template, a press
 summary, a CV, or a language model being polite.
 
-STRUCTURE: three or four paragraphs, with a blank line (two newline
-characters) between them. Never run the parts together into a single
-block. Write to be read in under a minute - usually 90 to 130 words - but
-do not pad or clip a sentence to hit a number. Say the thing properly and
-stop. No semicolons. At most two em dashes. Not more than half the
-sentences may begin with "I".
+STRUCTURE: four paragraphs - the hook, you, the ask, the close - with a
+blank line (two newline characters) between them. Never run the parts
+together into a single block. Write to be read in under a minute - usually
+110 to 160 words - but do not pad or clip a sentence to hit a number. Say
+the thing properly and stop. No semicolons. At most two em dashes. Not
+more than half the sentences may begin with "I".
 
 RHYTHM matters more than length. A real person writes an uneven email: a
 long thinking-out-loud sentence, then a short one. Three sentences of the
@@ -192,39 +192,54 @@ language layer", "the interface small shops need"); or a restatement of
 the one-liner. If a sentence could be sent to any company by swapping the
 name, delete it.
 
-Part 2 - one or two sentences about you: that you are a student, the ONE
-concrete thing you built (from the RESUME CLAIMS below) with its result,
-and the words "resume attached". If a second sentence earns its place, it
-says WHY that project connects to the question you just asked - not a
+Part 2 - about you (one or two sentences): that you are a student, and the
+ONE most relevant thing you built from the RESUME CLAIMS below, with the
+number or result that came with it. If a second sentence earns its place,
+it says WHY that project connects to the question you just asked - not a
 claim that your skills "fit", but the actual overlap in the problem. Skip
-it when there is no honest connection. Do not list roles, tools, degrees or a second
-project. Never write a sentence whose only content is which technologies
-you know ("I know Python and React"), and never claim a skill "maps well"
-to their work. Use ONLY the resume claims listed. Never invent a skill,
-tool, metric, role or institution that is not in the claims. Never imply
-professional seniority (no "years of experience", "my team", "in my
-current role").
+it when there is no honest connection. Do not list roles, tools, degrees
+or a second project. Never write a sentence whose only content is which
+technologies you know ("I know Python and React"), and never claim a skill
+"maps well" to their work. Use ONLY the resume claims listed. Never invent
+a skill, tool, metric, role or institution that is not in the claims.
+Never imply professional seniority (no "years of experience", "my team",
+"in my current role").
 
-Part 3 - the ask (one plain sentence, ALWAYS present, its own final
-paragraph): ask whether they would take a software engineering internship /
-intern. Never end the email without this question. Speculative, not an
-application to an advertised role. The words "intern" or "internship" must
-appear.
+NEVER write a sentence about your character or work habits - "I learn
+fast", "I'm comfortable figuring things out", "I'm a quick study", "I work
+well independently", "I'd enjoy working on this problem". Every applicant
+writes those and they carry no information. The project and the question
+are the evidence.
+
+Part 3 - the ask (one or two sentences): say you would like to join as a
+software engineering / SDE intern, and name the SPECIFIC area you would
+work on, taken from what you learned about them - their backend, the
+integrations, the part the question was about. Not "in any capacity", not
+"wherever I can help". The words "intern" or "internship" must appear.
+
+Part 4 - the close (one or two sentences, its own final paragraph): say
+the resume is attached - the words "resume attached" or "resume is
+attached" - and ask for a short, concrete next step, a quick 15-minute
+chat. Never end the email without that ask.
 
 TONE EXAMPLE - tone only. Every fact in your email must come from the
 sources and claims given below, never from this example:
 
-  Quick question about RoboGPT: when someone gives a vague prompt like
-  "pick the red ones", where does the system push back - in the language
-  model, or in the planner underneath? That boundary is the part I keep
-  turning over.
+  I ended up spending way longer on RoboGPT than I meant to. The part
+  that got me: changing a task from a blue square to a red triangle used
+  to mean reprogramming the arm, and you turned it into a sentence. Where
+  does the ambiguity actually get resolved when someone says "grab the red
+  ones" - in the language model, or the planner underneath?
 
-  I'm a student looking for a software engineering internship, and the
-  closest thing I've built is an AI grading pipeline for WaveWatch that
-  cut manual work by about 70%. Same shape of problem, in a way: deciding
-  when the model is confident enough to act on its own. Resume attached.
+  I'm a student. I built WaveWatch, a coastal risk monitoring system, and
+  won Smart India Hackathon 2025 with it among 68,000+ teams. Same shape
+  of problem as yours, in a way: deciding when a model is sure enough to
+  act on its own.
 
-  Would Orangewood have room for an intern this year?
+  I'd like to join Orangewood as an SDE intern and work on the planning
+  layer behind RoboGPT.
+
+  Resume is attached. Would you be open to a quick 15-minute chat?
 
 ANTI-TELLS - the things that make an email read as machine-written:
 - Contractions are fine and preferred ("I'm", "I've", "doesn't").

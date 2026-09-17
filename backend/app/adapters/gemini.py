@@ -245,7 +245,10 @@ tells you a fact; it then disappears. Write about the thing the company
 built, never about the coverage of it. Never name the outlet or publication,
 never give a date, never write "I saw", "I read", "the article", "the
 piece", "came across", "featured in" or anything else that refers to the
-source as a source.
+source as a source. This applies to EVERY source kind, not just news: never
+"your launch post", "the post", "you mention", "your website", "your job
+posting", "your YC page", "your blog". You know the fact. Where you got it
+is your business, not a sentence in the email.
 
 NEVER mention location, remote work, relocation, or where you are based.
 Never use: "I hope this email finds you well", "I am reaching out", "reach

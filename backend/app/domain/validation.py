@@ -182,6 +182,15 @@ def validate_style(draft, previous_body: str | None = None) -> list[str]:
 SOURCE_REFERENCE_PHRASES = [
     "saw the", "read the", "read about", "the article", "the piece",
     "coverage", "featured in", "in the news", "press release", "came across",
+    # Live finding (2026-09-17): a draft opened "In Orangewood's launch
+    # post, you mention that ..." - it names the channel the fact came
+    # from, which is exactly what D29 forbids, and the list above only
+    # covered news-shaped wording. The other source kinds (launch posts,
+    # job postings, the YC page, the company's own site) need the same ban.
+    "launch post", "your post", "the post", "your launch", "you mention",
+    "you mentioned", "your website", "your site", "job posting",
+    "your listing", "the listing", "your yc page", "your profile",
+    "your blog", "blog post", "announcement",
 ]
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "at", "with",

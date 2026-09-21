@@ -146,6 +146,23 @@ body {
   border-bottom-color: var(--shell-fg);
 }
 
+/* The mailbox everything is sent from, at the far end of the rail. */
+.app-account {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--shell-muted);
+  font-size: 0.82rem;
+}
+
+.app-account-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
 .app-main {
   flex: 1;
   width: 100%;

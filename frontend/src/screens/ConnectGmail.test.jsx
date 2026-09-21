@@ -147,3 +147,21 @@ it('explains a consent where one permission was left unticked', async () => {
   render('/?gmail=missing-scope')
   expect(await screen.findByRole('alert')).toHaveTextContent(/left unticked/i)
 })
+
+it('names the connected account in the header, on every screen', async () => {
+  // Which mailbox the letters leave from decides what a founder sees in
+  // their From line, and it is easy to forget months later.
+  mockStatus(CONNECTED)
+  mockEmptyDashboard()
+  render()
+  await screen.findByRole('heading', { name: 'Pipeline' })
+  expect(screen.getByText('operator@example.com')).toBeInTheDocument()
+})
+
+it('does not name an account before Gmail is connected', async () => {
+  mockStatus(NOT_CONNECTED)
+  render()
+  await screen.findByRole('heading', { name: /connect gmail/i })
+  const header = document.querySelector('.app-nav')
+  expect(header.textContent).not.toMatch(/operator@example\.com/)
+})

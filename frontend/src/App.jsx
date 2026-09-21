@@ -36,6 +36,14 @@ function App() {
             <NavLink to="/queue">Review</NavLink>
             <NavLink to="/contacts">Founders</NavLink>
             <NavLink to="/manual">Missing addresses</NavLink>
+            {/* Which mailbox these letters leave from. Worth saying on
+                every screen: it is the one setting that decides what a
+                founder sees in their From line, and it is easy to
+                forget which account was authorised months ago. */}
+            <span className="app-account" title="Letters are sent from this account">
+              <span className="app-account-dot" aria-hidden="true" />
+              {gmail.data.account}
+            </span>
           </>
         )}
       </nav>

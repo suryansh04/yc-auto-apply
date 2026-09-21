@@ -177,15 +177,14 @@ describe('long unbroken content wraps instead of being clipped', () => {
   })
 })
 
-describe('form controls use the 14px base, not the label caption size', () => {
+describe('form controls set their own size, never inheriting the label caption', () => {
   // Every text input, select and textarea in the app is nested inside a
-  // <label>, and label { font-size: 0.85rem } (below). `font: inherit`
-  // on the control pulls in that computed 0.85rem via inheritance, so
-  // without an explicit override the draft body the operator *edits*
-  // renders at 11.9px while the same text they *read* (.wire-text) is
-  // 13.3px. `rem` always resolves against the root font-size (14px), so
-  // an explicit `font-size: 1rem` on the control undoes the inherited
-  // label size regardless of nesting.
+  // <label>, and the label is a small caption. A control that inherits
+  // its font (`font: inherit`, or no font-size at all) pulls in that
+  // caption size, so the draft body the operator *edits* rendered at
+  // 11.9px while the same text they *read* was 13.3px. Each control
+  // declares its own size in `rem`, which resolves against the root
+  // font-size and so cannot be dragged down by the label it sits in.
   function ruleBlock(source, selectorStart) {
     const start = source.indexOf(selectorStart)
     const openBrace = source.indexOf('{', start)
@@ -193,18 +192,27 @@ describe('form controls use the 14px base, not the label caption size', () => {
     return stripComments(source.slice(openBrace + 1, closeBrace))
   }
 
-  it("input/select/textarea declare an explicit 14px-equivalent font-size, not just font: inherit", () => {
-    const controls = ruleBlock(css, "input[type='text'],")
-    expect(controls).toMatch(/font-size:\s*(1rem|14px)\s*;/)
+  function fontSizeRem(block) {
+    const match = block.match(/font-size:\s*([\d.]+)rem\s*;/)
+    return match ? Number(match[1]) : null
+  }
+
+  const labelSize = fontSizeRem(ruleBlock(css, 'label {'))
+
+  it('the label caption is smaller than the base, which is why this matters', () => {
+    expect(labelSize).toBeGreaterThan(0)
+    expect(labelSize).toBeLessThan(1)
   })
 
-  it('button declares an explicit 14px-equivalent font-size', () => {
-    const button = ruleBlock(css, 'button {')
-    expect(button).toMatch(/font-size:\s*(1rem|14px)\s*;/)
+  it("input/select/textarea declare their own font-size, larger than the caption", () => {
+    const controls = fontSizeRem(ruleBlock(css, "input[type='text'],"))
+    expect(controls).not.toBeNull()
+    expect(controls).toBeGreaterThan(labelSize)
   })
 
-  it("the label caption stays at 0.85rem (its own rule is untouched)", () => {
-    const label = ruleBlock(css, 'label {')
-    expect(label).toMatch(/font-size:\s*0\.85rem/)
+  it('button declares its own font-size, larger than the caption', () => {
+    const button = fontSizeRem(ruleBlock(css, 'button {'))
+    expect(button).not.toBeNull()
+    expect(button).toBeGreaterThan(labelSize)
   })
 })

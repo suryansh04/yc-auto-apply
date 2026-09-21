@@ -106,5 +106,5 @@ it('give-up requires confirmation and does not submit when cancelled', async () 
 it('an empty manual list shows an empty state', async () => {
   mockManual([])
   render(<ManualEmail />)
-  expect(await screen.findByText(/nothing needs a manual email/i)).toBeInTheDocument()
+  expect(await screen.findByText(/every founder in the pipeline has an address/i)).toBeInTheDocument()
 })

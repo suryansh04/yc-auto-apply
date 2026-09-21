@@ -73,7 +73,7 @@ it('shows the label with its rationale', async () => {
     }),
   )
   renderThread(1)
-  expect(await screen.findByText('REJECTED', { selector: '.label-name' })).toBeInTheDocument()
+  expect(await screen.findByText('Not interested', { selector: '.label-name' })).toBeInTheDocument()
   expect(screen.getByText(/explicitly said not looking/)).toBeInTheDocument()
 })
 
@@ -86,7 +86,7 @@ it('corrects a label in one click', async () => {
     }),
   ])
   renderThread(1)
-  await screen.findByText('UNCLEAR', { selector: '.label-name' })
+  await screen.findByText('Unclear', { selector: '.label-name' })
 
   await userEvent.selectOptions(
     screen.getByRole('combobox', { name: /correct label/i }),
@@ -94,7 +94,7 @@ it('corrects a label in one click', async () => {
   )
 
   expect(setLabel).toHaveBeenCalledWith(2, 'INTERESTED')
-  expect(await screen.findByText(/corrected by operator/i)).toBeInTheDocument()
+  expect(await screen.findByText(/you changed this/i)).toBeInTheDocument()
 })
 
 it('shows a 422 from a rejected label correction', async () => {
@@ -104,7 +104,7 @@ it('shows a 422 from a rejected label correction', async () => {
     thread({ messages: [message({ id: 2, direction: 'inbound', body: 'hm', label: 'UNCLEAR' })] }),
   )
   renderThread(1)
-  await screen.findByText('UNCLEAR', { selector: '.label-name' })
+  await screen.findByText('Unclear', { selector: '.label-name' })
 
   await userEvent.selectOptions(
     screen.getByRole('combobox', { name: /correct label/i }),
@@ -114,7 +114,7 @@ it('shows a 422 from a rejected label correction', async () => {
   expect(await screen.findByText(/invalid label: not one of the six/i)).toBeInTheDocument()
   // the rejected correction never happened - the message still shows its
   // original label, not a phantom "INTERESTED"
-  expect(screen.getByText('UNCLEAR', { selector: '.label-name' })).toBeInTheDocument()
+  expect(screen.getByText('Unclear', { selector: '.label-name' })).toBeInTheDocument()
 })
 
 it('links out to the gmail thread', async () => {
@@ -182,7 +182,7 @@ it('posts a correction to the right message id when a thread has several, and in
     }),
   ])
   renderThread(1)
-  await screen.findAllByText('UNCLEAR')
+  await screen.findAllByText('Unclear')
 
   const items = screen.getAllByRole('listitem')
   await userEvent.selectOptions(
@@ -194,7 +194,7 @@ it('posts a correction to the right message id when a thread has several, and in
   expect(setLabel).not.toHaveBeenCalledWith(10, 'REFERRAL')
   // the refetch (invalidation) landed a thread where message 20 (not 10)
   // now carries the corrected label
-  await waitFor(() => expect(screen.getAllByText(/corrected by operator/i)).toHaveLength(1))
+  await waitFor(() => expect(screen.getAllByText(/you changed this/i)).toHaveLength(1))
 })
 
 it('labels an outbound message "Draft" when it has not actually been sent yet', async () => {
@@ -232,7 +232,7 @@ it('shows a not-found state for an unknown thread id rather than crashing', asyn
   // T17-1: QUERY_DEFAULTS.retry never retries a 4xx ApiError, so this
   // resolves on the first failed request - no backoff wait needed (the
   // default findByRole timeout is enough, unlike before T17-1).
-  const link = await screen.findByRole('link', { name: /back to contacts/i })
+  const link = await screen.findByRole('link', { name: /back to founders/i })
   expect(link).toHaveAttribute('href', '/contacts')
   // A dedicated not-found state, not the generic error Banner (which
   // would also happen to contain the words "no such outreach" verbatim,

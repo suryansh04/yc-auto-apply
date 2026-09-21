@@ -41,7 +41,7 @@ it('filters by state without hiding non-hiring companies by default (D19)', asyn
   expect(await screen.findByText('Akash Gupta')).toBeInTheDocument()
   expect(screen.getByText('Priya Singh')).toBeInTheDocument()
 
-  await userEvent.selectOptions(screen.getByLabelText(/^state$/i), 'sent')
+  await userEvent.selectOptions(screen.getByLabelText(/^where it stands$/i), 'sent')
 
   // state narrows nothing here (both rows match), and critically the
   // non-hiring founder is STILL listed - the state filter never touched

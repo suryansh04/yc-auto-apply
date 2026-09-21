@@ -13,10 +13,13 @@ import { Link } from 'react-router-dom'
 import { useContacts } from '../api/hooks'
 import DataTable from '../components/DataTable'
 import Banner from '../components/Banner'
+import { outreachStateLabel } from '../labels'
 
 // OutreachState values (app/domain/states.py), mirrored by hand like
 // Pipeline.jsx's FUNNEL_STATES - there's no endpoint to discover them at
 // runtime.
+// Filter order follows the pipeline's flow; the words come from the
+// shared vocabulary so a row reads the same here as on the Pipeline.
 const OUTREACH_STATES = [
   'new',
   'needs_email',
@@ -46,11 +49,19 @@ const columns = [
     render: (row) => <Link to={`/thread/${row.outreach_id}`}>{row.founder_name}</Link>,
   },
   { key: 'domain', label: 'Domain', accessor: (row) => row.domain ?? '' },
-  { key: 'state', label: 'State', accessor: (row) => row.state },
+  {
+    key: 'state',
+    label: 'Where it stands',
+    accessor: (row) => outreachStateLabel(row.state),
+  },
   { key: 'batch', label: 'Batch', accessor: (row) => row.batch ?? '' },
   { key: 'team_size', label: 'Team size', accessor: (row) => row.team_size ?? 0 },
   { key: 'is_hiring', label: 'Hiring', accessor: (row) => (row.is_hiring ? 'yes' : 'no') },
-  { key: 'email_status', label: 'Email status', accessor: (row) => row.email_status },
+  {
+    key: 'email_status',
+    label: 'Address',
+    accessor: (row) => (row.email_status === 'resolved' ? 'found' : 'not found'),
+  },
 ]
 
 export default function Contacts() {
@@ -70,16 +81,19 @@ export default function Contacts() {
 
   return (
     <div className="contacts">
-      <h1>Contacts</h1>
+      <h1>Founders</h1>
+      <p className="screen-note">
+        Every founder the pipeline knows about, and where each one stands.
+      </p>
 
       <form className="contacts-filters" onSubmit={(event) => event.preventDefault()}>
         <label>
-          State
+          Where it stands
           <select value={state} onChange={(event) => setState(event.target.value)}>
             <option value="">All</option>
-            {OUTREACH_STATES.map((s) => (
-              <option key={s} value={s}>
-                {s}
+            {OUTREACH_STATES.map((value) => (
+              <option key={value} value={value}>
+                {outreachStateLabel(value)}
               </option>
             ))}
           </select>
@@ -100,16 +114,16 @@ export default function Contacts() {
         </label>
 
         <label>
-          Email status
+          Address
           <select value={emailStatus} onChange={(event) => setEmailStatus(event.target.value)}>
             <option value="">All</option>
-            <option value="resolved">Resolved</option>
-            <option value="unresolved">Unresolved</option>
+            <option value="resolved">Found</option>
+            <option value="unresolved">Not found</option>
           </select>
         </label>
       </form>
 
-      {contactsQuery.isLoading && <p>Loading contacts...</p>}
+      {contactsQuery.isLoading && <p className="muted">Loading founders…</p>}
 
       {contactsQuery.isError && (
         <Banner kind="error">Could not load contacts: {contactsQuery.error.message}</Banner>
@@ -117,7 +131,7 @@ export default function Contacts() {
 
       {!contactsQuery.isLoading && !contactsQuery.isError && (
         contacts.length === 0 ? (
-          <p className="empty-state">No contacts match these filters.</p>
+          <p className="empty">No founders match these filters. Widen one of them to see more.</p>
         ) : (
           <DataTable
             columns={columns}

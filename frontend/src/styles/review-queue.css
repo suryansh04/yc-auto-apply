@@ -1,206 +1,293 @@
-/* Task 18: Review Queue screen (draft/source panes, editor, action bar).
-   Two columns (draft ~55%, context ~45%) at >= 900px, stacked below.
-   Tokens and generic control shape live in ../styles.css. */
+/* The review queue: the letter, the evidence beside it, the decision
+   always within reach.
 
-.review-panes {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.5rem;
-  align-items: start;
+   The letter is the hero and gets the only serif on the screen, a real
+   reading measure and generous leading. The docket next to it holds
+   everything you need to judge the letter without leaving it — who it
+   goes to, what it cites, what the checks said. The decision rail is
+   pinned to the bottom of the viewport, because a 250-word letter used
+   to push Approve off the screen and make the operator scroll back up
+   to act on what they had just read. */
+
+.queue-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  margin-bottom: 0.5rem;
 }
 
-@media (min-width: 900px) {
-  .review-panes {
-    grid-template-columns: 55fr 45fr;
+.queue-position {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+/* A hairline that fills as the sitting progresses: the only thing on the
+   screen that says how much work is left. */
+.queue-progress {
+  flex: 1;
+  height: 3px;
+  background: var(--rule-strong);
+  position: relative;
+  min-width: 4rem;
+  max-width: 44rem;
+}
+
+.queue-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 3px;
+  background: var(--accent);
+}
+
+.review-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.1rem;
+  align-items: start;
+  padding-bottom: 4.5rem; /* room for the pinned decision rail */
+}
+
+@media (min-width: 60rem) {
+  .review-layout {
+    grid-template-columns: minmax(0, 1fr) 19rem;
+  }
+
+  .source-pane {
+    position: sticky;
+    top: 1.2rem;
   }
 }
 
 .draft-pane,
 .source-pane {
-  /* Grid items default to min-width: auto, which lets their content
-     (a long URL, an unbroken token) force the pane - and the grid -
-     wider than the viewport. html, body are overflow-x: hidden, so
-     without this the overflow isn't a scrollbar, it's silently
-     clipped text. min-width: 0 lets the pane shrink to the grid
-     track and hand off to overflow-wrap below instead. */
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 1rem;
+}
+
+/* ---- the letter ------------------------------------------------------ */
+
+.draft-pane {
   background: var(--bg-raised);
-}
-
-.queue-counter {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* The most visible things on a flagged draft: the manual-write flag and
-   (below) the validator's own error list. */
-.needs-manual-write {
-  font-weight: 700;
-  color: var(--warn);
-  background: var(--warn-bg);
-  border: 1px solid var(--warn);
-  border-radius: 4px;
-  padding: 0.5rem 0.65rem;
-}
-
-.critic-verdict-NEEDS_REVISION {
-  color: var(--warn);
-  font-weight: 600;
-}
-
-.critic-verdict-PASS {
-  color: var(--ok);
-}
-
-.critic-verdict-ERROR {
-  color: var(--muted);
-  font-style: italic;
-}
-
-.critic-note {
-  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0.5rem;
+  border-radius: 2px;
+  padding: 1.7rem 2rem 2rem;
+  /* The sheet ends where the writing does: 62ch of letter plus its own
+     margins, so the paper never trails off into empty space. */
+  max-width: 46rem;
 }
 
-.draft-meta,
-.founder-details {
+.draft-pane > h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.letter-head {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.15rem 0.75rem;
-  margin: 0.5rem 0 1rem;
+  gap: 0.2rem 0.9rem;
+  margin: 0 0 1.1rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
 }
 
-.draft-meta dd,
-.founder-details dd {
+.letter-head dt {
+  color: var(--muted);
+}
+
+.letter-head dd {
   margin: 0;
 }
 
-.draft-meta dt,
-.founder-details dt {
-  color: var(--muted);
+.letter-subject {
+  font-weight: 600;
 }
 
-/* The composed email: readable, not monospace, line breaks preserved. */
 .wire-text {
+  font-family: var(--letter);
+  font-size: 1.15rem;
+  line-height: 1.62;
+  margin: 0;
   white-space: pre-wrap;
-  /* pre-wrap preserves line breaks but not soft-wrap unbroken words
-     (a long URL in a founder's signature): overflow-wrap lets those
-     break instead of forcing the pane wider than its column. */
   overflow-wrap: anywhere;
-  font-family: inherit;
-  font-size: 0.95rem;
-  line-height: 1.5;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0.75rem;
-}
-
-.cited-source {
-  border-top: 1px solid var(--border);
-  padding-top: 0.5rem;
-}
-
-/* V1 (T18 fix wave 2): a real cited source can run to ~90 lines (the
-   Orangewood launch post). Left uncapped, the source pane grows taller
-   than the draft pane, and since the ActionBar sits below BOTH panes,
-   Approve/Edit/Redraft/Reject/Skip land far outside a 900px viewport -
-   the reviewer can't act without scrolling past the source first.
-   Capping just the source text (not the whole pane - company name,
-   founder/to, and the "Cited source" heading stay visible above the
-   scroll area) keeps the pane's total height bounded regardless of
-   citation length, so the ActionBar renders in the first viewport. */
-.source-text {
-  max-height: 45vh;
-  overflow-y: auto;
-}
-
-.source-kind {
-  color: var(--muted);
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.02em;
-  margin-bottom: 0.15rem;
-}
-
-.source-publication {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.source-text-none {
-  color: var(--muted);
-  font-style: italic;
-}
-
-.company-one-liner {
-  color: var(--muted);
+  max-width: 62ch;
+  color: var(--fg);
 }
 
 .sequence-step-badge {
   display: inline-block;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 3px;
-  padding: 0.1rem 0.4rem;
-  font-size: 0.8rem;
+  margin: 0 0 0.9rem;
+  font-size: 0.78rem;
+  color: var(--warn);
 }
+
+.letter-foot {
+  margin: 1.4rem 0 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.letter-foot.attachment-missing {
+  color: var(--danger);
+}
+
+/* One orchestrated moment: the next letter settles onto the desk after
+   the last one is dealt with. Nothing else on the screen animates. */
+.draft-pane {
+  animation: settle 220ms ease-out;
+}
+
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ---- the docket ------------------------------------------------------ */
+
+.source-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  font-size: 0.85rem;
+}
+
+.source-pane h2 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.company-one-liner {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+}
+
+.founder-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.7rem;
+  margin: 0;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+.founder-details dt {
+  color: var(--muted);
+}
+
+.founder-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cited-source {
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+.source-kind {
+  margin: 0 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.source-text {
+  margin: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.source-text-none {
+  color: var(--muted);
+}
+
+.source-publication {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.critic-note {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--bg);
+  border-left: 3px solid var(--rule-strong);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.critic-note button {
+  display: block;
+  margin-top: 0.45rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+/* ---- the decision rail ----------------------------------------------- */
+
+.action-bar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.7rem max(16px, 3vw);
+  background: var(--bg-raised);
+  border-top: 1px solid var(--rule-strong);
+}
+
+.finishing {
+  color: var(--muted);
+  padding: 2rem 0;
+}
+
+/* ---- the editor ------------------------------------------------------ */
 
 .editor {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 1rem;
-  background: var(--bg-raised);
-  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
 }
 
-.editor-field {
-  margin-bottom: 0.75rem;
+.editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .editor textarea {
+  font-family: var(--letter);
+  font-size: 1.05rem;
+  line-height: 1.6;
+  min-height: 18rem;
   resize: vertical;
 }
 
 .editor-errors {
-  list-style: none;
+  margin: 0;
+  padding-left: 1.1rem;
   color: var(--danger);
-  background: var(--danger-bg);
-  border: 1px solid var(--danger);
-  border-radius: 4px;
-  padding: 0.5rem 0.75rem;
-  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
 }
 
 .editor-actions {
   display: flex;
   gap: 0.5rem;
-}
-
-.action-bar {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.action-bar kbd {
-  margin-left: 0.35rem;
-}
-
-/* The resume that goes out with every send, named under the wire text so
-   the reviewer sees it is part of the message (2026-09-16). */
-.attachment {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin: 0.5rem 0 0;
-}
-
-.attachment-missing {
-  color: var(--warn);
-  font-weight: 700;
 }

@@ -1,18 +1,47 @@
-/* Task 18: Contacts and Manual email screens - shared filter/form row and
-   list styling. Tokens and generic control shape live in ../styles.css. */
+/* Founders and Missing addresses: two dense tables on paper.
+
+   Both screens are lists you scan, so the type stays small and the
+   numerals tabular; the only emphasis is on the column that asks
+   something of you (the address field on Missing addresses). */
 
 .contacts-filters,
-.manual-email-form {
+.manual-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: flex-end;
-  margin-bottom: 1rem;
+  gap: 0.9rem;
+  margin-bottom: 1.1rem;
 }
 
-.manual-email-form {
-  margin-bottom: 0;
+.contacts-filters label,
+.manual-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
 }
+
+.contacts table,
+.manual table {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+}
+
+.contacts .data-table th[aria-sort] {
+  cursor: pointer;
+}
+
+/* Short, fixed vocabularies wrapped onto two lines in every row and
+   doubled the height of the table: where it stands (4), the batch (5)
+   and whether an address was found (8). */
+.contacts .data-table th:nth-child(4),
+.contacts .data-table td:nth-child(4),
+.contacts .data-table th:nth-child(5),
+.contacts .data-table td:nth-child(5),
+.contacts .data-table th:nth-child(8),
+.contacts .data-table td:nth-child(8) {
+  white-space: nowrap;
+}
+
+/* ---- missing addresses ----------------------------------------------- */
 
 .candidate-list {
   color: var(--muted);
@@ -27,41 +56,26 @@
   padding-left: 1rem;
 }
 
-.no-candidates,
-.no-linkedin,
-.no-hint {
-  color: var(--muted);
-}
-
 .published-hint {
   color: var(--ok);
 }
 
-/* V3 (T18 fix wave 2): the Batch column ("Summer 2022", "Winter 2019")
-   wraps onto two lines in every single row of the Contacts table -
-   it's the 5th column (Company, Founder, Domain, State, Batch, ...). */
-.contacts .data-table th:nth-child(5),
-.contacts .data-table td:nth-child(5) {
-  white-space: nowrap;
-}
-
-/* V2 (T18 fix wave 2, verified on a 1280px screenshot): the "Set email"
-   column is the one actionable column in the Manual email table. Laid
-   out in two rows - the input on top, Submit / Give up beneath - so the
-   cell needs only ~13rem and never clips inside `.table-scroll` at a
-   >=1100px viewport; a single nowrap row (input + two buttons) was
-   ~24rem and cut the buttons off at the right edge. */
+/* The one actionable column: the input on top, its two buttons beneath,
+   so the cell needs ~13rem and never clips inside `.table-scroll`. */
 .manual-email-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: flex-end;
   min-width: 13rem;
+  margin-bottom: 0;
 }
 
 .manual-email-form label {
   display: flex;
   flex-direction: column;
-  flex-basis: 100%;
   gap: 0.2rem;
-  font-size: 0.85rem;
-  color: var(--muted);
+  flex-basis: 100%;
 }
 
 .manual-email-form input[type='text'] {

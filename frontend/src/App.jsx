@@ -15,13 +15,14 @@ import ManualEmail from './screens/ManualEmail'
 function App() {
   return (
     <div className="app-shell">
-      <nav className="app-nav">
+      <nav className="app-nav" aria-label="Main">
+        <span className="app-wordmark">Outreach desk</span>
         <NavLink to="/" end>
           Pipeline
         </NavLink>
-        <NavLink to="/queue">Review Queue</NavLink>
-        <NavLink to="/contacts">Contacts</NavLink>
-        <NavLink to="/manual">Manual email</NavLink>
+        <NavLink to="/queue">Review</NavLink>
+        <NavLink to="/contacts">Founders</NavLink>
+        <NavLink to="/manual">Missing addresses</NavLink>
       </nav>
       <main className="app-main">
         <Routes>

@@ -1,34 +1,113 @@
-/* Task 18: Pipeline screen (funnel, exceptions, stage tables, job
-   progress). Tokens and generic table/button shape live in ../styles.css. */
+/* Pipeline: where everyone stands, and the stages you can run by hand.
 
-.stage-group {
-  margin-bottom: 1.5rem;
+   The screen opens with the only number that asks something of the
+   operator — how many letters are waiting on their judgment — because
+   every other count on the page is something the machine will handle by
+   itself. The rest is a quiet ledger. */
+
+.standing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin-bottom: 1.8rem;
+}
+
+.standing-lead,
+.standing-second {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 1.1rem 1.3rem;
+  text-decoration: none;
+  color: inherit;
+  flex: 1 1 14rem;
+}
+
+.standing-lead {
+  border-right: 1px solid var(--border);
+}
+
+.standing-lead strong {
+  font-family: var(--letter);
+  font-size: 2.6rem;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.standing-second strong {
+  font-family: var(--letter);
+  font-size: 1.6rem;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.standing span {
+  color: var(--muted);
+  max-width: 18ch;
+}
+
+.standing-lead:hover strong,
+.standing-second:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.funnel,
+.stages {
+  margin-bottom: 2rem;
+}
+
+.funnel table {
+  max-width: 28rem;
+}
+
+.funnel h3 {
+  margin-top: 1.6rem;
+}
+
+.funnel th[scope='row'] {
+  font-weight: 400;
+}
+
+.funnel .is-action-queue th,
+.funnel .is-action-queue td {
+  font-weight: 600;
+}
+
+.stages h3 {
+  margin-top: 1.4rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.stages table {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
 }
 
 .stage-description {
   color: var(--muted);
-  max-width: 34rem;
+  max-width: 46ch;
 }
 
-tr.is-action-queue th {
-  color: var(--accent);
-  font-weight: 600;
+.job-button {
+  white-space: nowrap;
 }
 
-.job-status-running {
-  color: var(--warn);
-  font-weight: 600;
+.job-progress,
+.job-summary,
+.job-error,
+.job-never {
+  font-size: 0.8rem;
 }
 
-.job-status-failed {
+.job-error {
   color: var(--danger);
-  font-weight: 600;
 }
 
-.job-status-succeeded {
-  color: var(--ok);
-}
-
-.job-status-none {
+.job-never {
   color: var(--muted);
 }

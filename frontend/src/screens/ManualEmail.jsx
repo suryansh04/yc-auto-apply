@@ -72,7 +72,10 @@ function ManualEmailForm({ item }) {
         </p>
       )}
       <label>
-        {`Address for ${item.founder_name}`}
+        {/* The founder's name is already the first column of this row;
+            repeating it here only clipped the cell. The full, unique
+            name stays on the input's aria-label for screen readers. */}
+        New address
         <input
           type="text"
           aria-label={`Address for ${item.founder_name}`}
@@ -136,7 +139,7 @@ export default function ManualEmail() {
   const manualQuery = useManual()
   const items = manualQuery.data ?? []
 
-  if (manualQuery.isLoading) return <p>Loading manual email queue...</p>
+  if (manualQuery.isLoading) return <p>Loading…</p>
 
   if (manualQuery.isError) {
     return <Banner kind="error">Could not load manual queue: {manualQuery.error.message}</Banner>
@@ -145,15 +148,21 @@ export default function ManualEmail() {
   if (items.length === 0) {
     return (
       <div className="manual-email">
-        <h1>Manual email</h1>
-        <p className="empty-state">Nothing needs a manual email right now.</p>
+        <h1>Missing addresses</h1>
+        <p className="empty">
+          Every founder in the pipeline has an address. Nothing to do here.
+        </p>
       </div>
     )
   }
 
   return (
     <div className="manual-email">
-      <h1>Manual email</h1>
+      <h1>Missing addresses</h1>
+      <p className="screen-note">
+        The verifier could not find a working address for these founders. Add one
+        yourself, or give up on a founder to take them out of the queue.
+      </p>
       <DataTable
         columns={columns}
         rows={items}

@@ -280,8 +280,8 @@ export default function ReviewQueue() {
   if (visibleItems.length === 0) {
     return (
       <div className="review-queue">
-        <h1>Review Queue</h1>
-        <p className="finishing-state">Finishing up…</p>
+        <h1>Review queue</h1>
+        <p className="finishing">Nothing left to review. Drafts you approved are waiting to send.</p>
       </div>
     )
   }
@@ -291,12 +291,19 @@ export default function ReviewQueue() {
   // fallback, never expected to render.
   if (!current) return <p>Loading queue...</p>
 
+  const progress = Math.round((position / visibleItems.length) * 100)
+
   return (
     <div className="review-queue">
-      <h1>Review Queue</h1>
-      <p className="queue-counter">
-        {position} of {visibleItems.length}
-      </p>
+      <h1>Review queue</h1>
+      <div className="queue-head">
+        <p className="queue-position">
+          {position} of {visibleItems.length}
+        </p>
+        <div className="queue-progress" aria-hidden="true">
+          <span style={{ width: `${progress}%` }} />
+        </div>
+      </div>
 
       {actionError && <Banner kind="error">{actionError}</Banner>}
 
@@ -312,13 +319,13 @@ export default function ReviewQueue() {
         />
       ) : (
         <>
-          <div className="review-panes">
-            <DraftPane
+          <div className="review-layout">
+            <DraftPane item={current} />
+            <SourcePane
               item={current}
               criticDismissed={dismissedIds.has(current.outreach_id)}
               onDismissCritic={dismissCritic}
             />
-            <SourcePane item={current} />
           </div>
           <ActionBar
             onApprove={handleApprove}

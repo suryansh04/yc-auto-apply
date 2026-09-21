@@ -1,52 +1,81 @@
-/* Task 18: Thread screen - the per-outreach timeline, labels, and the
-   one-select-per-reply correction control. Tokens and generic control
-   shape live in ../styles.css. */
+/* Thread: the whole conversation with one founder, in time order.
+
+   An outbound letter sits on paper like it does in the review queue; a
+   reply is set against the desk and pulled in from the left, so the two
+   sides of the correspondence never blur together. Machine replies
+   (auto-responders, out-of-office) are muted and italic - the operator
+   must never read one as a founder answering. */
 
 .thread-meta {
   color: var(--muted);
+  margin: 0 0 1.4rem;
 }
 
 .message-list {
   list-style: none;
-  margin: 1rem 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
 .message {
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.75rem;
+  padding: 1rem 1.1rem;
+  border-radius: 2px;
 }
 
 .message-outbound {
   background: var(--bg-raised);
+  border: 1px solid var(--border);
+}
+
+.message-inbound {
+  border-left: 3px solid var(--rule-strong);
+  margin-left: 1.5rem;
 }
 
 .message-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.6rem;
   color: var(--muted);
-  font-size: 0.8rem;
-  margin-bottom: 0.35rem;
-}
-
-.message-subject {
-  font-weight: 600;
+  font-size: 0.78rem;
+  margin-bottom: 0.4rem;
 }
 
 .message-direction {
   font-weight: 600;
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+
+.message-subject {
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+
+.message-body {
+  font-family: var(--letter);
+  font-size: 1.05rem;
+  line-height: 1.58;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  max-width: 62ch;
 }
 
 .not-found {
   color: var(--muted);
+}
+
+.label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  font-size: 0.82rem;
 }
 
 .label-none {
@@ -54,30 +83,14 @@
   font-style: italic;
 }
 
-.message-body {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.label {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-  font-size: 0.85rem;
-}
-
 .label-name {
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .label-human .label-name {
-  color: var(--fg);
+  color: var(--ok);
 }
 
-/* Machine labels (AUTO_REPLY, OUT_OF_OFFICE) are muted and italic so they
-   can never be mistaken for a founder's own words. */
 .label-machine .label-name {
   color: var(--muted);
   font-style: italic;
@@ -86,9 +99,9 @@
 .label-machine-tag {
   color: var(--muted);
   font-style: italic;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 2px;
   padding: 0 0.3rem;
 }
 
@@ -100,13 +113,13 @@
 .label-corrected {
   color: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 3px;
+  border-radius: 2px;
   padding: 0 0.3rem;
-  font-size: 0.75rem;
+  font-size: 0.74rem;
 }
 
 .label-correction {
-  margin-top: 0.5rem;
+  margin-top: 0.6rem;
 }
 
 .label-correction label {

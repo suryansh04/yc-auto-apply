@@ -10,32 +10,29 @@
 // right now - a failed job an hour ago with its error is more useful
 // than a screen that goes quiet.
 import { useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { useJobs, useStartJob, useStats } from '../api/hooks'
 import JobButton from '../components/JobButton'
 import Banner from '../components/Banner'
+import { outreachStateLabel } from '../labels'
 
 // Display order follows the pipeline's normal flow. The four states that
 // are exits/exceptions rather than forward progress (unresolved,
 // discarded, bounced, failed) get their own group so a healthy funnel and
 // a pile of exceptions are never mixed into one number.
 const FUNNEL_STATES = [
-  ['new', 'New'],
-  ['needs_email', 'Needs email'],
-  ['needs_manual_email', 'Needs manual email'],
-  ['ready_to_draft', 'Ready to draft'],
-  ['pending_approval', 'Pending approval'],
-  ['approved', 'Approved'],
-  ['sent', 'Sent'],
-  ['replied', 'Replied'],
-  ['closed', 'Closed'],
+  'new',
+  'needs_email',
+  'needs_manual_email',
+  'ready_to_draft',
+  'pending_approval',
+  'approved',
+  'sent',
+  'replied',
+  'closed',
 ]
 
-const EXCEPTION_STATES = [
-  ['unresolved', 'Unresolved'],
-  ['discarded', 'Discarded'],
-  ['bounced', 'Bounced'],
-  ['failed', 'Failed'],
-]
+const EXCEPTION_STATES = ['unresolved', 'discarded', 'bounced', 'failed']
 
 // JOB_KINDS from app/api/jobs.py, mirrored exactly - there's no endpoint
 // to derive this list from, so this array (and the registry test that
@@ -54,46 +51,46 @@ const STAGES = [
     kind: 'sync',
     label: 'Sync',
     group: 'pipeline',
-    description: 'Fetch the current YC company list and upsert it into the database.',
+    description: 'Pull the current YC company list and add anything new.',
   },
   {
     kind: 'scrape',
     label: 'Scrape',
     group: 'pipeline',
-    description: "Scrape each active company's YC page for founders, job postings, news and launches.",
+    description: "Read each company's YC page for founders, jobs, news and launch posts.",
   },
   {
     kind: 'resolve',
     label: 'Resolve',
     group: 'pipeline',
-    description: 'Look up and verify founder email addresses against the daily verifier quota.',
+    description: "Find and verify founder email addresses, within the day's free quota.",
   },
   {
     kind: 'draft',
     label: 'Draft',
     group: 'pipeline',
-    description: 'Draft outreach messages for founders who are ready, with an advisory voice critic.',
+    description: 'Write a letter to every founder who has an address and research to cite.',
   },
   {
     kind: 'poll-replies',
     label: 'Poll replies',
     group: 'reply-loop',
-    description: 'Check the connected Gmail inbox for new replies and bounces to sent outreach.',
+    description: 'Check Gmail for replies and bounces to letters you have sent.',
   },
   {
     kind: 'classify-replies',
     label: 'Classify replies',
     group: 'reply-loop',
     description:
-      'Classify newly polled replies with the LLM: INTERESTED, REJECTED, REFERRAL, AUTO_REPLY, ' +
-      'OUT_OF_OFFICE, or UNCLEAR. Machine replies (auto-reply, out-of-office) never end a ' +
-      "follow-up sequence — only a founder's own words do.",
+      'Sort new replies: interested, not interested, a referral, or an automatic ' +
+      'reply. An out-of-office never counts as an answer, so follow-ups keep going ' +
+      'until a founder actually writes back.',
   },
   {
     kind: 'schedule-follow-ups',
     label: 'Schedule follow-ups',
     group: 'reply-loop',
-    description: 'Schedule or close follow-up messages based on reply classifications and elapsed time.',
+    description: 'Line up follow-ups for silent threads, and close the ones that are done.',
   },
 ]
 
@@ -225,9 +222,15 @@ export default function Pipeline() {
   // running" case) is shown, not swallowed.
   const showStartError = startJob.isError && startJob.error?.status !== 409
 
+  const waiting = counts.pending_approval ?? 0
+  const missingAddresses = counts.needs_manual_email ?? 0
+
   return (
     <div className="pipeline">
       <h1>Pipeline</h1>
+      <p className="screen-note">
+        Where every founder stands, and the stages you can run by hand.
+      </p>
 
       {statsQuery.isError && (
         <Banner kind="error">Could not load stats: {statsQuery.error.message}</Banner>
@@ -242,38 +245,51 @@ export default function Pipeline() {
         </Banner>
       )}
 
+      {/* The one thing this screen exists to tell you: how much is
+          waiting on a decision only you can make. */}
+      <div className="standing sheet">
+        <Link className="standing-lead" to="/queue">
+          <strong>{waiting}</strong>
+          <span>{waiting === 1 ? 'letter waiting for you' : 'letters waiting for you'}</span>
+        </Link>
+        <Link className="standing-second" to="/manual">
+          <strong>{missingAddresses}</strong>
+          <span>founders still need an address</span>
+        </Link>
+      </div>
+
       <section className="funnel">
-        <h2>Funnel</h2>
+        <h2>Everyone else</h2>
         <div className="table-scroll">
-        <table>
-          <tbody>
-            {FUNNEL_STATES.map(([key, label]) => (
-              <tr key={key} className={key === 'needs_manual_email' ? 'is-action-queue' : undefined}>
-                <th scope="row">{label}</th>
-                <td className="count">{counts[key] ?? 0}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          <table>
+            <tbody>
+              {FUNNEL_STATES.map((key) => (
+                <tr key={key} className={key === 'needs_manual_email' ? 'is-action-queue' : undefined}>
+                  <th scope="row">{outreachStateLabel(key)}</th>
+                  <td className="count numeric">{counts[key] ?? 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
-        <h3>Exceptions</h3>
+        <h3>Stuck or finished</h3>
         <div className="table-scroll">
-        <table>
-          <tbody>
-            {EXCEPTION_STATES.map(([key, label]) => (
-              <tr key={key}>
-                <th scope="row">{label}</th>
-                <td className="count">{counts[key] ?? 0}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          <table>
+            <tbody>
+              {EXCEPTION_STATES.map((key) => (
+                <tr key={key}>
+                  <th scope="row">{outreachStateLabel(key)}</th>
+                  <td className="count numeric">{counts[key] ?? 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </section>
 
       <section className="stages">
-        <h2>Stages</h2>
+        <h2>Run a stage</h2>
         {STAGE_GROUPS.map(([groupKey, heading]) => (
           <StageTable
             key={groupKey}

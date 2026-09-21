@@ -80,7 +80,7 @@ export default function DataTable({ columns, rows, getRowKey, defaultSortKey = n
               {column.sortable === false ? (
                 column.label
               ) : (
-                <button type="button" onClick={() => toggleSort(column)}>
+                <button type="button" className="sort-button" onClick={() => toggleSort(column)}>
                   {column.label}
                   {sortKey === column.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
                 </button>

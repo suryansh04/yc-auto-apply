@@ -1,60 +1,84 @@
-/* Task 18: the visual pass over all four screens. Dense and
-   information-first — a tool for reading 270 emails, not a marketing
-   dashboard. Hand-written CSS, system font stack, one accent colour,
-   real tables. No card grids, no gradient headers, no component
-   library's default look. See spec §8 and the task-18 brief.
+/* The proofing desk.
 
-   Every colour the app uses is a token declared here, on bare :root, in
-   the light palette. The dark variant re-declares the same token names
-   inside a prefers-color-scheme media query — a colour is never defined
-   only inside a media query, so the light palette always exists as a
-   complete, working fallback.
+   This tool exists so one person can decide whether a letter to a real
+   founder is true enough to send. So the letter is the only thing on
+   screen that looks like paper: a warm sheet, a serif set at a reading
+   measure, real leading. Everything around it is instrument — slate
+   surface, compact grotesque, tabular numerals — and stays quiet.
 
-   This file holds the tokens, reset, shell/nav, and the controls shared
-   by every screen (buttons, forms, tables, banners). Anything specific
-   to one screen lives in styles/<screen>.css, imported alongside this
-   file from main.jsx, so no single file grows unreadable. */
+   Two typefaces, clearly distinct: Newsreader carries the correspondence,
+   Archivo carries the machinery. No all-caps labels, no decorative
+   gradients, no card grid: structure comes from the sheet edge and the
+   hairline rule, both of which mean something.
+
+   Every colour is a token declared here on bare :root in the light
+   palette; the dark variant re-declares the same names inside the
+   prefers-color-scheme media query, so the light palette is always a
+   complete working fallback. Screen-specific rules live in
+   styles/<screen>.css, imported alongside this file from main.jsx. */
 
 :root {
   color-scheme: light;
 
-  --bg: #ffffff;
-  --bg-raised: #f6f7f9;
-  --fg: #16181c;
-  --muted: #63676f;
-  --accent: #2a5adf;
-  --accent-fg: #ffffff;
-  --border: #d7dade;
-  --danger: #b3261e;
-  --danger-bg: #fdecea;
-  --ok: #1e7d32;
-  --ok-bg: #eaf6ec;
-  --warn: #8a5a00;
-  --warn-bg: #fdf1de;
+  /* The desk and the sheet. */
+  --bg: #d9dcdf;          /* the desk: cool grey, so the warm sheet reads as paper */
+  --bg-raised: #fbfaf6;   /* paper */
+  --fg: #1a2129;          /* ink */
+  --muted: #6a7583;
+  --border: #d8d4ca;      /* the rule, cut into paper */
+  --rule-strong: #b9b3a6;
 
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
+  /* Status, never decoration. */
+  --accent: #1f4f6d;      /* the pen: links, focus, the primary act */
+  --accent-fg: #fbfaf6;
+  --ok: #17594a;          /* checked, verified, sent */
+  --ok-bg: #e4ece8;
+  --warn: #8f5a10;        /* this one needs you */
+  --warn-bg: #f6ecda;
+  --danger: #8c2f22;
+  --danger-bg: #f6e4e0;
+
+  --shell-bg: #202833;    /* the header rail above the desk */
+  --shell-fg: #e7e4dc;
+  --shell-muted: #9aa3ae;
+
+}
+
+/* Typefaces are not part of the palette, so they live outside the block
+   the light/dark parity test walks: Newsreader carries the
+   correspondence, Archivo the machinery. */
+:root {
+  --ui: 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --letter: 'Newsreader', Georgia, 'Times New Roman', serif;
+
+  font-family: var(--ui);
   font-size: 14px;
-  line-height: 1.35;
+  line-height: 1.45;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
 
-    --bg: #14161a;
-    --bg-raised: #1c1f24;
-    --fg: #e7e8ea;
-    --muted: #9a9ea6;
-    --accent: #7ea0ff;
-    --accent-fg: #0c1220;
-    --border: #33363c;
-    --danger: #ff8a80;
-    --danger-bg: #3a1613;
-    --ok: #7ddb92;
-    --ok-bg: #12301a;
-    --warn: #e3ac4e;
-    --warn-bg: #3a2b0c;
+    --bg: #161c24;
+    --bg-raised: #1e252e;
+    --fg: #e4e2dc;
+    --muted: #97a1ad;
+    --border: #2f3843;
+    --rule-strong: #46515e;
+
+    --accent: #8ec1e0;
+    --accent-fg: #10161d;
+    --ok: #7fc9b2;
+    --ok-bg: #15302a;
+    --warn: #e0ab5c;
+    --warn-bg: #33270f;
+    --danger: #e99384;
+    --danger-bg: #331915;
+
+    --shell-bg: #10161d;
+    --shell-fg: #e4e2dc;
+    --shell-muted: #8b95a1;
   }
 }
 
@@ -74,40 +98,168 @@ body {
 body {
   background: var(--bg);
   color: var(--fg);
+  -webkit-font-smoothing: antialiased;
 }
 
-h1,
-h2,
-h3 {
-  line-height: 1.2;
-  margin: 0 0 0.5rem;
+/* ---- shell ----------------------------------------------------------- */
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
+
+.app-nav {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  padding-inline: 16px;
+  padding-block: 0.7rem;
+  background: var(--shell-bg);
+  color: var(--shell-fg);
+}
+
+.app-wordmark {
+  font-family: var(--letter);
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  margin-right: auto;
+  color: var(--shell-fg);
+}
+
+.app-nav a {
+  color: var(--shell-muted);
+  text-decoration: none;
+  font-size: 0.86rem;
+  font-weight: 500;
+  padding-block: 0.15rem;
+  border-bottom: 2px solid transparent;
+}
+
+.app-nav a:hover {
+  color: var(--shell-fg);
+}
+
+.app-nav a.active {
+  color: var(--shell-fg);
+  border-bottom-color: var(--shell-fg);
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: 68rem;
+  margin: 0 auto;
+  padding-inline: 16px;
+  padding-block: 1.6rem 3rem;
+}
+
+@media (min-width: 640px) {
+  .app-nav,
+  .app-main {
+    padding-inline: max(16px, 3vw);
+  }
+}
+
+/* ---- headings -------------------------------------------------------- */
 
 h1 {
-  font-size: 1.35rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 0 0 0.15rem;
 }
 
 h2 {
-  font-size: 1.05rem;
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.6rem;
 }
 
 h3 {
-  font-size: 0.95rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-size: 0.86rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
 }
 
-p {
-  margin: 0 0 0.5rem;
+.screen-note {
+  color: var(--muted);
+  margin: 0 0 1.4rem;
+  max-width: 60ch;
+}
+
+/* A sheet of paper on the desk. Everything that holds content sits on
+   one; nothing else gets a border or a shadow. */
+.sheet {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 2px;
 }
 
 a {
   color: var(--accent);
 }
 
-a:visited {
-  color: var(--accent);
+/* ---- controls -------------------------------------------------------- */
+
+button {
+  font-family: var(--ui);
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.2;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--fg);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+button kbd {
+  font-family: var(--ui);
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.28rem;
+  border-radius: 2px;
+  background: rgb(0 0 0 / 0.08);
+}
+
+button.primary kbd {
+  background: rgb(255 255 255 / 0.18);
+}
+
+input[type='text'],
+select,
+textarea {
+  font-family: var(--ui);
+  font-size: 1rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+
+label {
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
 :focus-visible {
@@ -115,125 +267,7 @@ a:visited {
   outline-offset: 2px;
 }
 
-/* ---- shell ---------------------------------------------------------- */
-
-.app-shell {
-  padding-inline: 16px;
-  max-width: 72rem;
-  margin: 0 auto;
-}
-
-@media (min-width: 640px) {
-  .app-shell {
-    padding-inline: max(16px, 4vw);
-  }
-}
-
-.app-nav {
-  display: flex;
-  gap: 1.25rem;
-  padding: 0.85rem 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 1.25rem;
-}
-
-.app-nav a {
-  color: var(--muted);
-  text-decoration: none;
-  font-weight: 500;
-  padding-bottom: 0.2rem;
-  border-bottom: 2px solid transparent;
-}
-
-.app-nav a:hover {
-  color: var(--fg);
-}
-
-.app-nav a.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-.app-main {
-  padding-bottom: 3rem;
-}
-
-/* ---- buttons, forms, misc controls ----------------------------------- */
-
-button {
-  font: inherit;
-  font-size: 1rem;
-  color: var(--fg);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0.3rem 0.65rem;
-  cursor: pointer;
-}
-
-button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Primary actions: the review queue's Approve, and job-starting buttons -
-   the accent used on a button, not just on links and the active nav
-   item. */
-.action-bar button:first-child,
-.job-button {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
-}
-
-.action-bar button:first-child:disabled,
-.job-button:disabled {
-  background: var(--bg-raised);
-  color: var(--muted);
-  border-color: var(--border);
-}
-
-input[type='text'],
-select,
-textarea {
-  font: inherit;
-  /* `font: inherit` above pulls in the *computed* font-size of whatever
-     element the control sits in - and every control in this app is
-     nested inside a label (whose own rule, below, sets 0.85rem).
-     `rem` is always relative to the root font-size (14px, set on :root),
-     never to the immediate parent, so this line overrides that inherited
-     0.85rem back to the app's 14px base regardless of nesting. */
-  font-size: 1rem;
-  color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0.3rem 0.5rem;
-}
-
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-kbd {
-  font-family: inherit;
-  font-size: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 0 0.3rem;
-  background: var(--bg-raised);
-  color: var(--muted);
-}
-
-/* ---- tables (shared shape; per-screen files add specifics) ------------ */
+/* ---- tables ---------------------------------------------------------- */
 
 .table-scroll {
   overflow-x: auto;
@@ -242,53 +276,91 @@ kbd {
 table {
   border-collapse: collapse;
   width: 100%;
-  margin-bottom: 1.5rem;
+  font-variant-numeric: tabular-nums;
 }
 
 th,
 td {
-  padding: 0.3rem 0.6rem;
+  padding: 0.5rem 0.7rem;
   text-align: left;
   vertical-align: top;
-}
-
-thead th {
-  border-bottom: 1px solid var(--fg);
-  font-weight: 600;
-  color: var(--muted);
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-
-tbody tr {
   border-bottom: 1px solid var(--border);
 }
 
-td.count {
+thead th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--rule-strong);
+  white-space: nowrap;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+td.numeric,
+th.numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.data-table th button {
-  background: none;
+/* A sortable column header is still a header: it reads as a label and
+   only shows it is pressable on hover and focus. */
+.sort-button {
   border: none;
+  background: none;
   padding: 0;
   font: inherit;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: inherit;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  color: var(--muted);
   cursor: pointer;
 }
 
-/* ---- banners ------------------------------------------------------------ */
+.sort-button:hover {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---- status ---------------------------------------------------------- */
+
+/* One shape for "here is a fact about this item you should not miss":
+   a coloured left edge, the label, the detail. Used for critic verdicts,
+   attachment state, job failures. */
+.mark {
+  display: flex;
+  gap: 0.55rem;
+  align-items: baseline;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.mark-ok {
+  border-left-color: var(--ok);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.mark-warn {
+  border-left-color: var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+.mark-danger {
+  border-left-color: var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
 
 .banner {
-  padding: 0.5rem 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border-left: 3px solid var(--border);
   margin-bottom: 1rem;
-  border-left: 3px solid var(--accent);
-  background: var(--bg-raised);
+  font-size: 0.86rem;
 }
 
 .banner-error {
@@ -297,16 +369,33 @@ td.count {
   color: var(--danger);
 }
 
-.field-error {
-  color: var(--danger);
-  background: var(--danger-bg);
-  border: 1px solid var(--danger);
-  border-radius: 4px;
-  padding: 0.5rem 0.75rem;
-  margin: 0 0 0.75rem;
+.banner-info {
+  border-left-color: var(--accent);
+  background: var(--bg-raised);
 }
 
-.empty-state,
-.finishing-state {
+.field-error {
+  color: var(--danger);
+  font-size: 0.82rem;
+  margin: 0.3rem 0;
+}
+
+.muted {
   color: var(--muted);
+}
+
+.empty {
+  color: var(--muted);
+  padding: 2.5rem 0;
+  max-width: 48ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

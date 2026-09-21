@@ -19,18 +19,30 @@ import Banner from '../components/Banner'
 const LABELS = ['INTERESTED', 'REJECTED', 'REFERRAL', 'AUTO_REPLY', 'OUT_OF_OFFICE', 'UNCLEAR']
 const MACHINE_LABELS = new Set(['AUTO_REPLY', 'OUT_OF_OFFICE'])
 
+// The value sent to the backend is the label; the text on screen is what
+// the reply actually was. Shouting INTERESTED at the operator tells them
+// nothing the sentence case doesn't.
+const LABEL_TEXT = {
+  INTERESTED: 'Interested',
+  REJECTED: 'Not interested',
+  REFERRAL: 'Referred me on',
+  AUTO_REPLY: 'Automatic reply',
+  OUT_OF_OFFICE: 'Out of office',
+  UNCLEAR: 'Unclear',
+}
+
 function LabelBadge({ label, confidence, rationale, corrected }) {
-  if (!label) return <span className="label label-none">not yet classified</span>
+  if (!label) return <span className="label label-none">Not sorted yet</span>
   const machine = MACHINE_LABELS.has(label)
   return (
     <div className={machine ? 'label label-machine' : 'label label-human'}>
-      <span className="label-name">{label}</span>
+      <span className="label-name">{LABEL_TEXT[label] ?? label}</span>
       {machine && <span className="label-machine-tag">automated</span>}
       {confidence != null && (
         <span className="label-confidence">confidence {Math.round(confidence * 100)}%</span>
       )}
       {rationale && <span className="label-rationale">{rationale}</span>}
-      {corrected && <span className="label-corrected">corrected by operator</span>}
+      {corrected && <span className="label-corrected">you changed this</span>}
     </div>
   )
 }
@@ -126,14 +138,14 @@ export default function Thread() {
   const threadQuery = useThread(outreachId)
   const setLabel = useSetLabel()
 
-  if (threadQuery.isLoading) return <p>Loading thread...</p>
+  if (threadQuery.isLoading) return <p className="muted">Loading…</p>
 
   if (threadQuery.isError) {
     if (threadQuery.error?.status === 404) {
       return (
         <div className="thread">
-          <p className="not-found">No such outreach thread.</p>
-          <Link to="/contacts">Back to contacts</Link>
+          <p className="not-found">That conversation does not exist.</p>
+          <Link to="/contacts">Back to founders</Link>
         </div>
       )
     }

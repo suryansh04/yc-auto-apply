@@ -266,3 +266,17 @@ it('does not show the gmail-auth banner for a poll-replies job that is still run
   expect(await screen.findByText(/running/)).toBeInTheDocument()
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
+
+it('draws both funnel groups on one scale', async () => {
+  // Scaling each group to its own largest bar made a count of 1 in the
+  // exceptions group as wide as 162 in the main one: two charts under
+  // one heading are read as one picture, so a bar's length has to mean
+  // the same thing in both.
+  mockStats({ counts: { new: 100, discarded: 1 } })
+  mockJobs([])
+  render(<Pipeline />)
+  const biggest = await screen.findByTitle('Not started: 100')
+  const smallest = screen.getByTitle('Discarded: 1')
+  expect(biggest.firstChild.style.width).toBe('100%')
+  expect(smallest.firstChild.style.width).toBe('1%')
+})

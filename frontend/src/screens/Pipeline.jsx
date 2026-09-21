@@ -14,7 +14,7 @@ import { Link } from 'react-router-dom'
 import { useJobs, useStartJob, useStats } from '../api/hooks'
 import JobButton from '../components/JobButton'
 import Banner from '../components/Banner'
-import { outreachStateLabel } from '../labels'
+import FunnelChart from '../components/FunnelChart'
 
 // Display order follows the pipeline's normal flow. The four states that
 // are exits/exceptions rather than forward progress (unresolved,
@@ -222,6 +222,12 @@ export default function Pipeline() {
   // running" case) is shown, not swallowed.
   const showStartError = startJob.isError && startJob.error?.status !== 409
 
+  // One scale for both charts below: they sit under one heading and are
+  // read as one picture of the pipeline.
+  const funnelScale = Math.max(
+    ...[...FUNNEL_STATES, ...EXCEPTION_STATES].map((state) => counts[state] ?? 0),
+    1,
+  )
   const waiting = counts.pending_approval ?? 0
   const missingAddresses = counts.needs_manual_email ?? 0
 
@@ -260,32 +266,17 @@ export default function Pipeline() {
 
       <section className="funnel">
         <h2>Everyone else</h2>
-        <div className="table-scroll">
-          <table>
-            <tbody>
-              {FUNNEL_STATES.map((key) => (
-                <tr key={key} className={key === 'needs_manual_email' ? 'is-action-queue' : undefined}>
-                  <th scope="row">{outreachStateLabel(key)}</th>
-                  <td className="count numeric">{counts[key] ?? 0}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <FunnelChart
+          counts={counts}
+          states={FUNNEL_STATES}
+          max={funnelScale}
+          linkFor={(state) =>
+            ({ needs_manual_email: '/manual', pending_approval: '/queue' })[state]
+          }
+        />
 
         <h3>Stuck or finished</h3>
-        <div className="table-scroll">
-          <table>
-            <tbody>
-              {EXCEPTION_STATES.map((key) => (
-                <tr key={key}>
-                  <th scope="row">{outreachStateLabel(key)}</th>
-                  <td className="count numeric">{counts[key] ?? 0}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <FunnelChart counts={counts} states={EXCEPTION_STATES} max={funnelScale} />
       </section>
 
       <section className="stages">

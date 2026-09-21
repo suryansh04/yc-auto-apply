@@ -31,6 +31,7 @@ class _Creds:
 class _Flow:
     def __init__(self, granted):
         self.credentials = _Creds(granted)
+        self.code_verifier = None
 
     def fetch_token(self, code):
         pass
@@ -57,3 +58,12 @@ def test_a_missing_scope_is_rejected_even_though_ordering_is_relaxed(monkeypatch
         assert "readonly" in str(exc)
     else:
         raise AssertionError("a consent missing the read scope must not be accepted")
+
+
+def test_the_verifier_is_handed_to_the_flow_before_the_exchange(monkeypatch):
+    # Without it Google answers "invalid_grant: Missing code verifier".
+    flow = _Flow(list(GMAIL_SCOPES))
+    oauth = GoogleOAuthFlow("unused.json", "http://127.0.0.1:8000/api/gmail/callback")
+    monkeypatch.setattr(oauth, "_flow", lambda: flow)
+    oauth.exchange_code("code", "the-verifier")
+    assert flow.code_verifier == "the-verifier"

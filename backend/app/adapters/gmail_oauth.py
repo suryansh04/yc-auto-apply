@@ -37,6 +37,22 @@ GMAIL_SCOPES = [
 
 
 @dataclass(frozen=True)
+class AuthorizationRequest:
+    """Where to send the browser, plus the PKCE verifier that has to come
+    back to `exchange_code` for the same round trip.
+
+    Live finding (2026-09-21): a fresh `Flow` is built per request (so a
+    rotated client-secrets file takes effect without a restart), and the
+    verifier `authorization_url` generates lives on that object. Google
+    then answers the exchange with `invalid_grant: Missing code
+    verifier`. The caller holds it between the two requests instead - in
+    process memory, alongside the state, never in the browser."""
+
+    url: str
+    code_verifier: str
+
+
+@dataclass(frozen=True)
 class GmailTokens:
     """What the router needs to persist. Deliberately not the whole
     credentials object: no access token, no client secret, no id token."""
@@ -77,8 +93,9 @@ class GoogleOAuthFlow:
         flow.redirect_uri = self._redirect_uri
         return flow
 
-    def authorization_url(self, state: str) -> str:
-        url, _ = self._flow().authorization_url(
+    def authorization_url(self, state: str) -> AuthorizationRequest:
+        flow = self._flow()
+        url, _ = flow.authorization_url(
             # `offline` is what makes Google mint a refresh token at all;
             # `consent` forces the screen even when the account already
             # granted these scopes, which is the only way to get a second
@@ -88,10 +105,14 @@ class GoogleOAuthFlow:
             include_granted_scopes="true",
             state=state,
         )
-        return url
+        return AuthorizationRequest(url=url, code_verifier=flow.code_verifier)
 
-    def exchange_code(self, code: str) -> GmailTokens:
+    def exchange_code(self, code: str, code_verifier: str | None = None) -> GmailTokens:
         flow = self._flow()
+        # PKCE: the same verifier the consent URL was built with, or
+        # Google rejects the exchange with "Missing code verifier".
+        if code_verifier:
+            flow.code_verifier = code_verifier
         with _relaxed_scope_order():
             flow.fetch_token(code=code)
         creds = flow.credentials

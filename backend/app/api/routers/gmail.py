@@ -86,8 +86,12 @@ def gmail_connect(request: Request) -> GmailConnectOut:
     # that anything on this machine could hit, so a code only counts if
     # it comes back with a state this process minted and has not spent.
     state = secrets.token_urlsafe(32)
-    request.app.state.gmail_oauth_states[state] = time.monotonic()
-    return GmailConnectOut(auth_url=_oauth_flow(request, settings).authorization_url(state))
+    authorization = _oauth_flow(request, settings).authorization_url(state)
+    # The PKCE verifier belongs to this round trip and to this process:
+    # held next to the state, handed to the exchange, never sent to the
+    # browser and never written down.
+    request.app.state.gmail_oauth_states[state] = (time.monotonic(), authorization.code_verifier)
+    return GmailConnectOut(auth_url=authorization.url)
 
 
 @router.get("/gmail/callback", name="gmail_callback")
@@ -110,15 +114,16 @@ def gmail_callback(
     if error:
         return back("cancelled")
 
-    issued_at = request.app.state.gmail_oauth_states.pop(state, None) if state else None
-    if issued_at is None or (time.monotonic() - issued_at) > STATE_TTL_SECONDS:
+    pending = request.app.state.gmail_oauth_states.pop(state, None) if state else None
+    if pending is None or (time.monotonic() - pending[0]) > STATE_TTL_SECONDS:
         return back("expired")
+    code_verifier = pending[1]
     if not code:
         return back("failed")
 
     settings = get_operator_settings()
     try:
-        tokens = _oauth_flow(request, settings).exchange_code(code)
+        tokens = _oauth_flow(request, settings).exchange_code(code, code_verifier)
     except NoRefreshToken:
         return back("no-refresh-token")
     except MissingScope as exc:

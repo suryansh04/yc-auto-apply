@@ -8,7 +8,13 @@ a network call.
 
 import pytest
 
-from app.adapters.gmail_oauth import GMAIL_SCOPES, GmailTokens, MissingScope, NoRefreshToken
+from app.adapters.gmail_oauth import (
+    GMAIL_SCOPES,
+    AuthorizationRequest,
+    GmailTokens,
+    MissingScope,
+    NoRefreshToken,
+)
 from app.config import Settings, get_operator_settings
 
 SENDER = "operator@example.com"
@@ -27,14 +33,19 @@ class FakeFlow:
         self._raises = raises
         self.states: list[str] = []
         self.codes: list[str] = []
+        self.verifiers: list[str | None] = []
         self.redirect_uris: list[str] = []
 
     def authorization_url(self, state):
         self.states.append(state)
-        return f"https://accounts.google.com/o/oauth2/auth?state={state}"
+        return AuthorizationRequest(
+            url=f"https://accounts.google.com/o/oauth2/auth?state={state}",
+            code_verifier=f"verifier-for-{state}",
+        )
 
-    def exchange_code(self, code):
+    def exchange_code(self, code, code_verifier=None):
         self.codes.append(code)
+        self.verifiers.append(code_verifier)
         if self._raises:
             raise self._raises
         return self._tokens
@@ -226,3 +237,18 @@ def test_callback_reports_a_partly_granted_consent_as_its_own_outcome(gmail_clie
     response = _connect_then_callback(client, flow)
     assert response.headers["location"].endswith("gmail=missing-scope")
     assert repos.credential.get_by_account_email(SENDER) is None
+
+
+def test_the_pkce_verifier_from_connect_reaches_the_exchange(gmail_client):
+    # Google answers "invalid_grant: Missing code verifier" otherwise: the
+    # verifier is generated while building the consent URL and a fresh
+    # flow object is built per request, so it has to be carried across.
+    client, flow = gmail_client
+    _connect_then_callback(client, flow)
+    assert flow.verifiers == [f"verifier-for-{flow.states[-1]}"]
+
+
+def test_the_pkce_verifier_is_never_sent_to_the_browser(gmail_client):
+    client, flow = gmail_client
+    body = client.post("/api/gmail/connect").text
+    assert "verifier-for-" not in body

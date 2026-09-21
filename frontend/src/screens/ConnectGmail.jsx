@@ -26,9 +26,17 @@ const OUTCOMES = {
       'Google did not issue a new token because this account has already granted ' +
       'access. Remove “YC Auto Apply” at myaccount.google.com/permissions, then connect again.',
   },
+  'missing-scope': {
+    tone: 'danger',
+    text:
+      'One of the two permissions was left unticked on Google’s screen. Both are ' +
+      'needed: sending, and reading mail to find replies. Connect again and allow both.',
+  },
   failed: {
     tone: 'danger',
-    text: 'Google refused the connection. Check the client secrets file, then try again.',
+    text:
+      'Google refused the connection. The reason is in the API’s terminal output; ' +
+      'check the client secrets file, then try again.',
   },
 }
 

@@ -8,7 +8,7 @@ a network call.
 
 import pytest
 
-from app.adapters.gmail_oauth import GMAIL_SCOPES, GmailTokens, NoRefreshToken
+from app.adapters.gmail_oauth import GMAIL_SCOPES, GmailTokens, MissingScope, NoRefreshToken
 from app.config import Settings, get_operator_settings
 
 SENDER = "operator@example.com"
@@ -215,3 +215,14 @@ def test_the_authorisation_code_is_never_echoed_back_to_the_browser(gmail_client
     client, flow = gmail_client
     response = _connect_then_callback(client, flow)
     assert "auth-code" not in response.headers["location"]
+
+
+def test_callback_reports_a_partly_granted_consent_as_its_own_outcome(gmail_client, repos):
+    # Google's screen lets each permission be unticked. A token missing
+    # the read scope would send mail and then fail every poll, so it is
+    # never stored.
+    client, flow = gmail_client
+    flow._raises = MissingScope("https://www.googleapis.com/auth/gmail.readonly")
+    response = _connect_then_callback(client, flow)
+    assert response.headers["location"].endswith("gmail=missing-scope")
+    assert repos.credential.get_by_account_email(SENDER) is None

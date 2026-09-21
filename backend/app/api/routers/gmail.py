@@ -21,16 +21,19 @@ for the same reason job rows do (spec §9).
 
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from app.adapters.gmail_oauth import GMAIL_SCOPES, NoRefreshToken
+from app.adapters.gmail_oauth import GMAIL_SCOPES, MissingScope, NoRefreshToken
 from app.api.deps import Repos, get_repos, require_gmail_config
 from app.api.schemas import GmailConnectOut, GmailStatusOut
 from app.config import get_operator_settings
+
+logger = logging.getLogger("app.api")
 
 router = APIRouter(tags=["gmail"])
 
@@ -118,7 +121,14 @@ def gmail_callback(
         tokens = _oauth_flow(request, settings).exchange_code(code)
     except NoRefreshToken:
         return back("no-refresh-token")
+    except MissingScope as exc:
+        logger.warning("gmail connect: consent granted without %s", exc)
+        return back("missing-scope")
     except Exception:  # noqa: BLE001 - the browser gets an outcome, the log gets the trace
+        # The browser is told only that it failed (Google's message can
+        # name client details), but an operator staring at that needs the
+        # reason to be somewhere, and this is a local single-user log.
+        logger.exception("gmail connect: token exchange failed")
         return back("failed")
 
     repos.credential.upsert(

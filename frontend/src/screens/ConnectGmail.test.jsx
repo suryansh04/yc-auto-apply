@@ -141,3 +141,9 @@ it('says the API is down rather than asking for Gmail when status cannot be fetc
     await screen.findByRole('heading', { name: /api is not answering/i }, { timeout: 4000 }),
   ).toBeInTheDocument()
 })
+
+it('explains a consent where one permission was left unticked', async () => {
+  mockStatus(NOT_CONNECTED)
+  render('/?gmail=missing-scope')
+  expect(await screen.findByRole('alert')).toHaveTextContent(/left unticked/i)
+})

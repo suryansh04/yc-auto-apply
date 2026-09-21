@@ -227,3 +227,20 @@ class ContactOut(BaseModel):
     is_hiring: bool = False
     resolved_email: str | None = None
     email_status: str
+
+
+class GmailStatusOut(BaseModel):
+    """What the UI gates on before showing the dashboard. Deliberately
+    says nothing about the token itself - only whether one exists, for
+    which account (which the operator configured), and whether it covers
+    the read scope the reply poller needs."""
+
+    configured: bool
+    missing_config: list[str] = []
+    connected: bool
+    account: str | None = None
+    can_read_replies: bool = False
+
+
+class GmailConnectOut(BaseModel):
+    auth_url: str

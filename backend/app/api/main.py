@@ -11,11 +11,19 @@ from fastapi.responses import JSONResponse
 
 from app.api import jobs as jobs_module
 from app.api.deps import get_repos, real_repos
-from app.api.routers import contacts, jobs, manual, queue, send, stats, thread
+from app.api.routers import contacts, gmail, jobs, manual, queue, send, stats, thread
 
 ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 logger = logging.getLogger("app.api")
+
+
+def _default_gmail_oauth_factory(settings, redirect_uri: str):
+    """Production flow. Imported lazily so the offline suite never needs
+    `google_auth_oauthlib` installed to build an app."""
+    from app.adapters.gmail_oauth import GoogleOAuthFlow
+
+    return GoogleOAuthFlow(settings.gmail_client_secrets_path, redirect_uri)
 
 
 @asynccontextmanager
@@ -28,7 +36,8 @@ async def _lifespan(app: FastAPI):
     yield
 
 
-def create_app(repos_factory=None, job_session_factory=None, job_runner_factory=None) -> FastAPI:
+def create_app(repos_factory=None, job_session_factory=None, job_runner_factory=None,
+               gmail_oauth_factory=None) -> FastAPI:
     app = FastAPI(
         title="YC Auto Apply", docs_url="/api/docs", openapi_url="/api/openapi.json",
         lifespan=_lifespan,
@@ -53,6 +62,15 @@ def create_app(repos_factory=None, job_session_factory=None, job_runner_factory=
     app.dependency_overrides[jobs.get_job_session_factory] = lambda: app.state.job_session_factory
     app.dependency_overrides[jobs.get_job_runner_factory] = lambda: app.state.job_runner_factory
 
+    # The Google consent flow, on the same kind of seam: the offline
+    # suite exercises connect/callback with a fake that needs no browser,
+    # no client-secrets file and no network. `gmail_oauth_states` holds
+    # the one-shot CSRF states minted by POST /api/gmail/connect - in
+    # process memory on purpose, so restarting the API invalidates any
+    # consent link that is still open in a stale tab.
+    app.state.gmail_oauth_factory = gmail_oauth_factory or _default_gmail_oauth_factory
+    app.state.gmail_oauth_states = {}
+
     app.include_router(stats.router, prefix="/api")
     app.include_router(queue.router, prefix="/api")
     app.include_router(manual.router, prefix="/api")
@@ -60,6 +78,7 @@ def create_app(repos_factory=None, job_session_factory=None, job_runner_factory=
     app.include_router(contacts.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
     app.include_router(thread.router, prefix="/api")
+    app.include_router(gmail.router, prefix="/api")
 
     @app.exception_handler(Exception)
     async def _unhandled_exception(request: Request, exc: Exception) -> JSONResponse:

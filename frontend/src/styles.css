@@ -399,3 +399,53 @@ th.numeric {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- the connect gate ------------------------------------------------ */
+
+/* The first screen anyone sees, and the only one that is a single column
+   of prose: one decision, stated plainly, with nothing else competing. */
+.connect {
+  max-width: 38rem;
+  padding: 2.5rem 0;
+}
+
+.connect-missing {
+  margin: 0 0 1.4rem;
+  padding-left: 1.1rem;
+  color: var(--danger);
+}
+
+.connect-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  margin: 1.4rem 0 1.6rem;
+  padding: 1rem 1.1rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-size: 0.88rem;
+}
+
+.connect-details dt {
+  color: var(--muted);
+}
+
+.connect-details dd {
+  margin: 0;
+}
+
+.connect-button {
+  font-size: 0.95rem;
+  padding: 0.6rem 1.1rem;
+}
+
+.connect-footnote {
+  margin-top: 1.6rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.connect .mark {
+  margin-bottom: 1.4rem;
+}

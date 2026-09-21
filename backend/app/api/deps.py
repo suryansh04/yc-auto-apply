@@ -43,6 +43,11 @@ class Repos:
     # built before Task 10; `ClassifyReply` already falls back cleanly when
     # it is.
     settings: Any = None
+    # The stored Gmail refresh token (`gmail_credentials`). The Gmail
+    # connect flow both reads it (is this account authorised?) and writes
+    # it (consent came back), so it belongs on the bundle like every
+    # other repo rather than being constructed inside the router.
+    credential: Any = None
     # Task 5: a pre-built `MailSender`, present only when a caller injected
     # one (the test harness's `fake_sender` fixture). `None` in production -
     # `app.api.routers.send` builds a real `GmailSender` itself, gated by
@@ -82,6 +87,7 @@ def real_repos(session_factory: Callable[[], Session] = _session) -> Iterator[Re
         CompanyRepo,
         EmailCandidateRepo,
         FounderRepo,
+    GmailCredentialRepo,
         JobPostingRepo,
         JobRepo,
         MessageRepo,
@@ -105,6 +111,7 @@ def real_repos(session_factory: Callable[[], Session] = _session) -> Iterator[Re
             job=JobRepo(session),
             session=session,
             settings=SettingsRepo(session),
+            credential=GmailCredentialRepo(session),
         )
     finally:
         session.close()

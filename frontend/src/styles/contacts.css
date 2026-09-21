@@ -23,10 +23,29 @@
 .manual table {
   background: var(--bg-raised);
   border: 1px solid var(--border);
+  /* Eight columns never fit a phone. The table keeps a legible
+     minimum and `.table-scroll` scrolls it, rather than squeezing
+     every cell to one word per line. */
+  min-width: 40rem;
 }
 
 .contacts .data-table th[aria-sort] {
   cursor: pointer;
+}
+
+/* Spare width goes to the columns that actually hold long values.
+   Left to itself the table handed most of it to Company, which left a
+   hand's width of nothing between a company and its founder. Only once
+   there is spare width to give: below that these are minimums the
+   table cannot meet, and it scrolls sideways instead. */
+@media (min-width: 52rem) {
+  .contacts .data-table th:nth-child(1) {
+    width: 15rem;
+  }
+
+  .contacts .data-table th:nth-child(2) {
+    width: 13rem;
+  }
 }
 
 /* Short, fixed vocabularies wrapped onto two lines in every row and
@@ -42,6 +61,18 @@
 }
 
 /* ---- missing addresses ----------------------------------------------- */
+
+/* Same reason as the founders table: spare width to the columns that
+   need it, so a two-word name stays on one line. */
+@media (min-width: 52rem) {
+  .manual .data-table th:nth-child(1) {
+    width: 11rem;
+  }
+
+  .manual .data-table th:nth-child(2) {
+    width: 13rem;
+  }
+}
 
 .candidate-list {
   color: var(--muted);
@@ -60,22 +91,21 @@
   color: var(--ok);
 }
 
-/* The one actionable column: the input on top, its two buttons beneath,
-   so the cell needs ~13rem and never clips inside `.table-scroll`. */
+/* The one actionable column: the input and its two buttons on a single
+   line, so a row is one line tall. Stacked, the cell was three lines and
+   every other cell in the row sat in a tall empty box. */
 .manual-email-form {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  align-items: flex-end;
-  min-width: 13rem;
+  align-items: center;
+  min-width: 24rem;
   margin-bottom: 0;
 }
 
-.manual-email-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+.manual-email-form .field-error {
   flex-basis: 100%;
+  margin: 0;
 }
 
 .manual-email-form input[type='text'] {

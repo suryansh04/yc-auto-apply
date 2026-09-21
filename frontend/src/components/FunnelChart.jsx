@@ -40,6 +40,7 @@ export default function FunnelChart({ counts, states, linkFor, max }) {
               <span
                 className="funnel-bar"
                 style={{ width: `${(value / scale) * 100}%` }}
+                data-empty={value === 0 ? 'true' : 'false'}
                 aria-hidden="true"
               />
             </span>

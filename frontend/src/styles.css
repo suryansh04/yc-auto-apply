@@ -159,7 +159,8 @@ body {
   padding: 0.6rem 0.5rem 0;
   border-top: 1px solid rgb(255 255 255 / 0.12);
   color: var(--shell-muted);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
@@ -171,9 +172,15 @@ body {
   background: var(--ok);
 }
 
+/* Wide enough for the widest thing on any screen - the founders table,
+   which has eight columns and used to be cut off mid-column with 380px
+   of empty desk sitting beside it, because the column was capped at
+   64rem and pinned to the left. Reading measure is set per screen (the
+   letter, the screen notes), never by starving the whole column. */
 .app-main {
   width: 100%;
-  max-width: 64rem;
+  max-width: 88rem;
+  margin-inline: auto;
   padding-inline: 16px;
   padding-block: 1.8rem 3rem;
 }
@@ -184,7 +191,7 @@ body {
 @media (min-width: 52rem) {
   .app-shell {
     display: grid;
-    grid-template-columns: 14.5rem 1fr;
+    grid-template-columns: 15.5rem 1fr;
   }
 
   .app-nav {

@@ -71,18 +71,18 @@ function ManualEmailForm({ item }) {
           {error}
         </p>
       )}
-      <label>
-        {/* The founder's name is already the first column of this row;
-            repeating it here only clipped the cell. The full, unique
-            name stays on the input's aria-label for screen readers. */}
-        New address
-        <input
-          type="text"
-          aria-label={`Address for ${item.founder_name}`}
-          value={address}
-          onChange={(event) => setAddress(event.target.value)}
-        />
-      </label>
+      {/* No visible label: the column header already says "Set email",
+          and a "New address" caption stacked above every input pushed
+          each row to three lines, so eleven founders filled a screen
+          that now holds twenty-five. The full, unique name stays on the
+          input's aria-label for screen readers. */}
+      <input
+        type="text"
+        aria-label={`Address for ${item.founder_name}`}
+        placeholder="name@company.com"
+        value={address}
+        onChange={(event) => setAddress(event.target.value)}
+      />
       <button type="submit" disabled={setEmail.isPending}>
         Submit
       </button>

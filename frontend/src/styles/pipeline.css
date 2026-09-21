@@ -7,6 +7,7 @@
 
 .standing {
   display: flex;
+  max-width: 38rem;
   flex-wrap: wrap;
   align-items: stretch;
   margin-bottom: 1.8rem;
@@ -86,6 +87,39 @@
 .stages table {
   background: var(--bg-raised);
   border: 1px solid var(--border);
+  /* Held to a measure rather than run to the full width of the desk:
+     the funnel above it is 38rem wide, and a table three times that
+     read as a second, unrelated page. */
+  max-width: 62rem;
+}
+
+/* Below a certain width there is no arrangement of four columns that
+   fits, so the table keeps a readable minimum and `.table-scroll`
+   scrolls it sideways - squeezing it to the screen put one word per
+   line in the description. */
+.stages table {
+  min-width: 34rem;
+}
+
+/* Both stage tables carry the same four columns, so above that width
+   they are given the same ones. Left to themselves they sized to their
+   own content and the two tables' columns landed in different places,
+   which read as one broken table rather than two related ones. */
+@media (min-width: 52rem) {
+  .stages th:nth-child(1),
+  .stages td:nth-child(1) {
+    width: 11rem;
+  }
+
+  .stages th:nth-child(3),
+  .stages td:nth-child(3) {
+    width: 12rem;
+  }
+
+  .stages th:nth-child(4),
+  .stages td:nth-child(4) {
+    width: 19rem;
+  }
 }
 
 .stage-description {
@@ -123,7 +157,7 @@
   list-style: none;
   margin: 0 0 1.4rem;
   padding: 0;
-  max-width: 34rem;
+  max-width: 38rem;
 }
 
 .funnel-row {
@@ -158,12 +192,19 @@
   background: linear-gradient(var(--border), var(--border)) left center / 100% 1px no-repeat;
 }
 
+/* The 2px floor keeps a stage with one person in it visible against a
+   scale of 162. It does NOT apply to an empty stage: a stub of colour
+   beside "Sent 0" said there was something there. */
 .funnel-bar {
   display: block;
   height: 100%;
   min-width: 2px;
   background: var(--accent);
   border-radius: 0 3px 3px 0;
+}
+
+.funnel-bar[data-empty='true'] {
+  min-width: 0;
 }
 
 .funnel-value {

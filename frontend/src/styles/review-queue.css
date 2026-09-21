@@ -51,7 +51,11 @@
 
 @media (min-width: 60rem) {
   .review-layout {
-    grid-template-columns: minmax(0, 1fr) 19rem;
+    /* The letter column is the width of the sheet, not whatever is
+       left over: as a 1fr it stretched past the paper and pushed the
+       docket a hand's width away from the letter it describes. */
+    grid-template-columns: minmax(0, 46rem) 19rem;
+    justify-content: start;
   }
 
   .source-pane {
@@ -251,6 +255,15 @@
   padding: 0.7rem max(16px, 3vw);
   background: var(--bg-raised);
   border-top: 1px solid var(--rule-strong);
+}
+
+/* Once the navigation is a rail, the pinned bar starts where the rail
+   ends. Spanning the whole viewport drew it straight over the mailbox
+   at the bottom of the rail, which is the one thing down there. */
+@media (min-width: 52rem) {
+  .action-bar {
+    left: 15.5rem;
+  }
 }
 
 .finishing {

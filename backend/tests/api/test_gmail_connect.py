@@ -252,3 +252,56 @@ def test_the_pkce_verifier_is_never_sent_to_the_browser(gmail_client):
     client, flow = gmail_client
     body = client.post("/api/gmail/connect").text
     assert "verifier-for-" not in body
+
+
+# --- disconnect -----------------------------------------------------------
+
+
+def _connected(repos):
+    repos.credential.upsert(
+        account_email=SENDER, refresh_token="super-secret-refresh",
+        token_uri="https://oauth2.googleapis.com/token", scopes=list(GMAIL_SCOPES),
+    )
+
+
+def test_disconnect_forgets_the_stored_token(gmail_client, repos):
+    """Operator request (2026-09-23): a way out from the account line in
+    the sidebar. The token leaves this machine, so nothing here can send
+    or read as that account again until it is reconnected."""
+    client, _ = gmail_client
+    _connected(repos)
+    assert client.post("/api/gmail/disconnect").status_code == 200
+    assert repos.credential.get_by_account_email(SENDER) is None
+
+
+def test_the_app_reports_itself_disconnected_afterwards(gmail_client, repos):
+    # Which is what sends the UI back to the connect screen.
+    client, _ = gmail_client
+    _connected(repos)
+    client.post("/api/gmail/disconnect")
+    assert client.get("/api/gmail/status").json()["connected"] is False
+
+
+def test_disconnecting_twice_is_not_an_error(gmail_client, repos):
+    # Logging out when already logged out is the state being asked for,
+    # not a failure.
+    client, _ = gmail_client
+    _connected(repos)
+    assert client.post("/api/gmail/disconnect").status_code == 200
+    assert client.post("/api/gmail/disconnect").status_code == 200
+
+
+def test_disconnect_says_nothing_about_whether_a_token_existed(gmail_client, repos):
+    # Same answer either way, so the route cannot be used to probe for one.
+    client, _ = gmail_client
+    _connected(repos)
+    with_token = client.post("/api/gmail/disconnect")
+    without = client.post("/api/gmail/disconnect")
+    assert with_token.status_code == without.status_code
+    assert with_token.json() == without.json()
+
+
+def test_disconnect_never_echoes_the_token(gmail_client, repos):
+    client, _ = gmail_client
+    _connected(repos)
+    assert "super-secret-refresh" not in client.post("/api/gmail/disconnect").text

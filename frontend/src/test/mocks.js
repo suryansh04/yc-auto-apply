@@ -37,6 +37,40 @@ const DEFAULT_QUOTA = { provider: 'email-verifier', configured: false, daily_lim
  * list. Returns the response body's spy (vi.fn) wrapping the handler, so a
  * test can assert call counts if it cares.
  */
+/** GET /api/gmail/status - what the shell gates on. */
+export function mockGmailStatus(over = {}) {
+  const body = {
+    configured: true,
+    missing_config: [],
+    connected: true,
+    account: 'suryanshsingh0987@gmail.com',
+    can_read_replies: true,
+    ...over,
+  }
+  const spy = vi.fn(() => HttpResponse.json(body))
+  server.use(http.get('/api/gmail/status', spy))
+  return spy
+}
+
+/** POST /api/gmail/disconnect - forget the stored token. Idempotent, so
+ *  it answers the same either way. */
+export function mockDisconnectGmail() {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/gmail/disconnect', () => {
+      spy()
+      return HttpResponse.json({ ok: true })
+    }),
+  )
+  return spy
+}
+
+export function mockDisconnectFailure(detail = 'could not disconnect') {
+  server.use(
+    http.post('/api/gmail/disconnect', () => HttpResponse.json({ detail }, { status: 500 })),
+  )
+}
+
 export function mockStats({ counts = {}, quota = DEFAULT_QUOTA, jobs = [] } = {}) {
   const fullCounts = Object.fromEntries(ALL_OUTREACH_STATES.map((s) => [s, counts[s] ?? 0]))
   const body = { counts: fullCounts, quota, jobs }

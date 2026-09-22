@@ -30,7 +30,7 @@ from fastapi.responses import RedirectResponse
 
 from app.adapters.gmail_oauth import GMAIL_SCOPES, MissingScope, NoRefreshToken
 from app.api.deps import Repos, get_repos, require_gmail_config
-from app.api.schemas import GmailConnectOut, GmailStatusOut
+from app.api.schemas import GmailConnectOut, GmailStatusOut, OkOut
 from app.config import get_operator_settings
 
 logger = logging.getLogger("app.api")
@@ -92,6 +92,28 @@ def gmail_connect(request: Request) -> GmailConnectOut:
     # browser and never written down.
     request.app.state.gmail_oauth_states[state] = (time.monotonic(), authorization.code_verifier)
     return GmailConnectOut(auth_url=authorization.url)
+
+
+@router.post("/gmail/disconnect", response_model=OkOut)
+def gmail_disconnect(repos: Repos = Depends(get_repos)) -> OkOut:
+    """Forget the stored token - the sidebar's "Disconnect".
+
+    Operator request (2026-09-23): a way out from the account line in the
+    sidebar. The refresh token is deleted from this machine's database,
+    so nothing here can send or read mail as that account until it is
+    reconnected, and the UI falls back to the connect screen on its next
+    status check.
+
+    Idempotent: disconnecting when nothing is stored is not an error, it
+    is the state being asked for. Nothing about the token crosses this
+    boundary in either direction - the answer is `{"ok": true}` whether
+    or not there was one, which is also why it cannot be used to probe
+    for one.
+    """
+    settings = get_operator_settings()
+    repos.credential.delete_by_account_email(settings.gmail_sender_address or "")
+    repos.session.commit()
+    return OkOut()
 
 
 @router.get("/gmail/callback", name="gmail_callback")

@@ -576,6 +576,9 @@ class FakeCredentialRepo:
     def get_by_account_email(self, account_email: str) -> FakeCredentialRow | None:
         return self.rows.get(account_email)
 
+    def delete_by_account_email(self, account_email: str) -> bool:
+        return self.rows.pop(account_email, None) is not None
+
     def set_history_id(self, account_email: str, history_id: str) -> None:
         if account_email not in self.rows:
             raise ValueError(

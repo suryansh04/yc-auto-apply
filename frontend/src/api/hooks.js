@@ -68,6 +68,22 @@ export function useConnectGmail() {
   })
 }
 
+/**
+ * POST /api/gmail/disconnect - forget the stored token.
+ *
+ * Invalidating the status is the whole effect on this side: the shell
+ * gates on `connected`, so the next status read is what sends the
+ * operator back to the connect screen. Nothing about the token was ever
+ * here to clear.
+ */
+export function useDisconnectGmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiPost('/gmail/disconnect'),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['gmail-status'] }),
+  })
+}
+
 export function useQueue() {
   return useQuery({ queryKey: ['queue'], queryFn: () => apiGet('/queue'), ...QUERY_DEFAULTS })
 }

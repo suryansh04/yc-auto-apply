@@ -1,7 +1,10 @@
+import { useState } from 'react'
 import { NavLink, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import {
+  ChevronsUpDown,
   CircleDot,
   Inbox,
+  LogOut,
   LayoutDashboard,
   MailQuestion,
   FileUser,
@@ -20,7 +23,7 @@ import Resume from './screens/Resume'
 import Applications from './screens/Applications'
 import Sent from './screens/Sent'
 import ConnectGmail from './screens/ConnectGmail'
-import { useGmailStatus } from './api/hooks'
+import { useDisconnectGmail, useGmailStatus } from './api/hooks'
 import {
   Sidebar,
   SidebarContent,
@@ -47,6 +50,22 @@ import { Separator } from '@/components/ui/separator'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 // Router shell. Spec §16's four screens plus the manual-email screen:
 //   Pipeline     -> GET /api/stats, /api/jobs, POST /api/jobs/{kind} (Task 15)
@@ -94,6 +113,11 @@ function currentTitle(pathname) {
 
 function App() {
   const gmail = useGmailStatus()
+  const disconnect = useDisconnectGmail()
+  // Confirmed, not one click: disconnecting costs a trip through
+  // Google's consent screen to undo, and the account line is a place the
+  // operator's cursor passes on the way to the nav.
+  const [confirmLogout, setConfirmLogout] = useState(false)
   const [params] = useSearchParams()
   const location = useLocation()
   const outcome = params.get('gmail')
@@ -155,9 +179,13 @@ function App() {
             <SidebarFooter>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <SidebarMenuButton size="lg" className="cursor-default">
+                  {/* Operator request (2026-09-23): "give option here for
+                      logout too". The account line was the only place in
+                      the app that named the connected account, and the
+                      only way out of it was to stop using the app. */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <SidebarMenuButton size="lg">
                         <span
                           aria-hidden="true"
                           className="flex size-8 shrink-0 items-center justify-center"
@@ -168,12 +196,19 @@ function App() {
                           <span className="text-muted-foreground text-xs">Sending as</span>
                           <span className="truncate text-sm">{gmail.data.account}</span>
                         </span>
+                        <ChevronsUpDown className="ml-auto size-4 opacity-60" />
                       </SidebarMenuButton>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      Letters are sent from this account
-                    </TooltipContent>
-                  </Tooltip>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="right" align="end" className="w-64">
+                      <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">
+                        Letters are sent from this account
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem variant="destructive" onSelect={() => setConfirmLogout(true)}>
+                        <LogOut />
+                        Disconnect Gmail
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarFooter>
@@ -202,6 +237,56 @@ function App() {
             <GatedRoutes gmail={gmail} outcome={outcome} />
           </main>
         </SidebarInset>
+
+        <Dialog open={confirmLogout} onOpenChange={setConfirmLogout}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Disconnect {gmail.data?.account}?</DialogTitle>
+              <DialogDescription>
+                This app forgets the token, so nothing here can send or read mail as that
+                account until you connect it again. Your drafts, approvals and everything
+                already sent are untouched.
+              </DialogDescription>
+            </DialogHeader>
+            {/* Said plainly rather than implied: "disconnect" here means
+                this machine forgets the token, not that Google withdraws
+                the grant. Only the operator can do the second, and the
+                app already tells him the same thing when a token turns
+                out to be dead (`NoRefreshToken`). */}
+            <p className="text-muted-foreground text-sm">
+              Google still lists this app until you remove it at{' '}
+              <a
+                className="underline underline-offset-4"
+                href="https://myaccount.google.com/permissions"
+                target="_blank"
+                rel="noreferrer"
+              >
+                myaccount.google.com/permissions
+              </a>
+              .
+            </p>
+            {disconnect.isError && (
+              <p className="text-destructive text-sm" role="alert">
+                Could not disconnect: {disconnect.error.message}
+              </p>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmLogout(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={disconnect.isPending}
+                onClick={() =>
+                  disconnect.mutate(undefined, { onSuccess: () => setConfirmLogout(false) })
+                }
+              >
+                {disconnect.isPending ? <Spinner /> : null}
+                Disconnect
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </SidebarProvider>
     </TooltipProvider>
   )

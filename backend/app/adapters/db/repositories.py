@@ -650,6 +650,24 @@ class GmailCredentialRepo:
             select(GmailCredential).where(GmailCredential.account_email == account_email)
         ).scalar_one_or_none()
 
+    def delete_by_account_email(self, account_email: str) -> bool:
+        """Forget the stored token for this account. True if there was one.
+
+        What "disconnect" means here (operator request, 2026-09-23): the
+        refresh token leaves this machine's database, so nothing in this
+        app can send or read mail as that account again until it is
+        reconnected. It does NOT withdraw the grant at Google's end -
+        only the operator can do that, at
+        myaccount.google.com/permissions, which is the same thing
+        `NoRefreshToken` already tells him.
+        """
+        row = self.get_by_account_email(account_email)
+        if row is None:
+            return False
+        self.session.delete(row)
+        self.session.flush()
+        return True
+
     def set_history_id(self, account_email: str, history_id: str) -> None:
         """Task 7 (spec §5): the narrow write the reply poller (Task 8)
         needs after a successful `GmailReader.history_since` or

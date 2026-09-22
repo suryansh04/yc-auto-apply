@@ -716,9 +716,13 @@ it('asks for rewrites once the checks have found words to mark', async () => {
   await waitFor(() => expect(suggest).toHaveBeenCalled())
 })
 
-it('does not spend a model call on a letter with nothing marked', async () => {
-  // An LLM call per draft is the operator's money, and there is nothing
-  // to rewrite when no note resolved to actual words.
+it('asks even when no check resolved to words, because the company paragraph always can', async () => {
+  // 2026-09-23: this used to assert the screen did NOT ask. The company
+  // paragraph is a rewrite candidate whether or not a check complained
+  // about it, so the "is there anything to rewrite?" decision moved to
+  // the backend, which has the letter and can answer it properly - and
+  // which spends no model call when the answer is no
+  // (tests/application/test_suggest_fixes.py).
   mockQueue([item({ wire_text: ['Hi Madhav,', '', 'A clean letter.', '', 'Suryansh'].join('\n') })])
   mockCheckDraft({
     notes: ['body exceeds 380 words'],
@@ -727,7 +731,7 @@ it('does not spend a model call on a letter with nothing marked', async () => {
   const suggest = mockSuggestFixes({ suggestions: [] })
   render(<ReviewQueue />)
   expect(await screen.findByText('body exceeds 380 words')).toBeInTheDocument()
-  expect(suggest).not.toHaveBeenCalled()
+  await waitFor(() => expect(suggest).toHaveBeenCalled())
 })
 
 it('shows the rewrite when the mark is hovered', async () => {
@@ -863,4 +867,32 @@ it('leaves the letter unmarked when there is no company paragraph to point at', 
   render(<ReviewQueue />)
   await screen.findByText('Review queue')
   expect(screen.queryByLabelText(/paragraph about them/i)).not.toBeInTheDocument()
+})
+
+it('keeps the generic option on a check mark that covers the company paragraph', async () => {
+  // The check wins the overlap, so without this the generic line would
+  // vanish from exactly the letters most likely to need it - the ones a
+  // hook check has flagged.
+  const paragraph = 'You built a voice layer.'
+  mockQueue([item({
+    wire_text: ['Hi Akash,', '', paragraph, '', 'Suryansh'].join('\n'),
+    body: paragraph,
+    insight_text: paragraph,
+  })])
+  mockCheckDraft({
+    notes: ['hook overlaps more than 60% with one_liner'],
+    highlights: [{ message: 'hook overlaps more than 60% with one_liner', quote: paragraph }],
+  })
+  const generic = mockGenericLine({ notes: [] })
+  render(<ReviewQueue />)
+  // One mark, and it is the check's (amber) - but it carries both tabs.
+  const mark = await screen.findByLabelText(/hook overlaps more than 60%/i)
+  expect(mark).toHaveAttribute('data-kind', 'check')
+  await userEvent.hover(mark)
+  await userEvent.click(await screen.findByRole('tab', { name: /generic/i }))
+  // Two on screen: the one under the letter and the one in the card.
+  // The card's is the one this test is about, and it is rendered last.
+  const buttons = await screen.findAllByRole('button', { name: /use a generic line/i })
+  await userEvent.click(buttons[buttons.length - 1])
+  await waitFor(() => expect(generic).toHaveBeenCalledWith(1))
 })

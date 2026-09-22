@@ -22,6 +22,7 @@ import { Fragment } from 'react'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 function Card({ hit, suggestion, pending, onApply }) {
   const deletes = suggestion && suggestion.replacement.trim() === ''
@@ -63,28 +64,71 @@ function Card({ hit, suggestion, pending, onApply }) {
 
 /**
  * The company paragraph - the one part of the letter that is about the
- * founder rather than about the sender, and the only part the generic
- * line would replace.
+ * founder rather than about the sender, and the only part worth a second
+ * attempt.
  *
- * Operator request (2026-09-23): "no highlight that section to". The
- * generic-line button under the letter had to be taken on trust; marking
- * the paragraph is what makes the swap show its work, because the text
- * that would disappear is on screen next to the text that would take its
- * place.
+ * Operator request (2026-09-23): "no highlight that section to", then
+ * "give two tabs one for ai generated suggestion, other one should be
+ * generic". The two replacements answer different questions - "can this
+ * be said better?" and "can this be said at all?" - so they are two
+ * tabs, not one stacked card that made the choice look like a sequence.
+ *
+ * The AI tab is the only one that can be empty: the rewrite arrives
+ * after the mark, and a model with nothing sharper to offer is supposed
+ * to say nothing. The generic tab always has its line, because that line
+ * is written down.
  */
-function InsightCard({ hit }) {
+function InsightCard({ hit, suggestion, pending, onApply }) {
+  // `hit.quote` IS the paragraph as it currently stands, so this is the
+  // honest answer to "would pressing this change anything?".
+  const alreadyGeneric = hit.generic != null && hit.quote?.trim() === hit.generic.trim()
   return (
     <div className="grid gap-2 font-sans">
       <p className="text-sm leading-snug font-medium">{hit.message}</p>
-      {hit.generic && (
-        <>
-          <p className="text-muted-foreground text-xs leading-snug">
-            Can&rsquo;t find an honest specific line? This replaces it:
-          </p>
+      <Tabs defaultValue={suggestion ? 'ai' : 'generic'}>
+        <TabsList className="w-full">
+          <TabsTrigger value="ai">AI suggestion</TabsTrigger>
+          <TabsTrigger value="generic">Generic</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="ai" className="grid gap-2">
+          {suggestion ? (
+            <>
+              <div className="rounded-md border border-amber-400/70 bg-amber-50 p-2 text-sm dark:border-amber-500/40 dark:bg-amber-950/40">
+                {suggestion.replacement}
+              </div>
+              {suggestion.why && (
+                <p className="text-muted-foreground text-xs leading-snug">{suggestion.why}</p>
+              )}
+              {onApply && (
+                <Button size="sm" className="w-fit" onClick={() => onApply(hit.index)}>
+                  Use this
+                </Button>
+              )}
+            </>
+          ) : pending ? (
+            <p className="text-muted-foreground flex items-center gap-2 text-xs">
+              <Spinner className="size-3" />
+              Looking for a sharper line&hellip;
+            </p>
+          ) : (
+            <p className="text-muted-foreground text-xs leading-snug">
+              Nothing sharper to offer &mdash; it was asked, and it had nothing better
+              than what is already there.
+            </p>
+          )}
+        </TabsContent>
+
+        <TabsContent value="generic" className="grid gap-2">
           <div className="rounded-md border border-sky-400/70 bg-sky-50 p-2 text-sm dark:border-sky-500/40 dark:bg-sky-950/40">
             {hit.generic}
           </div>
-          {hit.onUseGeneric && (
+          <p className="text-muted-foreground text-xs leading-snug">
+            {alreadyGeneric
+              ? 'This letter is already using it.'
+              : 'Claims nothing about them, which is the point — for the companies where there is no honest specific line to find.'}
+          </p>
+          {hit.onUseGeneric && !alreadyGeneric && (
             <Button
               size="sm"
               variant="outline"
@@ -96,8 +140,8 @@ function InsightCard({ hit }) {
               Use a generic line
             </Button>
           )}
-        </>
-      )}
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
@@ -190,8 +234,19 @@ export function markUp(
           </mark>
         </HoverCardTrigger>
         <HoverCardContent align="start" className={insight ? 'w-96' : 'w-80'}>
-          {insight ? (
-            <InsightCard hit={hit} />
+          {/* Tabs wherever the mark covers the company paragraph - the
+              `insight` mark itself, and equally a check mark that landed
+              on the same words and won the overlap. Choosing on
+              `hit.generic` rather than on `kind` is what stops the
+              generic line disappearing from exactly the letters most
+              likely to need it: the ones a hook check has flagged. */}
+          {hit.generic ? (
+            <InsightCard
+              hit={hit}
+              suggestion={suggestions[hit.index]}
+              pending={pending}
+              onApply={onApply}
+            />
           ) : (
             <Card hit={hit} suggestion={suggestions[hit.index]} pending={pending} onApply={onApply} />
           )}

@@ -159,9 +159,14 @@ export default function ReviewQueue() {
       // draft is the operator's money.
       setRewrites({})
       setSuggestedId(null)
-      if ((data?.highlights ?? []).some((h) => h.quote)) {
-        suggestFixes.mutate({ id })
-      }
+      // Asked unconditionally now that the company paragraph is always a
+      // candidate for a rewrite, not only the spans a check complained
+      // about. A letter with nothing to rewrite costs no model call -
+      // `run_reviser` returns before touching the provider when it is
+      // handed no spans - so the guard that used to live here was
+      // deciding something the backend already decides, with less to go
+      // on.
+      suggestFixes.mutate({ id })
     },
   })
 
@@ -465,7 +470,26 @@ export default function ReviewQueue() {
   // Only a fresh check knows WHERE each note applies; the note stored at
   // draft time is just a sentence. So the letter is marked up after a
   // re-check or a save, and reads plainly before that.
-  const checkMarks = checkedId === current.outreach_id ? checkHighlights : []
+  function useGenericNow() {
+    setActionError(null)
+    genericLine.mutate(current.outreach_id, {
+      onError: (err) => setActionError(err.message),
+    })
+  }
+  const rawCheckMarks = checkedId === current.outreach_id ? checkHighlights : []
+  // A check mark that landed on the company paragraph carries the
+  // generic line too. It wins the overlap with the paragraph's own mark,
+  // so without this the generic option would vanish from precisely the
+  // letters that need it most - the ones a hook check has flagged.
+  const coversInsight = (quote) =>
+    Boolean(current.insight_text && quote &&
+      (quote.includes(current.insight_text) || current.insight_text.includes(quote)))
+  const checkMarks = rawCheckMarks.map((mark) =>
+    coversInsight(mark.quote)
+      ? { ...mark, generic: current.generic_line, busy: genericLine.isPending,
+          onUseGeneric: useGenericNow }
+      : mark,
+  )
   // The company paragraph, marked as itself. Appended after the checks so
   // it keeps the highest index - `activeIndex` and the suggestions panel
   // are keyed by position, and shifting the checks' indices to make room
@@ -479,19 +503,15 @@ export default function ReviewQueue() {
           quote: current.insight_text,
           generic: current.generic_line,
           busy: genericLine.isPending,
-          onUseGeneric: () => {
-            setActionError(null)
-            genericLine.mutate(current.outreach_id, {
-              onError: (err) => setActionError(err.message),
-            })
-          },
+          onUseGeneric: useGenericNow,
         },
       ]
     : checkMarks
   const shownRewrites = suggestedId === current.outreach_id ? rewrites : {}
   // "Still thinking" is only honest while the call is in flight for THIS
   // draft and something was actually flagged.
-  const suggestionsPending = suggestFixes.isPending && checkMarks.some((h) => h.quote)
+  const suggestionsPending =
+    suggestFixes.isPending && (rawCheckMarks.some((h) => h.quote) || Boolean(current.insight_text))
 
   // Accept a rewrite: paste it in where the flagged words were, and save.
   // The quote came back as a verbatim substring of the BODY (never the
@@ -708,7 +728,7 @@ export default function ReviewQueue() {
                 {suggestions.length > 0 ? (
                   <ul className="grid gap-1.5 text-sm">
                     {suggestions.map((note, index) => {
-                      const marked = Boolean(checkMarks[index]?.quote)
+                      const marked = Boolean(rawCheckMarks[index]?.quote)
                       return (
                         <li key={note}>
                           <button

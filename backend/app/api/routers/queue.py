@@ -44,6 +44,18 @@ from app.config import get_operator_settings, get_settings
 
 router = APIRouter(tags=["queue"])
 
+# What the reviser is told about the company paragraph. Every other span
+# it is given carries a complaint ("a sentence exceeds 45 words"); this
+# one carries an invitation, because there is nothing wrong with the
+# paragraph - it is simply the one part of the letter worth a second
+# attempt. Saying "skip it" outright is what stops the model rewriting a
+# good line for the sake of answering.
+INSIGHT_NOTE = (
+    "this is the paragraph about the company, and the only researched part "
+    "of the letter - offer a sharper version ONLY if you can name their "
+    "choice more precisely than this does, and skip it otherwise"
+)
+
 
 class _UTCClock:
     def now(self) -> datetime:
@@ -220,6 +232,17 @@ def suggest(outreach_id: int, payload: CheckIn | None = None,
         body=payload.body if payload else None,
     )
     highlights = highlights_for(notes, body)
+
+    # The company paragraph is ALWAYS worth a rewrite, whether or not a
+    # check complained about it (operator request 2026-09-23: an AI
+    # suggestion and the generic line, side by side, on the one paragraph
+    # the letter researches). It is appended LAST, so its index is
+    # `len(check highlights)` - exactly the index the review screen gives
+    # the same paragraph's mark, which is what pairs the two without
+    # either side matching on text.
+    insight = letter.insight_region(body)
+    if insight:
+        highlights = highlights + [{"message": INSIGHT_NOTE, "quote": insight}]
 
     # `getattr`, not `repos.reviser`: the offline `FakeRepos` carries the
     # attribute only when a test injected one, and a test that did not

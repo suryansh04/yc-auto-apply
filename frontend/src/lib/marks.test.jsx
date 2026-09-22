@@ -186,6 +186,7 @@ it('the swap is offered from the paragraph itself', async () => {
   const onUseGeneric = vi.fn()
   show('One thing. You built a voice layer. Another.', [{ ...INSIGHT, onUseGeneric }])
   await hover(screen.getByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('tab', { name: /generic/i }))
   await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
   expect(onUseGeneric).toHaveBeenCalled()
 })
@@ -210,4 +211,40 @@ it('both are marked when they do not overlap', async () => {
   ])
   const kinds = [...container.querySelectorAll('mark')].map((m) => m.dataset.kind)
   expect(kinds).toEqual(['check', 'insight'])
+})
+
+
+it('the company paragraph offers an AI rewrite and the generic line as two tabs', async () => {
+  // "give two tabs one for ai generated suggestion, other one should be
+  // generic" - the two answer different questions ("can this be said
+  // better?" and "can this be said at all?"), so neither is a step on
+  // the way to the other.
+  show('One thing. You built a voice layer. Another.', [INSIGHT], {
+    suggestions: {
+      0: { index: 0, quote: 'You built a voice layer.',
+           replacement: 'You put hiring on a phone call.', why: 'names the choice' },
+    },
+  })
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  // The AI tab opens first when there is a rewrite to show.
+  expect(await screen.findByText('You put hiring on a phone call.')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('tab', { name: /generic/i }))
+  expect(await screen.findByText('I came across Vahan while looking for teams.')).toBeInTheDocument()
+})
+
+it('opens on the generic tab when there is no AI rewrite yet', async () => {
+  show('One thing. You built a voice layer. Another.', [INSIGHT])
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  expect(await screen.findByText('I came across Vahan while looking for teams.')).toBeInTheDocument()
+})
+
+it('says so instead of offering a swap that would change nothing', async () => {
+  // The paragraph IS the generic line already - pressing the button
+  // would replace it with itself.
+  show('One thing. I came across Vahan while looking for teams. Another.', [
+    { ...INSIGHT, quote: 'I came across Vahan while looking for teams.' },
+  ], {})
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  expect(await screen.findByText(/already using it/i)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /use a generic line/i })).not.toBeInTheDocument()
 })

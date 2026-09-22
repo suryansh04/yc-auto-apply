@@ -177,6 +177,18 @@ export function useEdit() {
 // The resume PDF `send` attaches to every letter. `useResumeStatus` also
 // carries the parsed-claim count, because replacing the file does NOT
 // reparse it and the two can silently disagree.
+// Every application with the OUTCOME it ended in - a different question
+// from `useContacts`, which filters by raw state. Fetched whole and
+// filtered on the screen, so the tab counts are right whichever tab is
+// open.
+export function useApplications() {
+  return useQuery({
+    queryKey: ['applications'],
+    queryFn: () => apiGet('/applications'),
+    ...QUERY_DEFAULTS,
+  })
+}
+
 export function useResumeStatus() {
   return useQuery({
     queryKey: ['resume-status'],

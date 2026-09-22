@@ -502,3 +502,10 @@ export function mockReplaceResume({ status = 200, detail = null, ...over } = {})
   )
   return spy
 }
+
+
+/** GET /api/applications - every application with the OUTCOME it ended
+ *  in (`sent` / `rejected` / `skipped` / `waiting` / `not_started`). */
+export function mockApplications(items = []) {
+  server.use(http.get('/api/applications', () => HttpResponse.json(items)))
+}

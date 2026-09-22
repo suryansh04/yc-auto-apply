@@ -19,6 +19,7 @@ import {
   item,
   mockApprove,
   mockApproveFailure,
+  mockEdit,
   mockEditFailure,
   mockQueue,
   mockQueueSequence,
@@ -619,4 +620,20 @@ it('optional (S07): advancing past a settled item resolves the true visible neig
   await userEvent.keyboard('a')
   expect(await screen.findByText(/Second Co/)).toBeInTheDocument()
   expect(screen.queryByText(/First Co/)).not.toBeInTheDocument()
+})
+
+
+it('saves an edit the checks dislike, and shows what they said', async () => {
+  // The operator's own words are never refused: the checks are advice.
+  mockQueue([item({})])
+  const edit = mockEdit({ notes: ['implies seniority: my team'] })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /^edit/i }))
+  await userEvent.clear(screen.getByLabelText('Body'))
+  await userEvent.type(screen.getByLabelText('Body'), 'I built it with my team.')
+  await userEvent.click(screen.getByRole('button', { name: /save/i }))
+  await waitFor(() => expect(edit).toHaveBeenCalled())
+  // The editor closed - the save happened.
+  await waitFor(() => expect(screen.queryByLabelText('Body')).not.toBeInTheDocument())
+  expect(await screen.findByText('implies seniority: my team')).toBeInTheDocument()
 })

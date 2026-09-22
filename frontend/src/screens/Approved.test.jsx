@@ -139,7 +139,9 @@ it('edits a letter in place and saves it', async () => {
   expect(edit.mock.calls[0][1].body).toBe('A better sentence.')
 })
 
-it('keeps the typed text when the validator rejects an edit', async () => {
+it('keeps the typed text when the API refuses the save outright', async () => {
+  // A 4xx now means a real failure (the row vanished, the API is down) -
+  // the checks no longer refuse a save.
   mockApproved([letter()])
   mockEditFailure(['contains a semicolon'])
   render()
@@ -185,3 +187,18 @@ it('offers back-to-review even for a letter that cannot be sent', async () => {
 })
 
 
+
+
+it('saves an edit the checks dislike, and shows what they said', async () => {
+  mockApproved([letter()])
+  const edit = mockEdit({ notes: ['implies seniority: my team'] })
+  render()
+  await userEvent.click(await screen.findByRole('button', { name: /edit/i }))
+  await userEvent.clear(screen.getByLabelText('Body'))
+  await userEvent.type(screen.getByLabelText('Body'), 'I built it with my team.')
+  await userEvent.click(screen.getByRole('button', { name: /save/i }))
+  await waitFor(() => expect(edit).toHaveBeenCalled())
+  await waitFor(() => expect(screen.queryByLabelText('Body')).not.toBeInTheDocument())
+  expect(await screen.findByText(/saved\. what the checks noticed/i)).toBeInTheDocument()
+  expect(screen.getByText('implies seniority: my team')).toBeInTheDocument()
+})

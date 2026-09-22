@@ -265,13 +265,17 @@ export default function ReviewQueue() {
     edit.mutate(
       { id: current.outreach_id, subject, body },
       {
-        onSuccess: () => {
+        // 2026-09-22: a save always saves. The checks come back as notes
+        // about what was just written, so the editor closes and the
+        // suggestions panel shows them - it no longer refuses.
+        onSuccess: (data) => {
           setIsEditing(false)
           setEditErrors([])
+          setCheckNotes(data?.notes ?? [])
+          setCheckedId(current.outreach_id)
         },
-        // 422 {errors: [...]} - the validator's own messages, verbatim.
-        // Nothing was persisted on the backend, and the editor keeps
-        // whatever the operator typed (it owns its own local state).
+        // A real failure (the row vanished, the API is down). The editor
+        // stays open holding whatever the operator typed.
         onError: (err) => {
           setEditErrors(err.errors ?? [err.message])
         },

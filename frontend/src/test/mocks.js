@@ -210,13 +210,15 @@ export function mockApproveFailure(status = 500, detail = 'could not approve') {
 }
 
 /** Mocks a successful POST /api/outreach/:id/edit. */
-export function mockEdit() {
+export function mockEdit({ notes = [] } = {}) {
   const spy = vi.fn()
   server.use(
+    // 2026-09-22: an edit always saves and answers 200 with what the
+    // checks made of the new text. A 4xx now means a real failure.
     http.post('/api/outreach/:id/edit', async ({ params, request }) => {
       const body = await request.json()
       spy(Number(params.id), body)
-      return HttpResponse.json({ ok: true })
+      return HttpResponse.json({ notes })
     }),
   )
   return spy

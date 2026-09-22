@@ -183,6 +183,10 @@ class Outreach(Base):
     next_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(default=0)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the operator last passed over this draft in review (2026-09-22).
+    # NULL means never skipped - a letter he has not reached is not the
+    # same fact as one he looked at and moved on from.
+    skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

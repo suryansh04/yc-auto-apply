@@ -135,6 +135,8 @@ class FakeOutreachRow:
     last_error: str | None = None
     sequence_step: int = 0
     next_action_at: object = None  # Task 15: stamped via the injected Clock port
+    # 2026-09-22: when the operator last passed over this draft in review.
+    skipped_at: object = None
 
     def __setattr__(self, name, value):
         # Task 5: every use case assigns `state` as a plain `str` (e.g.

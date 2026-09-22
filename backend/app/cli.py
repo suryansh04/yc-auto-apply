@@ -877,7 +877,8 @@ def _review_loop(use_case, *, signature: str, clock, dry_run: bool, commit) -> d
                     typer.echo("rejected (discarded)")
                     break
                 if key == "s":
-                    use_case.skip(item.outreach.id)
+                    # Records that this draft was passed over (2026-09-22).
+                    use_case.skip(item.outreach.id, _UTCClock().now())
                     counts["skipped"] += 1
                     break
                 if key == "q":
@@ -895,12 +896,14 @@ def _review_loop(use_case, *, signature: str, clock, dry_run: bool, commit) -> d
                         continue
                     subject, body = _split_edit(edited)
                     pending_text = edited   # F8: re-offered whether edit returns errors or raises
-                    errors = use_case.edit(item.outreach.id, subject, body)
-                    if errors:
-                        typer.echo("edit rejected by the validator; nothing saved:", err=True)
-                        for e in errors:
-                            typer.echo(f"  - {e}", err=True)
-                        continue
+                    # 2026-09-22: the checks no longer refuse the save.
+                    # They are advice about the operator's own words, so
+                    # they are printed and the text is kept either way.
+                    notes = use_case.edit(item.outreach.id, subject, body, now=_UTCClock().now())
+                    if notes:
+                        typer.echo("saved. what the checks noticed:", err=True)
+                        for note in notes:
+                            typer.echo(f"  - {note}", err=True)
                     commit()
                     counts["edited"] += 1
                     pending_text = None

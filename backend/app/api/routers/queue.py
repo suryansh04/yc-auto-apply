@@ -166,6 +166,25 @@ def approve(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     return OkOut()
 
 
+@router.post("/outreach/{outreach_id}/skip", response_model=OkOut)
+def skip(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
+    """Record that this draft was passed over.
+
+    Skipping is still not a decision - the state does not change. What
+    changes is that a letter the operator has read and moved on from is
+    now distinguishable from one he has never reached, which is what the
+    Applications screen's "skipped" filter is.
+    """
+    try:
+        _use_case(repos).skip(outreach_id, _UTCClock().now())
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except (ValueError, IllegalTransition) as exc:
+        raise _action_error(exc)
+    repos.session.commit()
+    return OkOut()
+
+
 @router.post("/outreach/{outreach_id}/unapprove", response_model=OkOut)
 def unapprove(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     """Send an approved letter back to the review queue."""
@@ -203,22 +222,24 @@ def redraft(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     return OkOut()
 
 
-@router.post("/outreach/{outreach_id}/edit")
-def edit(outreach_id: int, payload: EditIn, repos: Repos = Depends(get_repos)):
+@router.post("/outreach/{outreach_id}/edit", response_model=CheckOut)
+def edit(outreach_id: int, payload: EditIn, repos: Repos = Depends(get_repos)) -> CheckOut:
+    """Save the operator's text, and say what the checks made of it.
+
+    Operator decision (2026-09-22): this used to answer 422 and persist
+    NOTHING when the checks complained, which made them a gate on his own
+    typing - the same mistake `approve` was making. The save now always
+    happens (a 4xx is reserved for "there is nothing to save" and "no such
+    row"), and the notes come back in the body as advice.
+    """
     try:
         # The clock matters only for an APPROVED letter, whose approval
         # is re-stamped onto the text the operator just wrote.
-        errors = _use_case(repos).edit(outreach_id, payload.subject, payload.body,
-                                       now=_UTCClock().now())
+        notes = _use_case(repos).edit(outreach_id, payload.subject, payload.body,
+                                      now=_UTCClock().now())
     except OutreachNotFound:
         raise HTTPException(404, "no such outreach")
     except (ValueError, IllegalTransition) as exc:
         raise _action_error(exc)
-    if errors:
-        # 422 with the validator's own messages, verbatim (global
-        # constraint) - the browser reviewer must see exactly what the CLI
-        # reviewer sees in `_review_loop`'s "edit rejected by the
-        # validator" branch. Nothing was persisted; no commit.
-        return JSONResponse(status_code=422, content={"errors": errors})
     repos.session.commit()
-    return {"ok": True}
+    return CheckOut(notes=notes)

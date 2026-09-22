@@ -63,7 +63,7 @@ function EditLetter({ item, saving, errors, onSave, onCancel }) {
       <CardContent className="grid gap-4 pt-6">
         {errors.length > 0 && (
           <Alert variant="destructive" role="alert">
-            <AlertTitle>This edit was not saved</AlertTitle>
+            <AlertTitle>Could not save</AlertTitle>
             <AlertDescription>
               <ul className="list-disc pl-4">
                 {errors.map((message) => (
@@ -113,6 +113,7 @@ function ApprovedLetter({ item, defaultOpen }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editErrors, setEditErrors] = useState([])
   const [sent, setSent] = useState(null)
+  const [notes, setNotes] = useState([])
   const edit = useEdit()
   const send = useSend()
   const unapprove = useUnapprove()
@@ -122,12 +123,14 @@ function ApprovedLetter({ item, defaultOpen }) {
     edit.mutate(
       { id: item.outreach_id, subject, body },
       {
-        onSuccess: () => {
+        // 2026-09-22: a save always saves. What the checks made of the
+        // new text comes back as notes, shown on the card afterwards.
+        onSuccess: (data) => {
           setIsEditing(false)
           setEditErrors([])
+          setNotes(data?.notes ?? [])
         },
-        // 422 carries the validator's own messages, verbatim. Nothing was
-        // persisted and the editor keeps what was typed.
+        // A real failure (the row vanished, the API is down).
         onError: (err) => setEditErrors(err.errors ?? [err.message]),
       },
     )
@@ -197,6 +200,22 @@ function ApprovedLetter({ item, defaultOpen }) {
             )}
           </CardAction>
         </CardHeader>
+
+        {notes.length > 0 && !isEditing && (
+          <CardContent>
+            {/* Advice about the text just saved - the save happened. */}
+            <Alert>
+              <AlertTitle>Saved. What the checks noticed</AlertTitle>
+              <AlertDescription>
+                <ul className="list-disc pl-4">
+                  {notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        )}
 
         {sent && (
           <CardContent>

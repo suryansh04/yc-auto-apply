@@ -106,6 +106,27 @@ class EditIn(BaseModel):
     body: str
 
 
+class ApplicationOut(BaseModel):
+    """One application on the Applications screen.
+
+    `outcome` is the bucket (`app.api.routers.applications.OUTCOMES`), not
+    the state: `sent`, `replied`, `closed` and `bounced` are four states
+    and one outcome, and `pending_approval` is one state and two outcomes
+    depending on whether it was skipped. `state` comes along anyway, so
+    the raw truth is never hidden behind the summary."""
+
+    outreach_id: int
+    company_name: str | None = None
+    founder_name: str
+    to: str | None = None
+    state: str
+    outcome: str
+    subject: str | None = None
+    sent_at: str | None = None
+    skipped_at: str | None = None
+    last_error: str | None = None
+
+
 class CheckIn(BaseModel):
     """Optional text to judge instead of the stored draft, so the operator
     can ask "is this any good?" about something he is still typing."""

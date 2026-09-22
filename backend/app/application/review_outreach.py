@@ -180,7 +180,9 @@ class ReviewOutreach:
         # him. (A draft with no row at all is a different thing and still
         # refuses above: there is nothing to approve.)
         self._repos.message.upsert(id=row.id, approved_at=now)
-        self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.APPROVED))
+        # A decision clears the skip - it is the decision the skip deferred.
+        self._repos.outreach.upsert(founder_id=outreach.founder_id,
+                                    state=str(OutreachState.APPROVED), skipped_at=None)
 
     def unapprove(self, outreach_id: int) -> None:
         """Send an approved letter back to the review queue.
@@ -216,12 +218,14 @@ class ReviewOutreach:
         if OutreachState(outreach.state) is not OutreachState.PENDING_APPROVAL:
             raise ValueError(f"only a PENDING_APPROVAL draft can be sent back for redraft (this one is {outreach.state})")
         assert_transition(OutreachState(outreach.state), OutreachState.READY_TO_DRAFT)
-        self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.READY_TO_DRAFT))
+        self._repos.outreach.upsert(founder_id=outreach.founder_id,
+                                    state=str(OutreachState.READY_TO_DRAFT), skipped_at=None)
 
     def reject(self, outreach_id: int) -> None:
         outreach = self._outreach(outreach_id)
         assert_transition(OutreachState(outreach.state), OutreachState.DISCARDED)
-        self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.DISCARDED))
+        self._repos.outreach.upsert(founder_id=outreach.founder_id,
+                                    state=str(OutreachState.DISCARDED), skipped_at=None)
 
     def check(self, outreach_id: int, subject: str | None = None,
               body: str | None = None) -> list[str]:
@@ -313,10 +317,14 @@ class ReviewOutreach:
             return errors
         draft = Draft(subject=subject, body=body, research_source_type=source_type or "",
                       research_source_id=source_id, sequence_step=step)
-        errors = self._validate(draft, source, company, founder, self._previous_body(outreach, step),
-                                all_publications=sources.publications)
-        if errors:
-            return errors
+        # Operator decision (2026-09-22): the checks do not refuse a save.
+        # They used to - a 422, nothing persisted - which made them a gate
+        # on the operator's OWN typing, for the same reason approve was
+        # wrong to refuse. These are his words and his name; the notes are
+        # returned so the screen can show them, and the text is saved
+        # either way.
+        notes = self._validate(draft, source, company, founder, self._previous_body(outreach, step),
+                               all_publications=sources.publications)
 
         approved_at = now if state is OutreachState.APPROVED else None
         fields = dict(
@@ -330,11 +338,27 @@ class ReviewOutreach:
             # must not keep claiming one (a stale `news/9999`, say).
             fields.update(research_source_type=None, research_source_id=None)
         self._repos.message.upsert(**fields)
+        # `last_error` is the note from DRAFT time and no longer describes
+        # this text. Whatever the checks say about what he just wrote is
+        # returned to the caller instead of being stored as a flag.
         self._repos.outreach.upsert(founder_id=outreach.founder_id, last_error=None)
-        return []
+        return notes
 
-    def skip(self, outreach_id: int) -> None:
-        """Leave the row exactly as it is."""
+    def skip(self, outreach_id: int, now: datetime | None = None) -> None:
+        """Pass over this draft without deciding anything.
+
+        Until 2026-09-22 this left the row untouched, which meant a letter
+        the operator had read and moved on from looked exactly like one he
+        had never reached. `skipped_at` records that he saw it. The state
+        does not change: skipping is still not a decision.
+
+        Callers with no clock (older ones, and anything that genuinely
+        just wants a no-op) keep the old behaviour.
+        """
+        if now is None:
+            return
+        outreach = self._outreach(outreach_id)
+        self._repos.outreach.upsert(founder_id=outreach.founder_id, skipped_at=now)
 
     # -- helpers ---------------------------------------------------------------
 

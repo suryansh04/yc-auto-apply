@@ -13,6 +13,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApplications } from '../api/hooks'
+import { useIncrementalRows } from '@/lib/paging'
 import { outreachStateLabel } from '../labels'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -78,6 +79,9 @@ export default function Applications() {
     return acc
   }, {})
   const rows = outcome === 'all' ? all : all.filter((a) => a.outcome === outcome)
+  // 284 rows is nothing over the wire and a lot of table cells. Rendered
+  // a page at a time; `resetKey` sends a new filter back to the top.
+  const page = useIncrementalRows(rows, { resetKey: outcome })
 
   if (query.isLoading) {
     return (
@@ -145,7 +149,7 @@ export default function Applications() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
+                {page.visible.map((row) => (
                   <TableRow key={row.outreach_id}>
                     <TableCell className="font-medium">{row.company_name ?? ''}</TableCell>
                     <TableCell>
@@ -179,6 +183,22 @@ export default function Applications() {
             </Table>
           </CardContent>
         </Card>
+      )}
+
+      {rows.length > 0 && (
+        <div className="flex items-center justify-center gap-3 pb-2">
+          <span className="text-muted-foreground text-sm">
+            Showing {page.shown} of {page.total}
+          </span>
+          {page.hasMore && (
+            <Button variant="outline" size="sm" onClick={page.loadMore}>
+              Load more
+            </Button>
+          )}
+          {/* Scrolled into view, this presses the button for you. The
+              button is the contract; the observer is the convenience. */}
+          <span ref={page.sentinelRef} aria-hidden="true" />
+        </div>
       )}
     </>
   )

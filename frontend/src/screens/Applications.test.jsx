@@ -104,3 +104,45 @@ it('has something to say when a filter is empty', async () => {
   await userEvent.click(await screen.findByRole('button', { name: /^Sent\s*0$/ }))
   expect(screen.getByText(/nothing here yet/i)).toBeInTheDocument()
 })
+
+
+// --- paging (operator request 2026-09-22) ---------------------------------
+
+it('renders a page at a time and says how many of the whole there are', async () => {
+  // 284 rows is 58 KB over the wire and two thousand table cells in the
+  // DOM. The list is still fetched whole; it is RENDERED incrementally.
+  mockApplications(Array.from({ length: 120 }, (_, i) =>
+    app({ outreach_id: i + 1, founder_name: `Founder ${i + 1}` })))
+  render()
+  expect(await screen.findByText('Showing 50 of 120')).toBeInTheDocument()
+  expect(screen.getByText('Founder 50')).toBeInTheDocument()
+  expect(screen.queryByText('Founder 51')).not.toBeInTheDocument()
+})
+
+it('loads another page on demand', async () => {
+  mockApplications(Array.from({ length: 120 }, (_, i) =>
+    app({ outreach_id: i + 1, founder_name: `Founder ${i + 1}` })))
+  render()
+  await userEvent.click(await screen.findByRole('button', { name: /load more/i }))
+  expect(screen.getByText('Showing 100 of 120')).toBeInTheDocument()
+  expect(screen.getByText('Founder 51')).toBeInTheDocument()
+})
+
+it('offers no load-more once everything is on screen', async () => {
+  mockApplications([app()])
+  render()
+  expect(await screen.findByText('Showing 1 of 1')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument()
+})
+
+it('goes back to the first page when the filter changes', async () => {
+  const many = Array.from({ length: 120 }, (_, i) =>
+    app({ outreach_id: i + 1, founder_name: `Founder ${i + 1}`, outcome: 'waiting' }))
+  mockApplications([...many, app({ outreach_id: 999, outcome: 'sent', state: 'sent' })])
+  render()
+  await userEvent.click(await screen.findByRole('button', { name: /load more/i }))
+  expect(screen.getByText('Showing 100 of 121')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: /^Waiting on you\s*120$/ }))
+  // Not 100 rows deep in a list the operator has not seen.
+  expect(screen.getByText('Showing 50 of 120')).toBeInTheDocument()
+})

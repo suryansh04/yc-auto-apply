@@ -207,6 +207,18 @@ def test_sarvam_critic_shares_the_system_prompt_with_gemini():
     assert sarvam_system is _CRITIC_SYSTEM
 
 
+def test_critic_prompt_names_the_template_and_not_a_question_concerns():
+    # Live finding (2026-09-16): the two tells the operator spotted first
+    # in a real draft, spelled out for the critic so it looks for them.
+    from app.adapters.gemini import _CRITIC_SYSTEM
+
+    low = " ".join(_CRITIC_SYSTEM.lower().split())  # the prompt is hard-wrapped
+    assert "reads like a template / ai-generated" in low
+    assert "tidy parallel sentences" in low
+    assert "summarises the company back" in low
+    assert "not a real question or a specific observation" in low
+
+
 # --- Port conformance -----------------------------------------------------------
 
 def test_both_critics_satisfy_the_critic_port():

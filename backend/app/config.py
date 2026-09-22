@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     gmail_client_secrets_path: str = ""   # OAuth "Desktop app" client JSON from Google Cloud
     gmail_sender_address: str = ""        # the Gmail account that was authorised by `gmail-auth`
 
+    # Where the browser is sent back to after Google's consent screen.
+    # The Vite dev server by default; set it if the UI is served anywhere
+    # else. Localhost only, like everything else here (spec A3).
+    app_url: str = "http://localhost:5173"
+
 
 @lru_cache
 def get_settings() -> Settings:

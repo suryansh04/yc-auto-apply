@@ -19,6 +19,15 @@ import {
 } from '../test/mocks'
 import Thread from './Thread'
 
+// shadcn's Select is a Radix listbox (a button that opens a popup), not
+// a native <select>, so a choice is "open it, click the option" rather
+// than selectOptions(). One helper so every correction test below reads
+// the same way.
+async function chooseLabel(combobox, option) {
+  await userEvent.click(combobox)
+  await userEvent.click(await screen.findByRole('option', { name: option }))
+}
+
 function renderThread(id = 1) {
   return renderWithQuery(
     <MemoryRouter initialEntries={[`/thread/${id}`]}>
@@ -73,7 +82,7 @@ it('shows the label with its rationale', async () => {
     }),
   )
   renderThread(1)
-  expect(await screen.findByText('REJECTED', { selector: '.label-name' })).toBeInTheDocument()
+  expect(await screen.findByText('Not interested')).toBeInTheDocument()
   expect(screen.getByText(/explicitly said not looking/)).toBeInTheDocument()
 })
 
@@ -86,15 +95,12 @@ it('corrects a label in one click', async () => {
     }),
   ])
   renderThread(1)
-  await screen.findByText('UNCLEAR', { selector: '.label-name' })
+  await screen.findByText('Unclear')
 
-  await userEvent.selectOptions(
-    screen.getByRole('combobox', { name: /correct label/i }),
-    'INTERESTED',
-  )
+  await chooseLabel(screen.getByRole('combobox', { name: /correct label/i }), 'INTERESTED')
 
   expect(setLabel).toHaveBeenCalledWith(2, 'INTERESTED')
-  expect(await screen.findByText(/corrected by operator/i)).toBeInTheDocument()
+  expect(await screen.findByText(/you changed this/i)).toBeInTheDocument()
 })
 
 it('shows a 422 from a rejected label correction', async () => {
@@ -104,17 +110,14 @@ it('shows a 422 from a rejected label correction', async () => {
     thread({ messages: [message({ id: 2, direction: 'inbound', body: 'hm', label: 'UNCLEAR' })] }),
   )
   renderThread(1)
-  await screen.findByText('UNCLEAR', { selector: '.label-name' })
+  await screen.findByText('Unclear')
 
-  await userEvent.selectOptions(
-    screen.getByRole('combobox', { name: /correct label/i }),
-    'INTERESTED',
-  )
+  await chooseLabel(screen.getByRole('combobox', { name: /correct label/i }), 'INTERESTED')
 
   expect(await screen.findByText(/invalid label: not one of the six/i)).toBeInTheDocument()
   // the rejected correction never happened - the message still shows its
   // original label, not a phantom "INTERESTED"
-  expect(screen.getByText('UNCLEAR', { selector: '.label-name' })).toBeInTheDocument()
+  expect(screen.getByText('Unclear')).toBeInTheDocument()
 })
 
 it('links out to the gmail thread', async () => {
@@ -143,13 +146,13 @@ it('renders a machine label distinctly from a human label, not just by text', as
     }),
   )
   renderThread(1)
-  await waitFor(() => expect(document.querySelector('.label-machine')).toBeTruthy())
-
-  const machineLabel = document.querySelector('.label-machine')
-  const humanLabel = document.querySelector('.label-human')
-  expect(machineLabel).toBeTruthy()
-  expect(humanLabel).toBeTruthy()
-  expect(machineLabel.className).not.toBe(humanLabel.className)
+  // The classifier's own signals carry an extra "automated" marker; a
+  // founder's own words never do. One reply here is each kind, so
+  // exactly one marker means the two are told apart by something other
+  // than their wording.
+  expect(await screen.findByText('Automatic reply')).toBeInTheDocument()
+  expect(screen.getByText('Interested')).toBeInTheDocument()
+  expect(screen.getAllByText('automated')).toHaveLength(1)
 })
 
 it('posts a correction to the right message id when a thread has several, and invalidates the thread', async () => {
@@ -182,10 +185,10 @@ it('posts a correction to the right message id when a thread has several, and in
     }),
   ])
   renderThread(1)
-  await screen.findAllByText('UNCLEAR')
+  await screen.findAllByText('Unclear')
 
   const items = screen.getAllByRole('listitem')
-  await userEvent.selectOptions(
+  await chooseLabel(
     within(items[1]).getByRole('combobox', { name: /correct label/i }),
     'REFERRAL',
   )
@@ -194,7 +197,7 @@ it('posts a correction to the right message id when a thread has several, and in
   expect(setLabel).not.toHaveBeenCalledWith(10, 'REFERRAL')
   // the refetch (invalidation) landed a thread where message 20 (not 10)
   // now carries the corrected label
-  await waitFor(() => expect(screen.getAllByText(/corrected by operator/i)).toHaveLength(1))
+  await waitFor(() => expect(screen.getAllByText(/you changed this/i)).toHaveLength(1))
 })
 
 it('labels an outbound message "Draft" when it has not actually been sent yet', async () => {
@@ -208,8 +211,8 @@ it('labels an outbound message "Draft" when it has not actually been sent yet', 
   )
   renderThread(1)
   expect(await screen.findByText('Not sent yet')).toBeInTheDocument()
-  expect(screen.getByText('Draft', { selector: '.message-direction' })).toBeInTheDocument()
-  expect(screen.queryByText('Sent', { selector: '.message-direction' })).not.toBeInTheDocument()
+  expect(screen.getByText('Draft')).toBeInTheDocument()
+  expect(screen.queryByText('Sent')).not.toBeInTheDocument()
 })
 
 it('labels an outbound message "Sent" once it actually has a sent_at', async () => {
@@ -223,7 +226,7 @@ it('labels an outbound message "Sent" once it actually has a sent_at', async () 
   )
   renderThread(1)
   expect(await screen.findByText('Already sent')).toBeInTheDocument()
-  expect(screen.getByText('Sent', { selector: '.message-direction' })).toBeInTheDocument()
+  expect(screen.getByText('Sent')).toBeInTheDocument()
 })
 
 it('shows a not-found state for an unknown thread id rather than crashing', async () => {
@@ -232,7 +235,7 @@ it('shows a not-found state for an unknown thread id rather than crashing', asyn
   // T17-1: QUERY_DEFAULTS.retry never retries a 4xx ApiError, so this
   // resolves on the first failed request - no backoff wait needed (the
   // default findByRole timeout is enough, unlike before T17-1).
-  const link = await screen.findByRole('link', { name: /back to contacts/i })
+  const link = await screen.findByRole('link', { name: /back to founders/i })
   expect(link).toHaveAttribute('href', '/contacts')
   // A dedicated not-found state, not the generic error Banner (which
   // would also happen to contain the words "no such outreach" verbatim,

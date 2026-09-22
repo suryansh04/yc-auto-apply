@@ -231,3 +231,51 @@ def test_two_letter_abbreviations_are_exempt():
 def test_a_three_letter_all_caps_technology_is_policed():
     body = "I run everything on AWS. Would you take an intern?"
     assert any("AWS" in e for e in validate_claims(d(body), CLAIMS))
+
+
+def test_the_templates_own_wording_is_not_an_unsupported_claim():
+    # Live finding (2026-09-17): the operator's template says "SDE intern"
+    # and "a quick 15-minute chat". Neither is a claim about the sender,
+    # but validate_claims saw an unknown proper token and a bare number and
+    # rejected every draft that used the template as written.
+    body = ("Where does RoboGPT resolve the ambiguity?\n\n"
+            "I'm a student. I built a scheduler in Python.\n\n"
+            "I'd like to join as an SDE intern.\n\n"
+            "Resume is attached. Would you be open to a quick 15-minute chat?")
+    errs = validate_claims(d(body), CLAIMS)
+    assert errs == [], errs
+
+
+# --- Live finding 2026-09-17: invented anecdotes --------------------------
+# The connection template asks for "a time I hit this problem myself". With
+# only a handful of real facts, the model invented one: "wiring together a
+# small retrieval service two weekends ago, when a mismatched payload
+# schema sent the same request through twice". No proper noun, no number -
+# nothing for the checks above to match. A sentence claiming the sender DID
+# something must name something real from the claims.
+
+FABRICATED = ("I have felt that pain while wiring together a small retrieval "
+              "service two weekends ago.")
+
+
+def test_rejects_a_work_story_that_names_nothing_from_the_resume():
+    errs = validate_claims(d(FABRICATED), CLAIMS)
+    assert any("names nothing from the resume" in e for e in errs), errs
+
+
+def test_accepts_a_work_story_that_names_a_real_project():
+    body = "I built a scheduler in Python and the retries were the painful part."
+    assert validate_claims(d(body), CLAIMS) == []
+
+
+def test_the_ask_and_the_close_are_not_work_stories():
+    # No past-work verb, so the rule must stay silent - these sentences
+    # appear in every email.
+    for body in ("I would like to join as an SDE intern and work on that layer.",
+                 "Resume is attached. Would you be open to a quick 15-minute chat?"):
+        assert validate_claims(d(body), CLAIMS) == [], body
+
+
+def test_a_sentence_about_the_company_is_not_a_work_story():
+    body = "You built that pipeline so a prompt replaces reprogramming."
+    assert validate_claims(d(body), CLAIMS) == []

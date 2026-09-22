@@ -64,7 +64,7 @@ it('shows validator errors verbatim when an edit is rejected', async () => {
   mockEditFailure(['contains a semicolon', 'no explicit internship ask'])
   mockQueue([item({})])
   render(<ReviewQueue />)
-  await screen.findByText('Review Queue')
+  await screen.findByText('Review queue')
   await userEvent.keyboard('e')
   await userEvent.click(await screen.findByRole('button', { name: /^save/i }))
   expect(await screen.findByText('contains a semicolon')).toBeInTheDocument()
@@ -75,7 +75,7 @@ it('keeps the typed text when an edit is rejected', async () => {
   mockEditFailure(['contains a semicolon'])
   mockQueue([item({})])
   render(<ReviewQueue />)
-  await screen.findByText('Review Queue')
+  await screen.findByText('Review queue')
   await userEvent.keyboard('e')
   const box = await screen.findByRole('textbox', { name: /body/i })
   await userEvent.clear(box)
@@ -87,7 +87,7 @@ it('keeps the typed text when an edit is rejected', async () => {
 it('marks a needs-manual-write draft and refuses a bare approve', async () => {
   mockQueue([item({ last_error: 'cited posting is not intern-appropriate' })])
   render(<ReviewQueue />)
-  expect(await screen.findByText(/needs manual write/i)).toBeInTheDocument()
+  expect(await screen.findByText(/needs a fix before approving/i)).toBeInTheDocument()
 })
 
 it('shows the critic note as one dismissible line', async () => {
@@ -102,7 +102,7 @@ it('ignores review keys while the editor is open', async () => {
   const approve = mockApprove()
   mockQueue([item({})])
   render(<ReviewQueue />)
-  await screen.findByText('Review Queue')
+  await screen.findByText('Review queue')
   await userEvent.keyboard('e')
   await userEvent.type(await screen.findByRole('textbox', { name: /body/i }), 'a')
   expect(approve).not.toHaveBeenCalled()
@@ -175,7 +175,7 @@ it('a key fired with focus on the editor\'s Save button does not approve', async
   const approve = mockApprove()
   mockQueue([item({})])
   render(<ReviewQueue />)
-  await screen.findByText('Review Queue')
+  await screen.findByText('Review queue')
   await userEvent.keyboard('e')
   const saveButton = await screen.findByRole('button', { name: /^save/i })
   saveButton.focus()
@@ -254,7 +254,7 @@ it('clicking Edit opens the same editor "e" does', async () => {
 it('Escape cancels the editor, even with focus still in the body textarea', async () => {
   mockQueue([item({ outreach_id: 1 })])
   render(<ReviewQueue />)
-  await screen.findByText('Review Queue')
+  await screen.findByText('Review queue')
   await userEvent.keyboard('e')
   const box = await screen.findByRole('textbox', { name: /body/i })
   box.focus()
@@ -288,7 +288,7 @@ it('"j"/"k" navigation stops at the ends instead of wrapping', async () => {
 it('renders an ERROR critic verdict as "unavailable", never as a verdict', async () => {
   mockQueue([item({ critic_verdict: 'ERROR', critic_note: null })])
   render(<ReviewQueue />)
-  expect(await screen.findByText(/critic unavailable/i)).toBeInTheDocument()
+  expect(await screen.findByText(/second opinion unavailable/i)).toBeInTheDocument()
   expect(screen.queryByText(/^PASS$/)).not.toBeInTheDocument()
   expect(screen.queryByText(/NEEDS_REVISION/)).not.toBeInTheDocument()
 })
@@ -353,14 +353,30 @@ it('labels a sequence_step of exactly 1 as a follow-up (pins the > 0 boundary, n
   mockQueue([item({ sequence_step: 1 })])
   render(<ReviewQueue />)
   expect(await screen.findByText(/follow-up/i)).toBeInTheDocument()
-  expect(screen.getByText(/step 1/i)).toBeInTheDocument()
+  expect(screen.getByText(/follow-up number 1/i)).toBeInTheDocument()
 })
 
 it('labels a sequence_step > 0 draft as a follow-up', async () => {
   mockQueue([item({ sequence_step: 2 })])
   render(<ReviewQueue />)
   expect(await screen.findByText(/follow-up/i)).toBeInTheDocument()
-  expect(screen.getByText(/step 2/i)).toBeInTheDocument()
+  expect(screen.getByText(/follow-up number 2/i)).toBeInTheDocument()
+})
+
+// --- 2026-09-16: the operator said "there is no resume attached" --------
+
+it('names the resume attachment under the composed email', async () => {
+  mockQueue([item({ attachment_name: 'Suryansh_Singh_resume.pdf' })])
+  render(<ReviewQueue />)
+  expect(await screen.findByText(/Suryansh_Singh_resume\.pdf goes with it/)).toBeInTheDocument()
+  expect(screen.queryByText(/No resume configured/)).not.toBeInTheDocument()
+})
+
+it('warns that send will refuse when no resume is configured (attachment_name null)', async () => {
+  mockQueue([item({ attachment_name: null })])
+  render(<ReviewQueue />)
+  expect(await screen.findByText(/no resume file configured/i)).toBeInTheDocument()
+  expect(screen.queryByText(/^Attachment:/)).not.toBeInTheDocument()
 })
 
 // --- fix round 2: F9 - settled ids stay hidden until the refetch lands ---
@@ -380,7 +396,7 @@ it(
 
     // In the window before the slow refetch lands, "Only Co" must not be
     // shown as a live, actionable draft again.
-    expect(await screen.findByText(/finishing up/i)).toBeInTheDocument()
+    expect(await screen.findByText(/nothing left to review/i)).toBeInTheDocument()
     expect(screen.queryByText(/Only Co/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^approve/i })).not.toBeInTheDocument()
 
@@ -428,7 +444,7 @@ it(
     expect(screen.queryByText(/First Co/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Second Co/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Third Co/)).not.toBeInTheDocument()
-    expect(await screen.findByText(/finishing up/i)).toBeInTheDocument()
+    expect(await screen.findByText(/nothing left to review/i)).toBeInTheDocument()
   },
   8000,
 )

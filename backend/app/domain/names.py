@@ -30,7 +30,9 @@ def company_display_name(name: str) -> str:
     """The company name as a person would write it mid-sentence: trailing
     legal suffixes (Inc., LLC, Pvt. Ltd., Private Limited, ...) removed."""
     cleaned = (name or "").strip()
-    stripped = _LEGAL_SUFFIX.sub("", cleaned).strip(" ,")
+    # "Statiq." is stored with its trailing period (live, 2026-09-16); a
+    # person writes "Statiq" mid-sentence.
+    stripped = _LEGAL_SUFFIX.sub("", cleaned).strip(" ,.")
     return stripped or cleaned
 
 

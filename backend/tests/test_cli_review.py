@@ -277,13 +277,17 @@ def test_review_edit_opens_the_editor_on_subject_and_body_then_recomposes(
 def test_review_edit_that_fails_validation_prints_errors_persists_nothing_and_reprompts(
     wired_review, repos, one_pending,
 ):
+    # A structural failure, not a banned phrase: as of 2026-09-22 the
+    # phrase bans do not apply to text the operator typed himself (they
+    # police the model's habits, not his voice). Implying seniority is a
+    # false claim about him, so it is still rejected.
     wired_review.editor = staticmethod(
-        lambda text: f"{PENDING_SUBJECT}\n\nI hope this email finds you well. Would you take an intern?"
+        lambda text: f"{PENDING_SUBJECT}\n\nYou're at Vahan.\n\nI built it with my team.\n\nIntern?"
     )
     wired_review.keys = ["e", "s"]
     result = runner.invoke(cli.app, ["review"])
     assert result.exit_code == 0, result.output
-    assert "banned phrase" in result.output
+    assert "implies seniority" in result.output
     row = repos.message.get_outbound(one_pending.id, 0)
     assert (row.subject, row.body, row.edited_by_user) == (PENDING_SUBJECT, PENDING_BODY, False)
     assert repos.session.commit_calls == 0

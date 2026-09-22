@@ -102,6 +102,7 @@ export function item(overrides = {}) {
     critic_verdict: 'PASS',
     critic_note: null,
     sequence_step: 0,
+    attachment_name: 'resume.pdf',
     ...overrides,
   }
 }

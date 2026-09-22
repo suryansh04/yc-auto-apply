@@ -93,6 +93,12 @@ class QueueItemOut(BaseModel):
     critic_verdict: str | None = None
     critic_note: str | None = None
     sequence_step: int
+    # Live finding (2026-09-16): the operator reviewed a draft and said
+    # "there is no resume attached" - it is attached at send time
+    # (`send_approved` passes `settings.resume_path`), the preview just never
+    # said so. Basename only (never the operator's filesystem path); None
+    # when RESUME_PATH is unset, which is exactly the case `send` refuses.
+    attachment_name: str | None = None
 
 
 class EditIn(BaseModel):
@@ -221,3 +227,20 @@ class ContactOut(BaseModel):
     is_hiring: bool = False
     resolved_email: str | None = None
     email_status: str
+
+
+class GmailStatusOut(BaseModel):
+    """What the UI gates on before showing the dashboard. Deliberately
+    says nothing about the token itself - only whether one exists, for
+    which account (which the operator configured), and whether it covers
+    the read scope the reply poller needs."""
+
+    configured: bool
+    missing_config: list[str] = []
+    connected: bool
+    account: str | None = None
+    can_read_replies: bool = False
+
+
+class GmailConnectOut(BaseModel):
+    auth_url: str

@@ -266,15 +266,23 @@ class ReviewOutreach:
         one_liner = getattr(company, "one_liner", None)
         # The same "facts about them" the drafter's validation allowed (F4).
         extra_allowed = [getattr(company, "long_description", None) or "", founder.full_name]
+        # `operator_edit=True`: this text was typed by the person who
+        # signs it. The phrase bans police the model's habits, not his
+        # own word choices - rejecting his edit for "genuinely" would be
+        # the tool arguing with its owner about his voice. Grounding, the
+        # resume-claims rules and every structural check still apply.
         if source is not None:
             return validate_draft(draft, source, name, one_liner, claims,
                                   previous_body=previous_body, extra_allowed_text=extra_allowed,
-                                  all_publications=all_publications)
+                                  all_publications=all_publications, operator_edit=True)
         # No resolvable citation (a manual write with no research material,
         # or a drafter citation that never resolved): grounding cannot be
         # checked, so the style and resume-claims rules stand alone.
         allowed = [name or "", one_liner or "", *extra_allowed]
-        return validate_style(draft, previous_body) + validate_claims(draft, claims, allowed_text=allowed)
+        return (validate_style(draft, previous_body, company_name=name or "",
+                               operator_edit=True)
+                + validate_claims(draft, claims, allowed_text=allowed,
+                                  company_name=name or ""))
 
     def _rank_key(self, item: ReviewItem):
         company = item.company

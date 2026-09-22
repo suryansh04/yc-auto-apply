@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any, Callable
 
@@ -151,53 +152,234 @@ DRAFT_SCHEMA: dict[str, Any] = {
     "type": "OBJECT",
     "properties": {
         "subject": {"type": "STRING"},
-        "body": {"type": "STRING"},
+        # Live finding (2026-09-17): asked for a single STRING body, the
+        # model returned all four parts run together with no blank lines,
+        # or stopped after the hook - and repeated the miss on the retry.
+        # An ARRAY makes the structure the schema's job, not prose the
+        # model may skim. `_to_draft` joins with blank lines.
+        "body": {"type": "ARRAY", "items": {"type": "STRING"}},
         "research_source_type": {"type": "STRING", "enum": SOURCE_KINDS},
         "research_source_id": {"type": "INTEGER"},
     },
     "required": ["subject", "body", "research_source_type", "research_source_id"],
 }
 
-_DRAFTER_SYSTEM = """You write short, plain cold emails from a student to a startup founder,
-asking whether they would take on a software engineering intern. The email
-must read like one specific person wrote it to one specific founder after
-actually understanding what the company builds. It must never read like a
-template, a press summary, or a CV.
+# --- first emails: the model writes ONE paragraph ----------------------
 
-STRUCTURE: exactly three paragraphs. You MUST put a blank line (two newline
-characters) between them. One paragraph per part - never run the parts
-together into a single block, and never exceed three sentences in any
-paragraph. Target about 90 words in total; the hard cap is 120. No sentence over
-25 words. No paragraph over three sentences. No semicolons. At most two em
-dashes. Not more than half the sentences may begin with "I".
+# Operator decision (2026-09-22). A first email is now ASSEMBLED
+# (app/domain/letter.py), not generated: the opener, who he is, the Better
+# internship, WaveWatch, Lerno.ai, the ask and the close are his own words
+# and are pasted in unchanged. The model's whole job is the paragraph
+# about the company that sits under "Now Here's the Important Part:".
+#
+# This is why the fabrication bugs are gone rather than merely discouraged:
+# the model is no longer handed the sender's resume to paraphrase, so it
+# cannot attribute one project's metric to another, and it is told to
+# write about the company only.
+FIRST_EMAIL_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "subject": {"type": "STRING"},
+        "company_paragraphs": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "could_be_a_user": {"type": "BOOLEAN"},
+    },
+    "required": ["subject", "company_paragraphs", "could_be_a_user"],
+}
 
-Part 1 - the hook (one or two sentences): what they build AND why you are
-writing, grounded in exactly one of the AVAILABLE SOURCES below. Name a
-specific thing from that source (the product, the mechanism, the problem)
-and give your own honest observation on it. Do not restate the company's
-one-liner or tagline back at them.
+_FIRST_EMAIL_SYSTEM = """You write ONE part of a cold email from a computer science student to a
+startup founder. The rest of the email is already written by the sender
+himself and you will never see or change it: how he introduces himself,
+what he has built, and what he is asking for.
 
-Part 2 - why you are worth taking on (one or two sentences): pick ONE
-concrete thing you built from the RESUME CLAIMS below and say what you did
-and what it achieved. Do not list roles, tools, degrees or a second project.
-Never write a sentence whose only content is which technologies you know
-("I know Python and React"), and never claim a skill "maps well" to their
-work. Use ONLY the resume claims listed. Never invent a skill, tool, metric, role or
-institution that is not in the claims. Never imply professional seniority
-(no "years of experience", "my team", "in my current role").
+Your paragraph sits directly under the line "Now Here's the Important
+Part:". It is the part that proves a real person looked at this specific
+company. Everything before it was about the sender; your paragraph is the
+turn to the founder.
 
-Part 3 - the ask (one plain sentence, ALWAYS present, its own final
-paragraph): ask whether they would take a software engineering internship /
-intern. Never end the email without this question. Speculative, not an application
-to an advertised role. The words "intern" or "internship" must appear.
+WHAT TO WRITE - one or two short paragraphs, nothing else:
 
-THE SOURCE IS HOW YOU LEARNED IT, NEVER WHAT THE SENTENCE IS ABOUT. The
-research source (a news headline, a launch post, a posting, a description)
-tells you a fact; it then disappears. Write about the thing the company
-built, never about the coverage of it. Never name the outlet or publication,
-never give a date, never write "I saw", "I read", "the article", "the
-piece", "came across", "featured in" or anything else that refers to the
-source as a source.
+Name the CHOICE they made that you can see from outside, and why it is
+not the obvious one. Not what the company does - the founder knows that -
+but the decision underneath it. The strongest version contrasts what they
+did NOT do with what they did:
+
+  "the thing that stuck with me is that you didn't try to build another
+  shopping app. You built a layer that sits on top of where people
+  already shop."
+
+That is the shape to aim for: a thing they avoided, then the thing they
+chose instead. Both halves must be visible in the SOURCE below.
+
+Ground it in WHAT THEY SAID below, and in nothing else.
+
+THE SOURCE IS HOW YOU LEARNED IT, never what the sentence is about.
+Naming the founder's own channel is fine and wanted - their launch post,
+their job posting, what they wrote - because that is where you actually
+read it. But NEVER name the news outlet or publication that covered them,
+and never write "the article", "the piece", "coverage", "featured in" or
+a date. A third party's write-up is not the founder's own words.
+
+Naming where you read it is OPTIONAL and only worth doing when it reads
+as a natural clause - "in your launch post you said ...", "the role you
+posted asks for ...". If it will not sit inside a real sentence, leave it
+out and simply state what they chose. Never bolt the channel onto the end
+of a sentence as a fragment: "...sits outside the sterile field - what
+you wrote about the company" is broken English and worse than saying
+nothing. Never write a bracketed citation, a number or an id.
+
+HARD RULES:
+
+- Write about THEM. Never a sentence about the sender's skills,
+  education, projects or character - those are already in the email and
+  repeating them wastes the founder's attention.
+- NEVER claim to have signed up for, tried, used, downloaded or tested
+  the product. You do not know whether he has, and the founder can check
+  their own signup list. Say what is visible from outside.
+- Do not say he has NOT tried it either. That is an apology for homework
+  nobody asked for.
+- No praise. Interest is shown by what you noticed, never stated. Never
+  "impressive", "excited", "resonates", "aligns", "fascinating",
+  "passionate about", "I came across".
+- Never restate the company's one-liner back to them.
+- Name the company once.
+- No semicolons. At most two em dashes. Contractions are good.
+- Vary sentence length. Three sentences of the same shape in a row is the
+  clearest sign a machine wrote it.
+
+could_be_a_user: TRUE only if this is something a computer science
+student in India could plausibly be a user of himself - a consumer app, a
+developer tool, a student product. FALSE for anything sold to businesses,
+to factories, to hospitals, to other founders as infrastructure. You are
+judging THE COMPANY, not the sender: do not guess whether he has used it,
+only whether someone like him could. When true, the sender is given a
+blank to fill in with his own real experience; you never write that part.
+
+SUBJECT: three to ten words, no emoji, no all-caps words, naming the
+company or their product.
+
+OUTPUT: JSON with "subject", "company_paragraphs" (a JSON ARRAY, one
+plain-text string per paragraph, one or two entries, no markdown, no
+greeting, no sign-off) and "could_be_a_user". Nothing else - and never a
+citation of any kind in the letter. The founder is reading a letter, not
+a paper.
+"""
+
+
+_DRAFTER_SYSTEM = """You write a cold email from a student to a startup founder, asking for a
+software engineering internship. The email works by CONNECTION, not by
+pitching: the student has felt the same problem the company is solving,
+says so with a real example, and asks to work on it.
+
+It must read like one specific person wrote it to one specific founder
+after actually looking at what they built. Never a template, never a press
+summary, never a CV, never a language model being polite.
+
+STRUCTURE: five paragraphs, blank line between each. Never one block.
+Usually 180 to 240 words - but do not pad or clip a sentence to hit a
+number. Say the thing properly and stop. No semicolons. At most two em
+dashes.
+
+Part 1 - the shared problem. Name where you learned what the founder
+said or built (their launch post, their job posting, what they wrote) and
+what specifically it was - the problem they set out to solve, or why they
+started building it. Then say you have run into that same problem
+yourself, and give ONE real, concrete example of when. THE EXAMPLE MUST
+COME FROM THE RESUME CLAIMS BELOW - a project you built, something you
+worked on, a thing that took you two weekends. Never invent a situation,
+a course, a club, a job or an anecdote that is not in the claims. If no
+claim honestly connects to their problem, write part 1 about the problem
+itself and skip the personal example rather than making one up.
+
+Part 2 - what you noticed in the product. Name a specific product or
+engineering CHOICE you can see from the outside - how they structured
+something, what they left out, what they made simple - and why you
+noticed it. NEVER claim to have signed up for, tried, used or tested the
+product: you have not, and the founder can check. Do not say you have
+NOT tried it either - no "I haven't signed up, but ..." - that is an
+apology for homework you were never expected to do. Just say what you
+noticed. Never praise in the
+abstract: no "it feels like it was built by people who understand the
+user" unless you name the exact thing that made you think so.
+
+The lesson in part 3 must come from the SAME fact group as the project
+you name there. Saying one project taught you what a different job taught
+you is a lie even though both facts are true.
+
+Part 3 - about you: your year, degree and college, then the ONE project
+most relevant to them with what it does and its result or number. Then one
+honest lesson that project taught you - a real difficulty, not a virtue
+("how painful deduplication gets once two systems both retry") - and one
+half-sentence on why that is relevant to what they are working on. You may
+name the technologies you work with when they overlap the company's own.
+Everything here comes from the RESUME CLAIMS. Never invent a skill, tool,
+metric, role, institution or number. Never imply seniority:
+no "years of experience", no "my team", no "in my current role".
+
+NEVER write a sentence about your character or work habits - "I learn
+fast", "I'm comfortable figuring things out", "I work well
+independently". Every applicant writes those. The project and the problem
+you have felt are the evidence.
+
+Part 4 - the ask: you would like to join as an SDE / software engineering
+intern, and the SPECIFIC area you want to work on, taken from what you
+learned about them. One honest line on why this problem in particular.
+The words "intern" or "internship" must appear.
+
+Part 5 - the close: say so in the words "resume attached" or "resume is
+attached", then ask for a concrete next step - a quick 15-minute chat.
+
+TONE EXAMPLE - TONE ONLY, and shorter than yours will be. Every fact in
+your email must come from the sources and claims given below. This example
+is about a robotics company that is NOT the one you are writing to: never
+reuse its words. If your email mentions a "planner", a "planning layer",
+"pick-and-place" or "monitoring tools" and the company below is not about
+those things, you have copied the example and must start again.
+
+  I read your launch post about turning a new pick-and-place task into a
+  sentence instead of a reprogramming job. That stuck with me because of
+  <the real project or job from the FACT GROUPS below where you hit the
+  same problem - name it, and say what actually went wrong>.
+
+  I can't try a robot arm from my desk, but the choice I noticed is that
+  RoboGPT takes the prompt and the vision model separately rather than
+  fusing them.
+
+  <here: your year, degree and college, the ONE project from the claims
+  that is closest to their problem, what it does, its number, and the
+  honest lesson THAT project taught you - never a lesson borrowed from a
+  different project, and never this example's words.>
+
+  I'd like to join Orangewood as an SDE intern and work on that planning
+  layer. It's a problem I've actually hit, on a much smaller scale.
+
+  Resume is attached. Would you be open to a quick 15-minute chat?
+
+ANTI-TELLS - the things that make an email read as machine-written:
+- Contractions are fine and preferred ("I'm", "I've", "doesn't").
+- No stacked adjectives ("a powerful, intuitive, seamless tool").
+- Never "genuinely", "truly" or "really" as intensifiers.
+- Never "exactly the", "the exact", "feels like the exact".
+- Never "resonates", "aligns", "excited", "thrilled", "impressive",
+  "fascinating", "incredible".
+- No sentence that summarises the company back to them.
+- Vary sentence length. Three sentences of the same shape in a row is a
+  tell. A short one after a long one is fine.
+- No praise. Interest is shown by what you noticed, never stated.
+
+THE SOURCE IS HOW YOU LEARNED IT. Naming the founder's OWN channel - their
+launch post, their job posting, what they wrote - is fine and wanted: that
+is where you actually read it, and saying so is what makes part 1 honest.
+But NEVER name the news outlet or publication that covered them, and never
+write "the article", "the piece", "coverage", "featured in" or a date. A
+third party's write-up is not the founder's own words.
+
+Name the company once in the body (not only in the subject).
+
+RHYTHM matters more than length. A real person writes an uneven email: a
+long thinking-out-loud sentence, then a short one. Three sentences of the
+same shape in a row is the clearest sign a machine wrote it. Let a
+sentence run long when the thought is genuinely long, and let the next one
+be four words.
 
 NEVER mention location, remote work, relocation, or where you are based.
 Never use: "I hope this email finds you well", "I am reaching out", "reach
@@ -205,8 +387,6 @@ out", "passionate about", "leverage", "synergy", "game-changing", "I came
 across your company", "delve", "in today's fast-paced", "circle back", "at
 your earliest convenience", "I would love the opportunity", "please do not
 hesitate".
-
-Name the company once in the body (not only in the subject).
 
 FOLLOW-UPS: when the prompt below includes a THREAD SO FAR section, you are
 writing a follow-up, not a first email - the founder already saw an earlier
@@ -232,28 +412,121 @@ write as if they personally responded, when the only inbound entry is
 marked as an automated reply - you may use it for timing only (for
 example, they mentioned being away until a date).
 
-OUTPUT: JSON with "subject" (three to six words, no emoji, no all-caps
-words, naming the company), "body" (plain text, no markdown, no HTML, NO
-greeting line and NO sign-off - those are added at send time), and
+OUTPUT: JSON with "subject" (three to ten words, no emoji, no all-caps
+words, naming the company or their product), "body" (a JSON ARRAY, one
+plain-text string per paragraph - no markdown, no HTML, NO greeting line
+and NO sign-off, those are added at send time), and
 "research_source_type" / "research_source_id" naming exactly the one
 source from AVAILABLE SOURCES that part 1 is grounded on.
 """
 
 
+# Our source-kind enum in the words a person would use. The raw values are
+# database plumbing; a founder who reads "I saw that in your
+# long_description" learns we have a schema.
+# Second person, because the model pastes these labels into the letter
+# verbatim. In the third person that produced "In what they wrote about
+# the company you described AlgoSurg as..." - talking about the founder to
+# the founder.
+SOURCE_KIND_LABELS = {
+    "news": "a news story about you",
+    "launch": "your launch post",
+    "job_posting": "a role you posted",
+    "long_description": "what you wrote about the company",
+}
+
+
+def _format_one_source(sources: list[dict]) -> str:
+    """The single best source, with no number and no kind, for a first
+    email.
+
+    Live finding (2026-09-22), three times over: whatever token the list
+    uses to identify a source, this model pastes it into the letter -
+    `kind=long_description`, then `[17]`, then `Source 1`. Telling it not
+    to supplies another example of the thing to imitate. With one source
+    and no label there is nothing to cite, and `first_email_source` knows
+    the answer without asking.
+    """
+    if not sources:
+        return "(none)"
+    top = sources[0]
+    text = str(top.get("text", "")).replace("\n", " ").strip()
+    label = SOURCE_KIND_LABELS.get(str(top.get("kind")), "their research material")
+    return f"This is {label}:\n{text}"
+
+
 def _format_sources(sources: list[dict]) -> str:
+    """Numbered, in the operator's language - never `kind=long_description`.
+
+    Live finding (2026-09-22): shown the raw enum, the model pasted it
+    straight into the letter ("I saw that in your description
+    (kind=long_description id=19)"), failing validation and burning both
+    attempts. Three earlier founders were discarded for the same error.
+    Telling it not to only reduced the rate; the string has to not be
+    there. `first_email_source` maps the number back.
+    """
     lines = []
     # Fix round 1 (F10): the publication name is deliberately NOT rendered.
     # D29 says the body must never name the outlet, so handing it to the
     # model only creates the temptation; nothing in the draft needs it.
-    for s in sources:
+    for i, s in enumerate(sources, start=1):
         text = str(s.get("text", "")).replace("\n", " ").strip()
-        lines.append(f"- kind={s.get('kind')} id={s.get('id')}: {text}")
+        label = SOURCE_KIND_LABELS.get(str(s.get("kind")), "their research material")
+        # "Source 1", not "[1]": shown a bracketed list the model
+        # imitated the format and wrote academic citations into the
+        # letter ("...what you wrote about the company [17].").
+        lines.append(f"- Source {i} - {label}: {text}")
     return "\n".join(lines) if lines else "- (none)"
+
+
+def first_email_source(context: dict, index=1) -> tuple[str, int | None]:
+    """The `(kind, id)` of the source a first email was grounded on.
+
+    The model is shown exactly one source and never names it, so this is
+    always the priority-ordered first. `index` remains for the follow-up
+    path and for tests; anything out of range falls back to the best one.
+    """
+    sources = context.get("available_sources") or []
+    if not sources:
+        return "", None
+    try:
+        chosen = sources[int(index) - 1]
+    except (TypeError, ValueError, IndexError):
+        chosen = sources[0]
+    source_id = chosen.get("id")
+    try:
+        source_id = int(source_id) if source_id is not None else None
+    except (TypeError, ValueError):
+        source_id = None
+    return str(chosen.get("kind") or ""), source_id
 
 
 def _format_claims(claims: list[dict]) -> str:
-    lines = [f"- [{c.get('kind')}] {c.get('text')}" for c in claims]
-    return "\n".join(lines) if lines else "- (none)"
+    """Claims grouped by the resume line they came from.
+
+    Live finding (2026-09-17): as a flat list, the model wrote "I ran into
+    that on WaveWatch, where I had to wire four monitoring tools together"
+    - the wiring belonged to a different job and WaveWatch is a different
+    project. Two true facts fused into one false sentence. Grouping by
+    `source_span` shows which facts came from the same line of the resume,
+    so the model can see they are separate things.
+    """
+    if not claims:
+        return "- (none)"
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for c in claims:
+        key = str(c.get("source_span") or "")
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(c)
+    lines: list[str] = []
+    for n, key in enumerate(order, start=1):
+        lines.append(f"FACT GROUP {n} (one thing - never mix with another group):")
+        for c in groups[key]:
+            lines.append(f"  - [{c.get('kind')}] {c.get('text')}")
+    return "\n".join(lines)
 
 
 def _format_thread_history(history: list[dict]) -> str:
@@ -290,13 +563,36 @@ def build_draft_prompt(context: dict) -> str:
         f"title: {founder.get('title') or '(unknown)'}",
         f"bio: {founder.get('bio') or '(none)'}",
         "",
-        "AVAILABLE SOURCES (ground part 1 on exactly one; cite its kind and id;",
-        "listed in priority order - prefer the first one that gives you something specific)",
-        _format_sources(context.get("available_sources") or []),
+        *(
+            [
+                "WHAT THEY SAID (ground your paragraph on this, and nothing else)",
+                _format_one_source(context.get("available_sources") or []),
+            ]
+            if int(context.get("sequence_step") or 0) == 0
+            else [
+                "AVAILABLE SOURCES (ground part 1 on exactly one; cite its kind and id;",
+                "listed in priority order - prefer the first one that gives you something specific)",
+                _format_sources(context.get("available_sources") or []),
+            ]
+        ),
         "",
-        "RESUME CLAIMS (the only things you may say about the sender)",
-        _format_claims(context.get("claims") or []),
     ]
+    # The resume goes to the model only when it is actually writing about
+    # the sender - i.e. a follow-up. A first email's model writes one
+    # paragraph about the COMPANY, so handing it the resume would only
+    # invite it to paraphrase facts that are already in the letter
+    # verbatim. That is precisely how a Better metric ended up attributed
+    # to WaveWatch.
+    if int(context.get("sequence_step") or 0) > 0:
+        parts += [
+            "",
+            "RESUME CLAIMS (the only things you may say about the sender).",
+            "Each FACT GROUP is ONE thing the sender did. NEVER attribute a "
+            "detail from one group to the project named in another - saying a "
+            "project did what a different job did is a lie, even though both "
+            "facts are true on their own.",
+            _format_claims(context.get("claims") or []),
+        ]
     # Task 12: a follow-up (sequence_step > 0) gets its own section naming
     # the word target for this step and showing the thread so far — a
     # first email (step 0, or a context with no `sequence_step` at all)
@@ -326,8 +622,46 @@ def build_draft_prompt(context: dict) -> str:
             f"subject: {previous.get('subject')}",
             f"body: {previous.get('body')}",
         ]
+    # Live finding (2026-09-17): with the four-part structure described only
+    # in the (long) system prompt, sarvam-105b-conversations returned the
+    # hook alone and dropped parts 2-4 - twice, so the retry burned too. A
+    # short checklist at the END of the user prompt, right before the
+    # instruction to write, is the part a small model actually follows.
+    if step == 0:
+        parts += [
+            "",
+            "Write ONLY the paragraph about this company - one or two "
+            "entries in \"company_paragraphs\". The sender's own "
+            "introduction, what he has built and his ask are already "
+            "written and are not yours to produce or repeat.",
+            "Name the choice they made that is not the obvious one: what "
+            "they did NOT do, then what they did instead. Both halves must "
+            "be visible in the source you cite.",
+            "No entry may contain a blank line. Name the company once.",
+            "Set could_be_a_user by judging THE COMPANY: could a computer "
+            "science student in India plausibly be a user of this himself?",
+        ]
     parts += ["", "Write the email now."]
     return "\n".join(parts)
+
+
+def _paragraph_list(raw) -> list[str]:
+    """The model's paragraphs as a list, whatever shape it sent.
+
+    The schema asks for an ARRAY, but a model that answers with one
+    string must not be turned into a single run-on paragraph, and a list
+    must never be `str()`-ed - that renders "['one', 'two']", brackets
+    and quotes included, into the email.
+    """
+    if isinstance(raw, (list, tuple)):
+        return [str(p).strip() for p in raw if str(p).strip()]
+    text = str(raw or "").strip()
+    return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+
+
+def _paragraph_text(raw) -> str:
+    """The same paragraphs as one body, blank line between each."""
+    return "\n\n".join(_paragraph_list(raw))
 
 
 class GeminiDrafter:
@@ -343,21 +677,46 @@ class GeminiDrafter:
         self._sleep = _sleep
 
     def draft(self, prompt_context: dict) -> dict:
+        """A first email and a follow-up are two different jobs.
+
+        Step 0: the model writes only the paragraph about the company;
+        `draft_outreach` assembles the letter around it from
+        `app.domain.letter`. The returned dict carries
+        `company_paragraphs` and `could_be_a_user` instead of a body.
+
+        Step > 0: unchanged - a follow-up is short, bespoke and has no
+        fixed blocks to assemble, so the model writes the whole body.
+        """
+        first_email = int(prompt_context.get("sequence_step") or 0) == 0
+        system = _FIRST_EMAIL_SYSTEM if first_email else _DRAFTER_SYSTEM
+        schema = FIRST_EMAIL_SCHEMA if first_email else DRAFT_SCHEMA
         response = _generate_with_retry(
             self._client, self._sleep, "drafter",
             model=self._model,
             contents=build_draft_prompt(prompt_context),
             config=types.GenerateContentConfig(
-                system_instruction=_DRAFTER_SYSTEM,
+                system_instruction=system,
                 response_mime_type="application/json",
-                response_schema=DRAFT_SCHEMA,
+                response_schema=schema,
             ),
         )
         data = _decode_json(response.text, "drafter")
         if not isinstance(data, dict):
             raise ValueError("drafter: expected a JSON object")
-        missing = [k for k in ("subject", "body", "research_source_type", "research_source_id")
-                   if k not in data]
+        if first_email:
+            missing = [k for k in ("subject", "company_paragraphs") if k not in data]
+            if missing:
+                raise ValueError(f"drafter: response missing {', '.join(missing)}")
+            kind, source_id = first_email_source(prompt_context, 1)
+            return {
+                "subject": str(data["subject"]),
+                "company_paragraphs": _paragraph_list(data["company_paragraphs"]),
+                "could_be_a_user": bool(data.get("could_be_a_user")),
+                "research_source_type": kind,
+                "research_source_id": source_id,
+            }
+        missing = [k for k in ("subject", "body", "research_source_type",
+                               "research_source_id") if k not in data]
         if missing:
             raise ValueError(f"drafter: response missing {', '.join(missing)}")
         try:
@@ -366,7 +725,7 @@ class GeminiDrafter:
             raise ValueError("drafter: research_source_id is not an integer") from exc
         return {
             "subject": str(data["subject"]),
-            "body": str(data["body"]),
+            "body": _paragraph_text(data["body"]),
             "research_source_type": str(data["research_source_type"]),
             "research_source_id": source_id,
         }
@@ -514,6 +873,17 @@ The single most useful question: is any sentence here doing no work? A
 draft can pass every mechanical rule and still contain a sentence that
 adds nothing, restates something already said, or could be sent to any
 company with the names swapped. That is what you are here to catch.
+
+Two more things to look for, because they are the tells a human reader
+notices first:
+- Reads like a template / AI-generated: tidy parallel sentences of the
+  same length and shape, praise ("impressive", "exciting"), or a sentence
+  that summarises the company back to the founder who built it.
+- Part 1 (the first paragraph) is not a real question or a specific
+  observation about how their product works - it is a compliment, a
+  restatement of what they do, or an abstract-noun summary ("that
+  natural language layer") rather than something a curious engineer would
+  actually ask.
 
 Never judge or comment on whether a fact is true, whether a claim is
 grounded, or word/sentence counts - those are already handled and are not

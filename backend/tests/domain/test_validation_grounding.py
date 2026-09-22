@@ -130,3 +130,15 @@ def test_a_non_cited_outlet_name_appearing_verbatim_in_the_body_is_rejected():
 def test_all_publications_does_not_break_a_grounded_draft():
     assert validate_grounding(d(), NEWS, "Vahan", "Recruitment over voice", CLAIMS,
                               all_publications=["The Economic Times", "Mint"]) == []
+
+
+def test_rejects_naming_a_launch_post_as_the_source():
+    # Live finding (2026-09-17): "In Orangewood's launch post, you mention
+    # that ..." passed - the list only covered news-shaped wording, so
+    # every non-news source kind could be named in the body (D29).
+    body = ("In Orangewood's launch post, you mention reprogramming for a new shape. "
+            "Where does the ambiguity get resolved?\n\n"
+            "I'm a student, resume attached.\n\n"
+            "Would Orangewood take an intern?")
+    errs = validate_grounding(d(body), NEWS, "Vahan", "x", CLAIMS)
+    assert any("source" in e for e in errs), errs

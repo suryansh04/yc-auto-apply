@@ -432,3 +432,34 @@ def test_send_to_self_respects_limit(repos, five_approved):
     s = FakeSender()
     assert SendApproved(s, FrozenClock(), repos).send_to_self("me@example.com", limit=2) == 2
     assert {d["to"] for d in s.sent} == {"me@example.com"}
+
+
+def test_a_draft_with_the_fill_in_yourself_paragraph_is_never_sent(repos, one_approved):
+    """2026-09-22: a first email to a company the sender could plausibly
+    use carries a placeholder paragraph only he can fill in ("are you
+    actually their user?"). Approving at speed is exactly when that gets
+    missed, so send is the gate: ">>> YOUR TURN" reaching a founder would
+    be worse than not sending at all.
+    """
+    from app.domain.letter import USER_FIT_STUB
+
+    row = _outbound(repos, one_approved)
+    row.body = f"{row.body}\n\n{USER_FIT_STUB}"
+    s = FakeSender()
+    result = SendApproved(s, FrozenClock(), repos).run(cap=10)
+    assert s.sent == []
+    assert result.errors == 1
+    assert _outbound(repos, one_approved).sent_at is None
+
+
+def test_the_same_draft_sends_once_the_paragraph_is_filled_in(repos, one_approved):
+    from app.domain.letter import USER_FIT_STUB
+
+    row = _outbound(repos, one_approved)
+    row.body = f"{row.body}\n\n{USER_FIT_STUB}".replace(
+        USER_FIT_STUB, "I have used it every week since March."
+    )
+    s = FakeSender()
+    result = SendApproved(s, FrozenClock(), repos).run(cap=10)
+    assert len(s.sent) == 1
+    assert result.errors == 0

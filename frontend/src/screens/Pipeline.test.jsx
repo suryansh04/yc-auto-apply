@@ -5,9 +5,14 @@
 import { expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { renderWithQuery as render } from '../test/render'
+import { MemoryRouter } from 'react-router-dom'
+import { renderWithQuery } from '../test/render'
 import { mockJobs, mockStartJob, mockStats } from '../test/mocks'
-import Pipeline from './Pipeline'
+import Pipeline, { funnelDomainMax } from './Pipeline'
+
+// The screen links the two counts that need a decision through to the
+// screens where that decision gets made, so it needs a router.
+const render = (ui) => renderWithQuery(<MemoryRouter>{ui}</MemoryRouter>)
 
 it('shows the funnel counts by state', async () => {
   mockStats({ counts: { new: 249, needs_manual_email: 20, sent: 3 } })
@@ -97,8 +102,10 @@ it('renders needs_manual_email as its own count, not folded into new', async () 
   mockJobs([])
   render(<Pipeline />)
   expect(await screen.findByText('100')).toBeInTheDocument()
-  expect(await screen.findByText('25')).toBeInTheDocument()
-  expect(screen.getByText('Needs manual email')).toBeInTheDocument()
+  // 25 appears twice: once in the ledger row, once in the standing
+  // figure at the top that links to the screen where it gets fixed.
+  expect((await screen.findAllByText('25')).length).toBeGreaterThanOrEqual(1)
+  expect(screen.getByText('Needs an address')).toBeInTheDocument()
 })
 
 it('shows progress without a slash when total is unknown (null)', async () => {
@@ -114,20 +121,22 @@ it('renders every funnel state even when its count is 0', async () => {
   mockJobs([])
   render(<Pipeline />)
   await screen.findByText('Pipeline')
+  // The words come from src/labels.js, the app's one vocabulary - the
+  // same row must read identically here and on the Founders screen.
   for (const label of [
-    'New',
-    'Needs email',
-    'Needs manual email',
-    'Ready to draft',
-    'Pending approval',
-    'Approved',
+    'Not started',
+    'Looking for an address',
+    'Needs an address',
+    'Ready to write',
+    'Waiting for review',
+    'Approved, not sent',
     'Sent',
-    'Replied',
+    'They replied',
     'Closed',
-    'Unresolved',
+    'No address found',
     'Discarded',
-    'Bounced',
-    'Failed',
+    'Address bounced',
+    'Something failed',
   ]) {
     expect(screen.getByText(label)).toBeInTheDocument()
   }
@@ -160,22 +169,24 @@ it('renders exactly the seven registered job kinds as stage buttons, in order', 
   ])
 })
 
-it("describes classify-replies' machine-reply rule, not a nonexistent label", async () => {
+it("describes classify-replies' machine-reply rule, in the app's own words", async () => {
   // The stage list test above pins labels only. This pins the
-  // description: there is no "not interested" label (the real set is
-  // INTERESTED/REJECTED/REFERRAL/AUTO_REPLY/OUT_OF_OFFICE/UNCLEAR), and
-  // the single most important rule this stage implements - machine
-  // replies never end a follow-up sequence - has to actually be stated.
+  // description: the single most important rule this stage implements -
+  // an automatic reply never ends a follow-up sequence - has to actually
+  // be stated, and the reply kinds it names have to be ones the Thread
+  // screen can actually show (src/screens/Thread.jsx's LABEL_TEXT), not
+  // invented ones.
   mockStats({})
   mockJobs([])
   render(<Pipeline />)
   await screen.findByText('Pipeline')
 
-  const description = screen.getByText(/machine replies.*never end a follow-up sequence/i)
+  const description = screen.getByText(/never counts as an answer/i)
   expect(description).toBeInTheDocument()
-  expect(description.textContent).not.toMatch(/not interested/i)
-  expect(description.textContent).toMatch(/AUTO_REPLY/)
-  expect(description.textContent).toMatch(/OUT_OF_OFFICE/)
+  expect(description.textContent).toMatch(/follow-ups keep going/i)
+  for (const kind of ['interested', 'not interested', 'referral', 'automatic']) {
+    expect(description.textContent.toLowerCase()).toContain(kind)
+  }
 })
 
 it('polls jobs at a 2000ms interval while running, not sooner', async () => {
@@ -254,4 +265,19 @@ it('does not show the gmail-auth banner for a poll-replies job that is still run
   // pre-fetch empty state.
   expect(await screen.findByText(/running/)).toBeInTheDocument()
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
+it('draws both funnel groups on one scale', () => {
+  // Scaling each group to its own largest bar made a count of 1 in the
+  // exceptions group as wide as 162 in the main one: two charts under
+  // one heading are read as one picture, so a bar's length has to mean
+  // the same thing in both. Asserted on the scale itself rather than on
+  // bar widths - jsdom has no layout, so the chart draws nothing and the
+  // DOM cannot answer this.
+  expect(funnelDomainMax({ new: 100, discarded: 1 })).toBe(100)
+  // The largest bar sets the scale wherever it lives, including in the
+  // exceptions group.
+  expect(funnelDomainMax({ new: 2, discarded: 57 })).toBe(57)
+  // Never zero: an all-empty pipeline must not divide by it.
+  expect(funnelDomainMax({})).toBe(1)
 })

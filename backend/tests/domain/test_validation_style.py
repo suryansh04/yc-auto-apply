@@ -1,6 +1,16 @@
 # backend/tests/domain/test_validation_style.py
+import pytest
+
 from app.domain.entities import Draft
-from app.domain.validation import validate_style
+from app.domain.validation import (
+    AI_TELL_PHRASES,
+    MAX_PARAGRAPHS,
+    MAX_SENTENCE_WORDS,
+    MAX_SENTENCES_PER_PARAGRAPH,
+    MAX_SUBJECT_WORDS,
+    MAX_WORDS,
+    validate_style,
+)
 
 GOOD_BODY = (
     "You're matching blue-collar workers to jobs over voice, in a dozen languages. "
@@ -17,15 +27,16 @@ def draft(body=GOOD_BODY, subject="Backend intern at Vahan", step=0):
 def test_the_reference_example_passes():
     assert validate_style(draft()) == []
 
-def test_rejects_body_over_120_words():
-    assert any("120 words" in e for e in validate_style(draft(body="word " * 121 + "intern")))
+def test_rejects_a_body_over_the_word_cap():
+    body = "word " * (MAX_WORDS + 1) + "intern"
+    assert any(f"{MAX_WORDS} words" in e for e in validate_style(draft(body=body)))
 
-def test_rejects_a_sentence_over_25_words():
-    long_sentence = " ".join(["word"] * 26) + " intern."
-    assert any("25 words" in e for e in validate_style(draft(body=long_sentence)))
+def test_rejects_a_sentence_over_the_sentence_cap():
+    long_sentence = " ".join(["word"] * (MAX_SENTENCE_WORDS + 1)) + " intern."
+    assert any(f"{MAX_SENTENCE_WORDS} words" in e for e in validate_style(draft(body=long_sentence)))
 
-def test_rejects_more_than_three_paragraphs():
-    body = "\n\n".join(["An intern ask here."] * 4)
+def test_rejects_more_paragraphs_than_the_cap():
+    body = "\n\n".join(["An intern ask here."] * (MAX_PARAGRAPHS + 1))
     assert any("paragraph" in e for e in validate_style(draft(body=body)))
 
 def test_rejects_semicolons():
@@ -54,8 +65,15 @@ def test_rejects_missing_internship_ask():
 
 def test_rejects_bad_subject_length():
     assert any("subject" in e for e in validate_style(draft(subject="Hi")))
-    assert any("subject" in e for e in validate_style(
-        draft(subject="A rather long subject line about interning here")))
+    too_long = " ".join(["word"] * (MAX_SUBJECT_WORDS + 1))
+    assert any("subject" in e for e in validate_style(draft(subject=too_long)))
+
+
+def test_accepts_the_operators_seven_word_subject_style():
+    # "SDE intern who's been poking around RoboGPT" - the operator's own
+    # template (2026-09-17); the old 6-word cap rejected it.
+    assert validate_style(
+        draft(subject="SDE intern who's been poking around RoboGPT")) == []
 
 def test_followup_must_be_shorter_than_previous():
     errs = validate_style(draft(step=1), previous_body="short intern ask")
@@ -64,15 +82,14 @@ def test_followup_must_be_shorter_than_previous():
 
 # --- Fix round 1 coverage (I2, I4, and cheap minors) ---
 
-def test_rejects_a_paragraph_with_more_than_three_sentences():
-    # One paragraph, four sentences, no paragraph break: isolates the
+def test_rejects_a_paragraph_with_more_sentences_than_the_cap():
+    # One paragraph, cap+1 sentences, no paragraph break: isolates the
     # per-paragraph sentence-count rule from the paragraph-COUNT rule, which
-    # the original test_rejects_more_than_three_paragraphs (four one-sentence
-    # paragraphs) never exercised.
-    body = ("You build voice AI for blue-collar workers. I think that's exciting. "
-            "I built a scheduler once. Would you take an intern?")
+    # the paragraph-count test (one-sentence paragraphs) never exercises.
+    body = (" ".join(["You build voice AI for blue-collar workers."] * MAX_SENTENCES_PER_PARAGRAPH)
+            + " Would you take an intern?")
     errs = validate_style(draft(body=body))
-    assert "a paragraph exceeds 3 sentences" in errs
+    assert f"a paragraph exceeds {MAX_SENTENCES_PER_PARAGRAPH} sentences" in errs
 
 
 def test_rejects_more_than_two_em_dashes():
@@ -118,3 +135,120 @@ def test_location_phrase_does_not_false_positive_on_partial_word():
             "Would you take an intern?")
     errs = validate_style(draft(body=body))
     assert not any("location" in e for e in errs)
+
+
+# --- Live finding 2026-09-16: "looks very AI generated" -------------------
+# The operator's chosen tone example (curious and specific: a real question
+# about the mechanism, the student's one project and why it connects, a
+# plain ask). Restored to the operator's own 31-word opening sentence after
+# the 2026-09-17 decision to raise the caps - an email that has room to
+# breathe reads less machine-cut than three clipped sentences.
+
+OPERATOR_EXAMPLE = (
+    "I read your launch post about turning a new pick-and-place task into a "
+    "sentence instead of a reprogramming job.\n\n"
+    "I can't try a robot arm from my desk, but the choice I noticed is that "
+    "RoboGPT takes the prompt and the vision model separately rather than "
+    "fusing them.\n\n"
+    "I'd like to join Orangewood as an SDE intern and work on that planning "
+    "layer.\n\n"
+    "Resume is attached. Would you be open to a quick 15-minute chat?"
+)
+
+def test_the_operator_example_passes_style():
+    assert validate_style(draft(body=OPERATOR_EXAMPLE, subject="Intern question about RoboGPT")) == []
+
+
+def test_the_prompts_tone_example_leaves_the_personal_parts_blank():
+    """Live finding (2026-09-17): the example's own sentences were coming
+    back in real emails - every founder got "that taught me how painful
+    deduplication gets", and one got "your planner" when they build
+    procurement software. The parts that must come from the sender's own
+    resume are placeholders now, so there is nothing there to copy."""
+    from app.adapters.gemini import _DRAFTER_SYSTEM
+    example = _DRAFTER_SYSTEM[_DRAFTER_SYSTEM.index("TONE EXAMPLE"):]
+    assert "<the real project or job from the FACT GROUPS" in example
+    assert "<here: your year, degree and college" in example
+    # The lesson that was being copied verbatim is gone from the example.
+    assert "deduplication" not in example.lower()
+
+
+@pytest.mark.parametrize("phrase", AI_TELL_PHRASES)
+def test_rejects_each_ai_tell_phrase(phrase):
+    body = f"You build voice AI and it {phrase} me. Would you take an intern?"
+    errs = validate_style(draft(body=body))
+    assert any(f"banned phrase: {phrase!r}" in e for e in errs)
+
+
+def test_ai_tells_never_reject_a_company_name():
+    body = ("Incredible Health matches nurses to hospitals over one app. "
+            "Where does the matching break first, the hospitals or the nurses?\n\n"
+            "I'm a student. I built a scheduler that cut queue wait by half, resume attached.\n\n"
+            "Would Incredible Health take an intern this year?")
+    assert not [e for e in validate_style(draft(body=body)) if "banned phrase" in e]
+
+
+def test_the_ai_tell_list_covers_the_rejected_draft():
+    rejected = (
+        "Orangewood's RoboGPT lets anyone program a robotic arm with a text prompt. "
+        "That natural language layer feels like the exact interface small shops "
+        "need to actually adopt automation.\n\n"
+        "I cut manual grading time by 70% on WaveWatch by building an AI pipeline.\n\n"
+        "Would Orangewood take on a software engineering intern?"
+    )
+    assert any("banned phrase" in e for e in validate_style(draft(body=rejected)))
+
+
+# --- Live findings 2026-09-17 (the connection template, on real data) -----
+
+@pytest.mark.parametrize("claim", [
+    "I signed up and tried sending a text prompt to move an object.",
+    "I tried it last week and the setup was one step.",
+    "I have used it on a side project.",
+    "I created an account to see the onboarding.",
+])
+def test_rejects_claiming_to_have_used_the_product(claim):
+    # The model wrote the first of these to a ROBOT ARM company. A founder
+    # can check their own signup list; the claim is banned outright.
+    body = f"You build robot arms.\n\n{claim}\n\nWould you take an intern?"
+    assert any("banned phrase" in e for e in validate_style(draft(body=body)))
+
+
+def test_rejects_our_internal_source_kind_names():
+    # "In your long description you said ..." - that is our database
+    # schema talking, not a person who read what they wrote.
+    body = ("In your long description you said you do procurement.\n\n"
+            "Would you take an intern?")
+    assert any("banned phrase" in e for e in validate_style(draft(body=body)))
+
+
+def test_the_company_name_acronym_is_not_shouting():
+    # "SDE internship at Bulk MRO" was rejected as shouting: two all-caps
+    # tokens, both legitimate (the role asked for, the company's own name).
+    errs = validate_style(draft("Would you take an intern? Thanks."),
+                          company_name="Bulk MRO Industrial Supply")
+    assert not any("all-caps" in e for e in errs)
+
+
+def test_genuine_shouting_is_still_rejected():
+    errs = validate_style(draft("Would you take an intern? Thanks.",
+                                subject="URGENT HIRING REQUEST NOW"),
+                          company_name="Bulk MRO Industrial Supply")
+    assert any("all-caps" in e for e in errs)
+
+
+@pytest.mark.parametrize("phrase", [
+    "I have not signed up for Mudrex, but the split is interesting.",
+    "I haven't tried the product, but I noticed the API is one call.",
+])
+def test_rejects_apologising_for_not_having_used_the_product(phrase):
+    # Honest, but it reads as an apology for homework nobody asked for.
+    body = f"You build trading tools.\n\n{phrase}\n\nWould you take an intern?"
+    assert any("banned phrase" in e for e in validate_style(draft(body=body)))
+
+
+def test_rejects_asserting_relevance_instead_of_showing_it():
+    body = ("You build trading tools.\n\nI built a scheduler in Python. "
+            "That is relevant to what Mudrex is working on.\n\n"
+            "Would you take an intern?")
+    assert any("banned phrase" in e for e in validate_style(draft(body=body)))

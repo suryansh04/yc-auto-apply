@@ -77,6 +77,10 @@ python -m alembic upgrade head
 python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000
 ```
 
+Gmail is connected from the app itself now, not the terminal: open the UI
+and press **Connect Gmail**. `python -m app.cli gmail-auth` still works and
+does the same thing, but you never need it.
+
 Leave that `uvicorn` process running — the API must stay up for the UI
 and the scheduled tasks below to do anything. In a second terminal:
 

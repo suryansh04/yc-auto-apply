@@ -29,11 +29,52 @@
 import { useState } from 'react'
 import { useApprove, useEdit, useQueue, useRedraft, useReject } from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
-import DraftPane from '../components/DraftPane'
-import SourcePane from '../components/SourcePane'
-import Editor from '../components/Editor'
-import ActionBar from '../components/ActionBar'
-import Banner from '../components/Banner'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { Input } from '@/components/ui/input'
+import { Item, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item'
+import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
+import { Separator } from '@/components/ui/separator'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
+
+// app/domain/letter.py's USER_FIT_MARKER, mirrored by hand - there is no
+// endpoint that exposes it. A draft to a company the sender could
+// plausibly be a user of carries a paragraph only he can write; `send`
+// refuses a body that still has the marker, so saying so here is what
+// stops him approving 47 drafts and finding out later.
+const USER_FIT_MARKER = '>>> YOUR TURN'
+
+// The source kinds are database enum values (`long_description`,
+// `job_posting`). Nobody reviewing a letter thinks in those terms, so
+// say where the fact came from in the words a person would use.
+const SOURCE_KINDS = {
+  news: 'From a news story about them',
+  launch: 'From their launch post',
+  job_posting: 'From a job they posted',
+  long_description: 'From their own description of the company',
+}
+
+// T13-1: `critic_verdict` is PASS / NEEDS_REVISION / ERROR (the critic
+// itself crashed). ERROR must never read as a verdict on the letter.
+function criticCheck(verdict) {
+  if (verdict === 'PASS') return { variant: 'secondary', label: 'Second opinion: reads well' }
+  if (verdict === 'NEEDS_REVISION')
+    return { variant: 'outline', label: 'Second opinion: worth another look' }
+  if (verdict === 'ERROR') return { variant: 'outline', label: 'Second opinion unavailable' }
+  return { variant: 'outline', label: 'No second opinion yet' }
+}
 
 // The id that was next to `id` in `list` at the moment of an action -
 // "next" if one exists, else "previous" (so acting on the last item in
@@ -101,19 +142,13 @@ export default function ReviewQueue() {
   // visible list, show that; otherwise (nothing selected yet on first
   // load, or the selected id fell out of the list for a reason other
   // than this screen's own action) fall back to the first visible item.
-  // The common case (this screen's own approve/reject/redraft) already
-  // set `currentId` to the right next id *before* the mutation fired, so
-  // this falls through to the first branch.
   //
   // F11: the fallback-to-first-item branch is reachable in the wild only
   // when something *other* than this screen's own action removes the
   // currently-viewed id mid-session - concurrently reviewing the same
-  // outreach row from the CLI is the one real path, since nothing else
-  // in this app writes to the queue. Jumping to the start of the
-  // (now-shorter) list rather than trying to guess a "neighbour" is a
-  // deliberate simplicity choice: it is rendered before any key can act
-  // on stale data, so there is no wrong-item risk, only a jump the
-  // operator will notice and re-navigate from.
+  // outreach row from the CLI is the one real path. Jumping to the start
+  // of the (now-shorter) list is deliberate: it is rendered before any
+  // key can act on stale data, so there is no wrong-item risk.
   const current =
     visibleItems.find((it) => it.outreach_id === currentId) ??
     (visibleItems.length > 0 ? visibleItems[0] : null)
@@ -123,19 +158,18 @@ export default function ReviewQueue() {
 
   // T16-4/F5: one in-flight approve/reject/redraft at a time - "aa" must
   // never double-submit the same action. Keyed on the mutations
-  // themselves (rather than per-id) since only one item can be acted on
-  // at once from this screen anyway, and this also covers the narrow
-  // window (two keydowns in the same tick, before React has re-rendered
-  // with the new `currentId`/`settledIds`) that filtering alone can't:
+  // themselves since only one item can be acted on at once from this
+  // screen anyway, and this also covers the narrow window (two keydowns
+  // in the same tick, before React has re-rendered with the new
+  // `currentId`/`settledIds`) that filtering alone can't:
   // `mutation.isPending` flips true synchronously inside `mutate()`,
   // before any state update commits.
   const busy = approve.isPending || reject.isPending || redraft.isPending
 
   // T16-4/F10: navigation is gated on `busy` too, so Skip/next/previous
-  // are exactly as inert as the (visibly disabled) ActionBar buttons
-  // while a mutation is in flight - key and click stay indistinguishable
-  // (T16-1), and it closes off one more way to land somewhere surprising
-  // mid-mutation.
+  // are exactly as inert as the (visibly disabled) action buttons while
+  // a mutation is in flight - key and click stay indistinguishable
+  // (T16-1).
   function goNext() {
     if (!current || busy) return
     const idx = visibleItems.findIndex((it) => it.outreach_id === current.outreach_id)
@@ -216,7 +250,7 @@ export default function ReviewQueue() {
           setEditErrors([])
         },
         // 422 {errors: [...]} - the validator's own messages, verbatim.
-        // Nothing was persisted on the backend, and the Editor keeps
+        // Nothing was persisted on the backend, and the editor keeps
         // whatever the operator typed (it owns its own local state).
         onError: (err) => {
           setEditErrors(err.errors ?? [err.message])
@@ -257,18 +291,35 @@ export default function ReviewQueue() {
     { enabled: isEditing },
   )
 
-  if (queueQuery.isLoading) return <p>Loading queue...</p>
+  if (queueQuery.isLoading) {
+    return (
+      <div className="grid gap-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    )
+  }
 
   if (queueQuery.isError) {
-    return <Banner kind="error">Could not load queue: {queueQuery.error.message}</Banner>
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>Could not load queue</AlertTitle>
+        <AlertDescription>{queueQuery.error.message}</AlertDescription>
+      </Alert>
+    )
   }
 
   if (items.length === 0) {
     return (
-      <div className="review-queue">
-        <h1>Review Queue</h1>
-        <p className="empty-state">Queue is empty — nothing left to review.</p>
-      </div>
+      <>
+        <h1 className="text-2xl font-semibold tracking-tight">Review queue</h1>
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>Queue is empty</EmptyTitle>
+            <EmptyDescription>Nothing left to review.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </>
     )
   }
 
@@ -279,29 +330,59 @@ export default function ReviewQueue() {
   // back, this is purely "nothing safe to show right now."
   if (visibleItems.length === 0) {
     return (
-      <div className="review-queue">
-        <h1>Review Queue</h1>
-        <p className="finishing-state">Finishing up…</p>
-      </div>
+      <>
+        <h1 className="text-2xl font-semibold tracking-tight">Review queue</h1>
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>Nothing left to review</EmptyTitle>
+            <EmptyDescription>Drafts you approved are waiting to send.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </>
     )
   }
 
   // `current` always resolves to a real item once `visibleItems` is
   // non-empty (see its derivation above) - this is just a defensive
   // fallback, never expected to render.
-  if (!current) return <p>Loading queue...</p>
+  if (!current) return <Skeleton className="h-96 w-full" />
+
+  const progress = Math.round((position / visibleItems.length) * 100)
+  const needsYourParagraph = (current.wire_text ?? '').includes(USER_FIT_MARKER)
+  const critic = criticCheck(current.critic_verdict)
+  const showCriticNote = Boolean(current.critic_note) && !dismissedIds.has(current.outreach_id)
 
   return (
-    <div className="review-queue">
-      <h1>Review Queue</h1>
-      <p className="queue-counter">
-        {position} of {visibleItems.length}
-      </p>
+    <>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Review queue</h1>
+        <div className="mt-2 flex items-center gap-3">
+          <span className="text-muted-foreground text-sm tabular-nums whitespace-nowrap">
+            {position} of {visibleItems.length}
+          </span>
+          <Progress value={progress} className="max-w-md" />
+        </div>
+      </div>
 
-      {actionError && <Banner kind="error">{actionError}</Banner>}
+      {actionError && (
+        <Alert variant="destructive">
+          <AlertDescription>{actionError}</AlertDescription>
+        </Alert>
+      )}
+
+      {needsYourParagraph && !isEditing && (
+        <Alert>
+          <AlertTitle>This one is waiting on you</AlertTitle>
+          <AlertDescription>
+            Press <kbd className="font-mono">e</kbd> and replace the{' '}
+            <span className="font-mono">{USER_FIT_MARKER}</span> paragraph with the real thing,
+            or delete it. Approving it as it stands will not send.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {isEditing ? (
-        <Editor
+        <EditDraft
           key={current.outreach_id}
           initialSubject={current.subject ?? ''}
           initialBody={current.body ?? ''}
@@ -311,25 +392,218 @@ export default function ReviewQueue() {
           onCancel={closeEditor}
         />
       ) : (
-        <>
-          <div className="review-panes">
-            <DraftPane
-              item={current}
-              criticDismissed={dismissedIds.has(current.outreach_id)}
-              onDismissCritic={dismissCritic}
-            />
-            <SourcePane item={current} />
-          </div>
-          <ActionBar
-            onApprove={handleApprove}
-            onEdit={openEditor}
-            onRedraft={handleRedraft}
-            onReject={handleReject}
-            onSkip={handleSkip}
-            disabled={busy}
-          />
-        </>
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          {/* The letter. Ruling R2: this renders `wire_text` (greeting,
+              signature and opt-out line already applied), never the bare
+              stored `body` - the operator reviews what actually goes
+              out. */}
+          <Card aria-label="Draft email">
+            <CardHeader>
+              <CardDescription>To</CardDescription>
+              <CardTitle className="text-base font-normal">
+                {current.to ?? 'no address yet'}
+              </CardTitle>
+              <CardDescription className="pt-2">Subject</CardDescription>
+              <CardTitle className="text-base">{current.subject ?? '(no subject)'}</CardTitle>
+              {current.sequence_step > 0 && (
+                <Badge variant="secondary" className="mt-2 w-fit">
+                  Follow-up number {current.sequence_step}
+                </Badge>
+              )}
+            </CardHeader>
+            <Separator />
+            <CardContent>
+              <pre className="font-sans text-[15px] leading-relaxed whitespace-pre-wrap">
+                {current.wire_text}
+              </pre>
+            </CardContent>
+            <CardFooter>
+              {/* Live finding (2026-09-16): the operator reviewed a draft
+                  and said "there is no resume attached". It is - `send`
+                  attaches RESUME_PATH - but nothing said so.
+                  `attachment_name` is null exactly when `send` would
+                  refuse, so say that instead. */}
+              {current.attachment_name ? (
+                <p className="text-muted-foreground text-xs">
+                  {current.attachment_name} goes with it · {current.word_count} words
+                </p>
+              ) : (
+                <p className="text-destructive text-xs" role="alert">
+                  No resume file configured, so this cannot be sent yet · {current.word_count}{' '}
+                  words
+                </p>
+              )}
+            </CardFooter>
+          </Card>
+
+          {/* The docket: everything you need to judge the letter without
+              leaving it. Sticky beside it on a wide screen, so the
+              evidence stays put while you read the claim. */}
+          <aside
+            className="grid gap-4 lg:sticky lg:top-4"
+            aria-label="Company, source and checks"
+          >
+            <Card>
+              <CardHeader>
+                <CardTitle>{current.company_name ?? 'Unknown company'}</CardTitle>
+                {current.company_one_liner && (
+                  <CardDescription>{current.company_one_liner}</CardDescription>
+                )}
+              </CardHeader>
+              <CardContent>
+                <Item variant="muted">
+                  <ItemContent>
+                    <ItemDescription>Founder</ItemDescription>
+                    <ItemTitle>
+                      {current.founder_name}
+                      {current.founder_title ? ` — ${current.founder_title}` : ''}
+                    </ItemTitle>
+                  </ItemContent>
+                </Item>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">What the letter is built on</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-1">
+                {current.source_text ? (
+                  <>
+                    <p className="text-muted-foreground text-xs">
+                      {SOURCE_KINDS[current.source_kind] ?? 'From their research material'}
+                    </p>
+                    <p className="text-sm">{current.source_text}</p>
+                    {current.source_publication && (
+                      <p className="text-muted-foreground text-xs">
+                        {current.source_publication}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-muted-foreground text-sm">
+                    Nothing cited — this one was written by hand.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-2">
+              {current.last_error && (
+                <Alert variant="destructive" role="alert">
+                  <AlertTitle>Needs a fix before approving</AlertTitle>
+                  <AlertDescription>{current.last_error}</AlertDescription>
+                </Alert>
+              )}
+
+              <Badge variant={critic.variant} className="w-fit">
+                {critic.label}
+              </Badge>
+
+              {showCriticNote && (
+                <Alert>
+                  <AlertDescription className="grid gap-2">
+                    <span>{current.critic_note}</span>
+                    <Button variant="outline" size="sm" className="w-fit" onClick={dismissCritic}>
+                      Dismiss
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+          </aside>
+        </div>
       )}
-    </div>
+
+      {/* The decision rail, pinned to the bottom of the viewport: a
+          250-word letter used to push Approve off screen, so the
+          operator had to scroll back up to act on what they had just
+          finished reading. Each button dispatches through the exact same
+          handler its key does (T16-1). */}
+      {!isEditing && (
+        <div
+          role="group"
+          aria-label="Review actions"
+          className="bg-background sticky bottom-0 -mx-4 flex flex-wrap gap-2 border-t px-4 py-3 md:-mx-6 md:px-6"
+        >
+          <Button onClick={handleApprove} disabled={busy}>
+            Approve <kbd className="ml-1 text-xs opacity-70">a</kbd>
+          </Button>
+          <Button variant="outline" onClick={openEditor} disabled={busy}>
+            Edit <kbd className="ml-1 text-xs opacity-70">e</kbd>
+          </Button>
+          <Button variant="outline" onClick={handleRedraft} disabled={busy}>
+            Redraft <kbd className="ml-1 text-xs opacity-70">d</kbd>
+          </Button>
+          <Button variant="outline" onClick={handleReject} disabled={busy}>
+            Reject <kbd className="ml-1 text-xs opacity-70">r</kbd>
+          </Button>
+          <Button variant="ghost" onClick={handleSkip} disabled={busy}>
+            Skip <kbd className="ml-1 text-xs opacity-70">s</kbd>
+          </Button>
+        </div>
+      )}
+    </>
+  )
+}
+
+// The manual-write / edit form. Subject + body are local, controlled
+// state seeded once from the props - deliberately NOT reset when
+// `errors` changes, so a 422 from the validator never wipes out what the
+// operator typed. The parent closes this only on a successful save, and
+// re-mounts it (via `key`) only when a different draft is opened.
+function EditDraft({ initialSubject, initialBody, errors, saving, onSave, onCancel }) {
+  const [subject, setSubject] = useState(initialSubject ?? '')
+  const [body, setBody] = useState(initialBody ?? '')
+
+  return (
+    <Card aria-label="Edit draft">
+      <CardHeader>
+        <CardTitle>Edit draft</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        {errors && errors.length > 0 && (
+          <Alert variant="destructive" role="alert">
+            <AlertTitle>This draft was not saved</AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc pl-4">
+                {errors.map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div className="grid gap-2">
+          <Label htmlFor="edit-subject">Subject</Label>
+          <Input
+            id="edit-subject"
+            aria-label="Subject"
+            value={subject}
+            onChange={(event) => setSubject(event.target.value)}
+          />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="edit-body">Body</Label>
+          <Textarea
+            id="edit-body"
+            aria-label="Body"
+            rows={14}
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+          />
+        </div>
+      </CardContent>
+      <CardFooter className="gap-2">
+        <Button onClick={() => onSave(subject, body)} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </CardFooter>
+    </Card>
   )
 }

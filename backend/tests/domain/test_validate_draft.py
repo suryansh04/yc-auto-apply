@@ -3,7 +3,7 @@
 Added in fix round 1 (I3): before this file, nothing exercised validate_draft
 itself, only its two halves separately."""
 from app.domain.entities import Draft, ResumeClaim
-from app.domain.validation import validate_draft, validate_grounding, validate_style, SourceRow
+from app.domain.validation import MAX_WORDS, validate_draft, validate_grounding, validate_style, SourceRow
 
 NEWS = SourceRow(
     kind="news",
@@ -38,11 +38,11 @@ def test_validate_draft_surfaces_a_style_only_failure():
     # Grounded cleanly (shares a source term, names the company) but blows
     # the word cap: confirms validate_draft surfaces validate_style's errors
     # even when validate_grounding has nothing to say.
-    body = "word " * 121 + "intern Vahan voice blue collar"
+    body = "word " * (MAX_WORDS + 1) + "intern Vahan voice blue collar"
     draft = d(body)
     assert validate_grounding(draft, NEWS, "Vahan", "x", CLAIMS) == []
     errs = validate_draft(draft, NEWS, "Vahan", "x", CLAIMS)
-    assert any("120 words" in e for e in errs)
+    assert any(f"{MAX_WORDS} words" in e for e in errs)
 
 
 def test_validate_draft_surfaces_a_grounding_only_failure():

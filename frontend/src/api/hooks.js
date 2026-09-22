@@ -42,6 +42,32 @@ export function useStats() {
   return useQuery({ queryKey: ['stats'], queryFn: () => apiGet('/stats'), ...QUERY_DEFAULTS })
 }
 
+// The gate the whole app sits behind. Cheap, and re-asked whenever the
+// window regains focus, so coming back from Google's consent screen in
+// another tab lands on a fresh answer rather than a stale "not
+// connected".
+export function useGmailStatus() {
+  return useQuery({
+    queryKey: ['gmail-status'],
+    queryFn: () => apiGet('/gmail/status'),
+    refetchOnWindowFocus: true,
+    ...QUERY_DEFAULTS,
+  })
+}
+
+// Starting the flow is a navigation, not a fetch: the API hands back
+// Google's URL and the browser goes there. `window.location.assign` (not
+// a new tab) so the consent screen and the redirect back happen in one
+// place and no popup blocker is involved.
+export function useConnectGmail() {
+  return useMutation({
+    mutationFn: () => apiPost('/gmail/connect'),
+    onSuccess: (data) => {
+      if (data?.auth_url) window.location.assign(data.auth_url)
+    },
+  })
+}
+
 export function useQueue() {
   return useQuery({ queryKey: ['queue'], queryFn: () => apiGet('/queue'), ...QUERY_DEFAULTS })
 }

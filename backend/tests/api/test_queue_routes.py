@@ -39,3 +39,25 @@ def test_approving_a_draft_the_checks_dislike_still_works(client, repos, one_pen
     assert client.post(f"/api/outreach/{one_pending.id}/approve").status_code == 200
     assert repos.outreach.get(one_pending.id).state == "approved"
     assert isinstance(notes, list)
+
+
+# --- the approved screen (operator request 2026-09-22) --------------------
+
+def test_approved_lists_only_approved_letters(client, repos, one_pending, one_approved):
+    ids = [r["outreach_id"] for r in client.get("/api/approved").json()]
+    assert ids == [one_approved.id]
+    # ...and the review queue still shows only the undecided ones.
+    assert [r["outreach_id"] for r in client.get("/api/queue").json()] == [one_pending.id]
+
+
+def test_approved_carries_the_whole_letter_not_just_a_row(client, one_approved):
+    (item,) = client.get("/api/approved").json()
+    # The composed wire text is what leaves the mailbox (ruling R2), so it
+    # is what this screen must show.
+    assert item["wire_text"]
+    assert item["wire_text"].startswith("Hi ")
+    assert item["to"] and item["subject"]
+
+
+def test_approved_is_empty_when_nothing_is_approved(client, one_pending):
+    assert client.get("/api/approved").json() == []

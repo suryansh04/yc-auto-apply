@@ -445,13 +445,11 @@ export default function Pipeline() {
             </CardDescription>
             <CardTitle className="text-4xl tabular-nums">{approvedNotSent}</CardTitle>
             <CardAction>
-              <Button
-                size="sm"
-                disabled={approvedNotSent === 0 || send.isPending}
-                onClick={handleSend}
-              >
-                {send.isPending ? <Spinner /> : <Send />}
-                Send now
+              <Button asChild size="sm" disabled={approvedNotSent === 0}>
+                <Link to="/approved">
+                  <Send />
+                  Review and send
+                </Link>
               </Button>
             </CardAction>
           </CardHeader>

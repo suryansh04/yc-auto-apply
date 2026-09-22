@@ -289,38 +289,16 @@ it('draws both funnel groups on one scale', () => {
 
 // --- sending (operator finding 2026-09-22) ---------------------------------
 
-it('sends the approved letters, after asking', async () => {
+it('points at the approved letters rather than sending from a number', async () => {
   // "clicking approve does nothing, not sending the email": approve was
-  // working, but approving and sending are two steps and there was no way
-  // to do the second one from the UI at all.
+  // working, but there was no way to send from the UI at all. Sending now
+  // lives on its own screen, where the letters can be read first, so this
+  // card is the way in rather than the trigger.
   mockStats({ counts: { approved: 3 } })
   mockJobs([])
-  const send = mockSend({ sent: 3 })
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
   render(<Pipeline />)
-  await userEvent.click(await screen.findByRole('button', { name: /send now/i }))
-  await waitFor(() => expect(send).toHaveBeenCalled())
-  expect(confirm.mock.calls[0][0]).toMatch(/send 3 approved letters/i)
-  expect(await screen.findByText('3 letters sent')).toBeInTheDocument()
-  confirm.mockRestore()
-})
-
-it('does not send when the confirmation is declined', async () => {
-  mockStats({ counts: { approved: 2 } })
-  mockJobs([])
-  const send = mockSend({ sent: 2 })
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-  render(<Pipeline />)
-  await userEvent.click(await screen.findByRole('button', { name: /send now/i }))
-  expect(send).not.toHaveBeenCalled()
-  confirm.mockRestore()
-})
-
-it('offers nothing to send when nothing is approved', async () => {
-  mockStats({ counts: { approved: 0 } })
-  mockJobs([])
-  render(<Pipeline />)
-  expect(await screen.findByRole('button', { name: /send now/i })).toBeDisabled()
+  const link = await screen.findByRole('link', { name: /review and send/i })
+  expect(link).toHaveAttribute('href', '/approved')
 })
 
 it('names every outcome of a send, not just the ones that went', () => {

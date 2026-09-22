@@ -133,8 +133,22 @@ class ReviewOutreach:
     # -- listing ---------------------------------------------------------------
 
     def pending(self) -> list[ReviewItem]:
+        return self._in_state(OutreachState.PENDING_APPROVAL)
+
+    def approved(self) -> list[ReviewItem]:
+        """The letters the operator has approved and not yet sent.
+
+        Operator request (2026-09-22): a screen of its own. They are
+        neither in the review queue (already decided) nor visible anywhere
+        else as whole letters, and they are the ones about to leave, so
+        reading them one more time before pressing send is the last
+        moment anything can be caught.
+        """
+        return self._in_state(OutreachState.APPROVED)
+
+    def _in_state(self, state: OutreachState) -> list[ReviewItem]:
         items = []
-        for founder in self._repos.founder.list_by_state(state=OutreachState.PENDING_APPROVAL):
+        for founder in self._repos.founder.list_by_state(state=state):
             outreach = self._repos.outreach.get_by_founder_id(founder.id)
             if outreach is None:
                 continue

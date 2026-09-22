@@ -107,6 +107,16 @@ def list_queue(repos: Repos = Depends(get_repos)) -> list[QueueItemOut]:
     return [_to_out(item) for item in _use_case(repos).pending()]
 
 
+@router.get("/approved", response_model=list[QueueItemOut])
+def list_approved(repos: Repos = Depends(get_repos)) -> list[QueueItemOut]:
+    """The letters approved and not yet sent, as whole letters.
+
+    Same shape as `/queue` because it is the same thing at a later
+    moment - the operator reads the composed wire text, not a row.
+    """
+    return [_to_out(item) for item in _use_case(repos).approved()]
+
+
 @router.get("/queue/{outreach_id}", response_model=QueueItemOut)
 def get_queue_item(outreach_id: int, repos: Repos = Depends(get_repos)) -> QueueItemOut:
     try:

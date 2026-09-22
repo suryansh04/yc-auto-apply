@@ -447,3 +447,10 @@ export function mockSend(result = {}) {
   )
   return spy
 }
+
+
+/** GET /api/approved - the letters approved and not yet sent. Same shape
+ *  as the queue, because it is the same thing at a later moment. */
+export function mockApproved(items = []) {
+  server.use(http.get('/api/approved', () => HttpResponse.json(items)))
+}

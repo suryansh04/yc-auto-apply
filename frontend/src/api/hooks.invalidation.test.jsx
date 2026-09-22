@@ -34,7 +34,9 @@ const cases = [
     hook: useApprove,
     mock: () => http.post('/api/outreach/1/approve', () => HttpResponse.json({ ok: true })),
     variables: 1,
-    expectedKeys: [['queue'], ['stats']],
+    // ['approved'] joined the set on 2026-09-22: approving is what puts a
+    // letter on the Approved screen, so that list is now stale too.
+    expectedKeys: [['queue'], ['approved'], ['stats']],
   },
   {
     name: 'useEdit',
@@ -48,6 +50,8 @@ const cases = [
     hook: useReject,
     mock: () => http.post('/api/outreach/1/reject', () => HttpResponse.json({ ok: true })),
     variables: 1,
+    // ['approved'] joined the set on 2026-09-22: approving is what puts a
+    // letter on the Approved screen, so that list is now stale too.
     expectedKeys: [['queue'], ['stats']],
   },
   {
@@ -55,6 +59,8 @@ const cases = [
     hook: useRedraft,
     mock: () => http.post('/api/outreach/1/redraft', () => HttpResponse.json({ ok: true })),
     variables: 1,
+    // ['approved'] joined the set on 2026-09-22: approving is what puts a
+    // letter on the Approved screen, so that list is now stale too.
     expectedKeys: [['queue'], ['stats']],
   },
   {
@@ -69,7 +75,7 @@ const cases = [
     hook: useSend,
     mock: () => http.post('/api/send', () => HttpResponse.json({ sent: 1 })),
     variables: 5,
-    expectedKeys: [['stats'], ['queue']],
+    expectedKeys: [['stats'], ['queue'], ['approved']],
   },
   {
     name: 'useStartJob',

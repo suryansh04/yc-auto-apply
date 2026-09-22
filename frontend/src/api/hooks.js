@@ -72,6 +72,12 @@ export function useQueue() {
   return useQuery({ queryKey: ['queue'], queryFn: () => apiGet('/queue'), ...QUERY_DEFAULTS })
 }
 
+// The letters approved and not yet sent. Same shape as the queue - it is
+// the same thing at a later moment.
+export function useApproved() {
+  return useQuery({ queryKey: ['approved'], queryFn: () => apiGet('/approved'), ...QUERY_DEFAULTS })
+}
+
 export function useQueueItem(id) {
   return useQuery({
     queryKey: ['queue', id],
@@ -143,6 +149,7 @@ export function useApprove() {
     mutationFn: (id) => apiPost(`/outreach/${id}/approve`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
       queryClient.invalidateQueries({ queryKey: ['stats'] })
     },
   })
@@ -215,6 +222,7 @@ export function useSend() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stats'] })
       queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
     },
   })
 }

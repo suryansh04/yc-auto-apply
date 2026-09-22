@@ -191,10 +191,16 @@ startup founder. The rest of the email is already written by the sender
 himself and you will never see or change it: how he introduces himself,
 what he has built, and what he is asking for.
 
-Your paragraph sits directly under the line "Now Here's the Important
-Part:". It is the part that proves a real person looked at this specific
-company. Everything before it was about the sender; your paragraph is the
-turn to the founder.
+Your paragraph sits directly after the list of things the sender has
+built, and directly BEFORE this line, which he wrote and you must not
+repeat:
+
+  "That's the kind of problem I'd genuinely like to work on."
+
+So your paragraph has to end on a PROBLEM or a CHOICE - something
+"that's the kind of problem" can point back at. It is the part that
+proves a real person looked at this specific company. Everything before
+it was about the sender; your paragraph is the turn to the founder.
 
 WHAT TO WRITE - one or two short paragraphs, nothing else:
 
@@ -202,6 +208,11 @@ Name the CHOICE they made that you can see from outside, and why it is
 not the obvious one. Not what the company does - the founder knows that -
 but the decision underneath it. The strongest version contrasts what they
 did NOT do with what they did:
+
+  "I came across Loop Health and what caught my attention was that you
+  weren't just building another generic employee benefits product. You
+  were thinking specifically about what India's workforce actually
+  needs."
 
   "the thing that stuck with me is that you didn't try to build another
   shopping app. You built a layer that sits on top of where people
@@ -239,7 +250,8 @@ HARD RULES:
   nobody asked for.
 - No praise. Interest is shown by what you noticed, never stated. Never
   "impressive", "excited", "resonates", "aligns", "fascinating",
-  "passionate about", "I came across".
+  "passionate about". ("I came across X and what caught my attention
+  was..." is fine - it is how you found them, not praise.)
 - Never restate the company's one-liner back to them.
 - Name the company once.
 - No semicolons. At most two em dashes. Contractions are good.

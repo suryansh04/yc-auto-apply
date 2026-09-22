@@ -214,6 +214,35 @@ export function mockCheckDraft({ notes = [], highlights = null } = {}) {
  * and `index` is a position in the check's `highlights`, never a match on
  * text.
  */
+/**
+ * POST /api/outreach/:id/generic-line - swap the company paragraph for
+ * the written generic one. An edit, so it answers with the checks'
+ * notes, never a refusal.
+ */
+export function mockGenericLine({ notes = [], highlights = null } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/generic-line', ({ params }) => {
+      spy(Number(params.id))
+      return HttpResponse.json({
+        notes,
+        highlights: highlights ?? notes.map((message) => ({ message, quote: null })),
+      })
+    }),
+  )
+  return spy
+}
+
+/** POST /api/outreach/:id/generic-line refused - a letter that does not
+ *  have the assembled shape, so there is no paragraph to swap. */
+export function mockGenericLineFailure(detail = 'edit it by hand') {
+  server.use(
+    http.post('/api/outreach/:id/generic-line', () =>
+      HttpResponse.json({ detail }, { status: 409 }),
+    ),
+  )
+}
+
 export function mockSuggestFixes({ suggestions = [], unavailable = null } = {}) {
   const spy = vi.fn()
   server.use(

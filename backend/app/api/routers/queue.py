@@ -304,6 +304,26 @@ def redraft(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     return OkOut()
 
 
+@router.post("/outreach/{outreach_id}/generic-line", response_model=CheckOut)
+def generic_line(outreach_id: int, repos: Repos = Depends(get_repos)) -> CheckOut:
+    """Swap the company paragraph for the written generic one.
+
+    Operator request (2026-09-23): a way out for the companies where no
+    good specific line can be found, because the realistic alternative to
+    a generic line is a fabricated one. It is an edit like any other -
+    saved, validated, never refused - so it answers with the checks'
+    notes exactly as `edit` does.
+    """
+    try:
+        notes = _use_case(repos).use_generic_line(outreach_id, now=_UTCClock().now())
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except (ValueError, IllegalTransition) as exc:
+        raise _action_error(exc)
+    repos.session.commit()
+    return _checked(repos, outreach_id, notes, None)
+
+
 @router.post("/outreach/{outreach_id}/edit", response_model=CheckOut)
 def edit(outreach_id: int, payload: EditIn, repos: Repos = Depends(get_repos)) -> CheckOut:
     """Save the operator's text, and say what the checks made of it.

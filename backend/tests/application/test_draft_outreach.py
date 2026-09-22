@@ -564,7 +564,7 @@ def test_a_first_email_is_assembled_from_the_operators_blocks():
     assert letter.OPENER in draft.body
     assert letter.BUILT in draft.body
     assert "You put the whole thing on a voice call." in draft.body
-    assert "building Vahan!" in draft.body
+    assert "do that at Vahan." in draft.body
     assert not letter.contains_stub(draft.body)
 
 

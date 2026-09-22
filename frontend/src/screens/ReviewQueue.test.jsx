@@ -27,6 +27,8 @@ import {
   mockCheckDraft,
   mockSuggestFixes,
   mockSuggestFailure,
+  mockGenericLine,
+  mockGenericLineFailure,
 } from '../test/mocks'
 import ReviewQueue from './ReviewQueue'
 
@@ -769,4 +771,39 @@ it('a failed rewrite call leaves the checks exactly where they were', async () =
   const mark = await screen.findByLabelText('contains a semicolon')
   await userEvent.hover(mark)
   expect(await screen.findByText(/no rewrite for this one/i)).toBeInTheDocument()
+})
+
+
+// --- the generic company line (operator request 2026-09-23) ---------------
+//
+// "give option for this to make a generic if i am not able to find good
+// for this specifically line". The realistic alternative to a generic
+// line is not a better specific one - it is a fabricated one.
+
+it('offers a way to swap in a generic company line', async () => {
+  mockQueue([item({})])
+  const generic = mockGenericLine({ notes: [] })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
+  await waitFor(() => expect(generic).toHaveBeenCalledWith(1))
+})
+
+it('shows what the checks made of the generic line', async () => {
+  // It is an edit, so its result is the checks' verdict on the new text
+  // - shown exactly where a save's would be.
+  mockQueue([item({})])
+  mockGenericLine({ notes: ['hook shares no distinctive term with the cited source'] })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
+  expect(
+    await screen.findByText('hook shares no distinctive term with the cited source'),
+  ).toBeInTheDocument()
+})
+
+it('says so when a letter has no company paragraph to swap', async () => {
+  mockQueue([item({})])
+  mockGenericLineFailure('this letter does not have the assembled shape - edit it by hand')
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
+  expect(await screen.findByText(/edit it by hand/i)).toBeInTheDocument()
 })

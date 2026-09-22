@@ -282,6 +282,27 @@ export function useCheckDraft(options = {}) {
  * unavailable}`. `index` is a position in the check's `highlights`, so a
  * rewrite is paired with its note without matching on text.
  */
+/**
+ * POST /api/outreach/{id}/generic-line - swap the company paragraph for
+ * the written generic one. An edit like any other: saved, validated,
+ * never refused, and it answers with the checks' notes.
+ *
+ * Invalidates the queue and the approved list because the stored body
+ * changed - this is the one "suggestion" on the screen that writes.
+ */
+export function useGenericLine(options = {}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => apiPost(`/outreach/${id}/generic-line`),
+    ...options,
+    onSuccess: (data, id, ctx) => {
+      queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
+      options.onSuccess?.(data, id, ctx)
+    },
+  })
+}
+
 export function useSuggestFixes(options = {}) {
   return useMutation({
     mutationFn: ({ id, subject, body }) =>

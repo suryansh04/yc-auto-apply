@@ -59,6 +59,7 @@ from datetime import datetime
 from typing import Protocol
 
 from app.application.draft_outreach import build_sources, load_resume_claims
+from app.domain import letter
 from app.domain.entities import Draft
 from app.domain.ranking import rank_key
 from app.domain.states import OutreachState, assert_transition
@@ -343,6 +344,46 @@ class ReviewOutreach:
         # returned to the caller instead of being stored as a flag.
         self._repos.outreach.upsert(founder_id=outreach.founder_id, last_error=None)
         return notes
+
+    def use_generic_line(self, outreach_id: int, now: datetime | None = None) -> list[str]:
+        """Swap this letter's company paragraph for the written generic one.
+
+        Operator request (2026-09-23): "give option for this to make a
+        generic if i am not able to find good for this specifically
+        line". Some companies have nothing public worth a specific
+        sentence about them, and the realistic alternative to a generic
+        line is not a better specific line - it is a fabricated one,
+        which is the failure `app.domain.letter` exists to prevent.
+
+        Only the company paragraph changes (`letter.with_insight` works
+        from the letter's own anchors), so an edit the operator made
+        anywhere else in the letter survives. The save then goes through
+        `edit`, which means it is validated, never refused, and re-stamps
+        an APPROVED letter's approval exactly as any other edit does.
+
+        Returns the checks' notes, like `edit`. Raises only when there is
+        nothing to swap: no draft, or a letter that does not have this
+        shape (one written before the blocks were rewritten, or
+        restructured by hand) - guessing which paragraph is the company
+        one would put the generic line in the wrong place.
+        """
+        outreach = self._outreach(outreach_id)
+        founder = self._repos.founder.get(outreach.founder_id)
+        company = self._repos.company.get(founder.company_id) if founder is not None else None
+        if founder is None or company is None:
+            raise ValueError(f"outreach {outreach_id} has no founder/company")
+        step = int(getattr(outreach, "sequence_step", 0) or 0)
+        row = self._repos.message.get_outbound(outreach.id, step)
+        if row is None or not getattr(row, "body", None):
+            raise ValueError("there is no draft to rewrite yet")
+        company_name = getattr(company, "name", None) or ""
+        swapped = letter.with_insight(row.body, [letter.generic_insight(company_name)])
+        if swapped is None:
+            raise ValueError(
+                "this letter does not have the assembled shape, so there is no "
+                "company paragraph to swap - edit it by hand"
+            )
+        return self.edit(outreach_id, row.subject or "", swapped, now=now)
 
     def skip(self, outreach_id: int, now: datetime | None = None) -> None:
         """Pass over this draft without deciding anything.

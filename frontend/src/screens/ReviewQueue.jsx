@@ -30,6 +30,7 @@ import { useEffect, useState } from 'react'
 import {
   useApprove,
   useCheckDraft,
+  useGenericLine,
   useEdit,
   useQueue,
   useRedraft,
@@ -38,7 +39,7 @@ import {
 } from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { markUp } from '@/lib/marks'
-import { Lightbulb, RefreshCw } from 'lucide-react'
+import { Lightbulb, RefreshCw, Shuffle } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -128,6 +129,19 @@ export default function ReviewQueue() {
     // Advice on top of advice: a failure leaves the notes exactly where
     // they are. The hover cards just say there is no rewrite.
     onError: () => setRewrites({}),
+  })
+  // Swapping in the generic company line is an edit, so its result is
+  // the checks' verdict on the new text - shown exactly where a save's
+  // would be.
+  const genericLine = useGenericLine({
+    onSuccess: (data, id) => {
+      setCheckNotes(data?.notes ?? [])
+      setCheckHighlights(data?.highlights ?? [])
+      setCheckedId(id)
+      setActiveNote(null)
+      setRewrites({})
+      setSuggestedId(null)
+    },
   })
   const checkDraft = useCheckDraft({
     onSuccess: (data, { id }) => {
@@ -538,7 +552,7 @@ export default function ReviewQueue() {
                   : current.wire_text}
               </pre>
             </CardContent>
-            <CardFooter>
+            <CardFooter className="flex-wrap items-center justify-between gap-3">
               {/* Live finding (2026-09-16): the operator reviewed a draft
                   and said "there is no resume attached". It is - `send`
                   attaches RESUME_PATH - but nothing said so.
@@ -554,6 +568,24 @@ export default function ReviewQueue() {
                   words
                 </p>
               )}
+              {/* Operator request (2026-09-23): the way out for a company
+                  where no good specific line can be found. It sits under
+                  the letter, next to the line it rewrites, rather than in
+                  the decision rail - it is a rewrite, not a decision. */}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={genericLine.isPending || busy}
+                onClick={() => {
+                  setActionError(null)
+                  genericLine.mutate(current.outreach_id, {
+                    onError: (err) => setActionError(err.message),
+                  })
+                }}
+              >
+                {genericLine.isPending ? <Spinner /> : <Shuffle />}
+                Use a generic line
+              </Button>
             </CardFooter>
           </Card>
 

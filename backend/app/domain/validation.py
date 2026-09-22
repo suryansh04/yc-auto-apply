@@ -13,16 +13,18 @@ from app.domain.names import company_display_name, company_name_variants
 # words), not a style device; rhythm is the prompt's job.
 #
 # Raised again (2026-09-22) for the operator's assembled letter: the fixed
-# blocks in app/domain/letter.py are 193 words before the model writes a
-# syllable, and the example email the operator supplied is 318. The cap
-# leaves room for two company paragraphs and the operator's own user-fit
-# paragraph on top of that. `test_letter.py` pins the cap against the
-# real block sizes, so shortening the cap below what the blocks need
-# fails a test instead of rejecting every draft at run time.
+# blocks in app/domain/letter.py are the bulk of the body before the model
+# writes a syllable - 237 words since the 2026-09-23 rewrite - and the
+# example email the operator supplied is 318. The cap leaves room for two
+# company paragraphs and the operator's own user-fit paragraph on top of
+# that. `test_letter.py` pins the cap against the real block sizes, so
+# shortening the cap below what the blocks need fails a test instead of
+# rejecting every draft at run time.
 MAX_WORDS = 380
 MAX_SENTENCE_WORDS = 45
-# Seven fixed blocks, up to two generated company paragraphs, plus the
-# operator's user-fit paragraph.
+# The fixed blocks are eight paragraphs (the "things I've built" lead-in
+# and its bullet list count separately), plus up to two generated company
+# paragraphs and the operator's user-fit paragraph.
 MAX_PARAGRAPHS = 11
 # Live finding (2026-09-13): the cap alone let a one-block email through —
 # hook, pitch and ask run together in a single 3-sentence paragraph, which
@@ -163,24 +165,24 @@ def _hook(body: str) -> str:
     Historically that was the first paragraph. In an assembled letter
     (2026-09-22) the first paragraph is the operator's fixed opener, which
     is the same for every founder and could never share a term with a
-    source; the paragraph that must be grounded is the one the model wrote,
-    under "Now Here's the Important Part:". Scoring the opener instead
-    rejected every draft with "hook shares no distinctive term with the
-    cited source".
+    source; the paragraph that must be grounded is the one the model
+    wrote. Scoring the opener instead rejected every draft with "hook
+    shares no distinctive term with the cited source".
+
+    Where that paragraph sits is `app.domain.letter`'s business, not this
+    module's - it moved once already, when the letter was rewritten on
+    2026-09-23 and the "Now Here's the Important Part:" hinge disappeared.
+    Asking `letter` for it means this function did not have to move with
+    it.
 
     Only that paragraph is scored, never the whole body, so a later
     paragraph still cannot launder a source or one_liner term.
     """
-    from app.domain.letter import ASK, SECTION_BREAK
+    from app.domain.letter import insight_region
 
-    if SECTION_BREAK in body:
-        after = body.split(SECTION_BREAK, 1)[1]
-        # Everything up to the fixed ask is the model's; the ask and the
-        # close are the operator's again.
-        company_part = after.split(ASK, 1)[0]
-        paras = _paragraphs(company_part)
-        if paras:
-            return "\n\n".join(paras)
+    region = insight_region(body)
+    if region:
+        return region
     paras = _paragraphs(body)
     return paras[0] if paras else body
 
@@ -337,10 +339,16 @@ def validate_style(
 # problem" - naming the channel is what makes that sentence honest rather
 # than a claim to have divined the fact. What stays banned is naming the
 # PUBLICATION (the outlet's coverage, not the founder's own words) and the
-# passive "I came across" framing the operator rejected earlier.
+# PUBLICATION (the outlet's coverage, not the founder's own words).
+#
+# "came across" was on this list until 2026-09-23 as a passive framing the
+# operator had rejected. It came off because he then wrote it himself, in
+# the example letter this module's copy is taken from: "I came across Loop
+# Health and what caught my attention was that...". A ban on a phrase the
+# sender uses in his own letter is a rule about nothing.
 SOURCE_REFERENCE_PHRASES = [
     "the article", "the piece", "coverage", "featured in", "in the news",
-    "press release", "came across",
+    "press release",
 ]
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "for", "to", "of", "in", "on", "at", "with",

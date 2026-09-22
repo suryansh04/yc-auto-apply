@@ -158,11 +158,13 @@ class ReviewOutreach:
         row = self._repos.message.get_outbound(outreach.id, outreach.sequence_step)
         if row is None:
             raise ValueError("refusing to approve: there is no draft yet - press [e] to edit (write) one first")
-        if outreach.last_error and not row.edited_by_user:
-            raise ValueError(
-                "refusing to approve: this draft is flagged NEEDS MANUAL WRITE "
-                f"({outreach.last_error}) - press [e] to edit it before approving"
-            )
+        # Operator decision (2026-09-22): `last_error` used to REFUSE the
+        # approve unless the draft had been hand-edited. It is advice -
+        # what the checks noticed - and the person pressing approve is the
+        # one whose name is on the letter and who has just read it. The
+        # note is still shown, and still stored; it no longer overrules
+        # him. (A draft with no row at all is a different thing and still
+        # refuses above: there is nothing to approve.)
         self._repos.message.upsert(id=row.id, approved_at=now)
         self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.APPROVED))
 

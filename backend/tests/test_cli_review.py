@@ -316,18 +316,21 @@ def test_review_edit_aborted_in_the_editor_changes_nothing(wired_review, repos, 
     assert "aborted" in result.output and "empty" not in result.output
 
 
-def test_review_refuses_to_approve_an_unedited_needs_manual_write_row(
+def test_review_approves_an_unedited_needs_manual_write_row_but_still_shows_the_note(
     wired_review, repos, manual_write_pending,
 ):
-    wired_review.keys = ["a", "s"]
+    # 2026-09-22: this used to be a refusal. The operator's ruling: the
+    # checks are advice, and the person pressing approve is the one whose
+    # name is on the letter. The note is still stored and still shown; it
+    # no longer overrules him.
+    wired_review.keys = ["a"]
     result = runner.invoke(cli.app, ["review"])
     assert result.exit_code == 0, result.output
+    # Still told, every time - the operator decides what to do about it.
     assert "NEEDS MANUAL WRITE" in result.output
-    assert "edit" in result.output.lower() and "refus" in result.output.lower()
-    assert repos.outreach.get(manual_write_pending.id).state == S.PENDING_APPROVAL
-    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at is None
-    assert repos.session.commit_calls == 0
-    assert wired_review.prompts == 2
+    assert "refus" not in result.output.lower()
+    assert repos.outreach.get(manual_write_pending.id).state == S.APPROVED
+    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at is not None
 
 
 def test_review_edit_then_approve_of_a_needs_manual_write_row(

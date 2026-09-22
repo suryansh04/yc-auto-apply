@@ -38,12 +38,14 @@ def test_approve_moves_the_row_and_stamps_approved_at(client, repos, pending_dra
     assert repos.session.commit_calls == 1
 
 
-def test_approve_is_refused_for_a_flagged_unedited_draft(client, repos, flagged_draft):
+def test_a_flagged_draft_can_still_be_approved(client, repos, flagged_draft):
+    # 2026-09-22: this used to be a refusal. The operator's ruling: the
+    # checks are advice, and the person pressing approve is the one whose
+    # name is on the letter. The note is still stored and still shown; it
+    # no longer overrules him.
     r = client.post(f"/api/outreach/{flagged_draft.outreach.id}/approve")
-    assert r.status_code == 409
-    assert repos.outreach.get(flagged_draft.outreach.id).state == S.PENDING_APPROVAL
-    # A refused (409) action must commit nothing.
-    assert repos.session.commit_calls == 0
+    assert r.status_code == 200
+    assert repos.outreach.get(flagged_draft.outreach.id).state == S.APPROVED
 
 
 def test_edit_returns_422_with_the_validators_own_messages(client, repos, pending_draft):

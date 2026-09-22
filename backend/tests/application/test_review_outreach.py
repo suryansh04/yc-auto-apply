@@ -6,7 +6,8 @@ Every state change goes through `assert_transition`; `approve` stamps
 `approved_at` on the step's outbound row (the DB CHECK `sent_requires_
 approved` and `reserve_for_send`'s `approved_at IS NOT NULL` both key off
 it); `edit` re-runs `validate_draft` and persists nothing on failure; a row
-flagged needs-manual-write cannot be approved until it has been edited.
+flagged needs-manual-write CAN be approved (2026-09-22 - the checks are
+advice, and the operator signs the letter), and keeps its note.
 """
 
 from datetime import datetime, timezone
@@ -98,12 +99,18 @@ def test_approve_from_a_non_pending_state_is_an_illegal_transition(repos, one_ap
         ReviewOutreach(repos).approve(one_approved.id, NOW)
 
 
-def test_approve_is_refused_for_an_unedited_needs_manual_write_row(repos, manual_write_pending):
-    with pytest.raises(ValueError, match="edit"):
-        ReviewOutreach(repos).approve(manual_write_pending.id, NOW)
+def test_an_unedited_needs_manual_write_row_can_still_be_approved(repos, manual_write_pending):
+    # 2026-09-22: this used to be a refusal. The operator's ruling: the
+    # checks are advice, and the person pressing approve is the one whose
+    # name is on the letter. The note is still stored and still shown; it
+    # no longer overrules him.
+    ReviewOutreach(repos).approve(manual_write_pending.id, NOW)
     o = repos.outreach.get(manual_write_pending.id)
-    assert o.state == S.PENDING_APPROVAL and o.last_error == MANUAL_WRITE_ERROR
-    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at is None
+    assert o.state == S.APPROVED
+    # The note survives the approve - it is a record of what was noticed,
+    # not a lock that got picked.
+    assert o.last_error == MANUAL_WRITE_ERROR
+    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at == NOW
 
 
 def test_approve_is_refused_when_there_is_no_draft_row_at_all(repos, no_material_pending):

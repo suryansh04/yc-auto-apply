@@ -95,11 +95,13 @@ def test_the_assembled_letter_stays_inside_the_paragraph_cap():
     assert len(paragraphs) <= MAX_PARAGRAPHS
 
 
-def test_the_wire_text_is_the_letter_plus_greeting_signature_and_opt_out():
+def test_the_wire_text_is_the_letter_plus_a_greeting_and_a_signature():
+    # 2026-09-23: and nothing after the signature - the opt-out line was
+    # deleted at the operator's instruction.
     body = letter.assemble_body("Zave", INSIGHT)
     wire = compose_wire_text("Hiren", body, "Thanks for reading\nSuryansh")
     assert wire.startswith("Hi Hiren,\n\n" + letter.OPENER)
-    assert wire.rstrip().endswith('If not, a one-word "no" is fine and I won\'t follow up.')
+    assert wire.endswith("Thanks for reading\nSuryansh")
 
 
 @pytest.mark.parametrize("phrase", ["passionate about", "genuinely"])

@@ -362,7 +362,10 @@ def test_wire_text_is_composed_and_the_stored_body_is_untouched(repos, one_appro
     row = _outbound(repos, one_approved)
     stored_body = row.body
     SendApproved(s, FrozenClock(), repos, signature="Suryansh").run(cap=10)
-    assert s.sent[0]["body"] == f"Hi Madhav,\n\n{stored_body}\n\nSuryansh\n\n{OPT_OUT_LINE}"
+    # 2026-09-23: the letter ends at the signature - the opt-out line was
+    # deleted at the operator's instruction (`app.domain.compose`).
+    assert s.sent[0]["body"] == f"Hi Madhav,\n\n{stored_body}\n\nSuryansh"
+    assert OPT_OUT_LINE == ""
     assert s.sent[0]["subject"] == row.subject
     assert _outbound(repos, one_approved).body == stored_body
 

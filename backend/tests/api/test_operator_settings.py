@@ -40,7 +40,9 @@ def test_operator_settings_load_dotenv_without_a_database_url(dotenv_only):
 
 def test_queue_preview_signature_comes_from_dotenv(dotenv_only, client, pending_draft):
     item = client.get("/api/queue").json()[0]
-    assert "\n\nOnly In Dotenv\n\n" in item["wire_text"]
+    # The signature is the last part of the letter now that the opt-out
+    # line is gone (2026-09-23), so it ends the wire text.
+    assert item["wire_text"].endswith("\n\nOnly In Dotenv")
 
 
 def test_stats_verifier_configured_comes_from_dotenv(dotenv_only, client):

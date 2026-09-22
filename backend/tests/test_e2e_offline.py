@@ -179,7 +179,9 @@ def test_phase_1_pipeline_end_to_end_offline(repos):
     assert madhav_row.body == VAHAN_DRAFT["body"]
     assert sender.sent[0]["body"] == compose_wire_text(first_name(madhav.full_name), madhav_row.body, SIGNATURE)
     assert sender.sent[0]["body"].startswith("Hi Madhav,\n\n")
-    assert sender.sent[0]["body"].endswith(f"{SIGNATURE}\n\n{OPT_OUT_LINE}")
+    # 2026-09-23: the letter ends at the signature (`app.domain.compose`).
+    assert sender.sent[0]["body"].endswith(SIGNATURE)
+    assert OPT_OUT_LINE == ""
     assert sender.sent[0]["subject"] == "Backend intern at Vahan"
 
 

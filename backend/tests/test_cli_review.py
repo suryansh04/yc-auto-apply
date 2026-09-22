@@ -59,9 +59,11 @@ def test_screen_shows_the_composed_wire_text_not_the_bare_body(a_pending_message
     assert expected in out
     assert "Hi Madhav," in out
     assert "Suryansh\nIIT Delhi" in out
-    assert OPT_OUT_LINE in out
+    # 2026-09-23: there is no opt-out line any more, so the signature is
+    # what the screen ends the letter with.
+    assert OPT_OUT_LINE == ""
     # The greeting precedes the body and the signature follows it.
-    assert out.index("Hi Madhav,") < out.index(PENDING_BODY) < out.index(OPT_OUT_LINE)
+    assert out.index("Hi Madhav,") < out.index(PENDING_BODY) < out.index("IIT Delhi")
 
 
 def test_screen_uses_the_signature_it_is_given(a_pending_message, a_news_source):

@@ -6,6 +6,7 @@ import {
   MailQuestion,
   FileUser,
   ListChecks,
+  MailCheck,
   SendHorizontal,
   Users,
 } from 'lucide-react'
@@ -17,6 +18,7 @@ import ManualEmail from './screens/ManualEmail'
 import Approved from './screens/Approved'
 import Resume from './screens/Resume'
 import Applications from './screens/Applications'
+import Sent from './screens/Sent'
 import ConnectGmail from './screens/ConnectGmail'
 import { useGmailStatus } from './api/hooks'
 import {
@@ -63,6 +65,7 @@ const NAV = [
   { to: '/', end: true, label: 'Pipeline', icon: LayoutDashboard },
   { to: '/queue', label: 'Review', icon: Inbox },
   { to: '/approved', label: 'Approved', icon: SendHorizontal },
+  { to: '/sent', label: 'Sent', icon: MailCheck },
   { to: '/applications', label: 'Applications', icon: ListChecks },
   { to: '/contacts', label: 'Founders', icon: Users },
   { to: '/manual', label: 'Missing addresses', icon: MailQuestion },
@@ -76,6 +79,7 @@ const TITLES = {
   '/': 'Pipeline',
   '/queue': 'Review queue',
   '/approved': 'Approved',
+  '/sent': 'Sent',
   '/applications': 'Applications',
   '/contacts': 'Founders',
   '/manual': 'Missing addresses',
@@ -246,6 +250,7 @@ function GatedRoutes({ gmail, outcome }) {
       <Route path="/" element={<Pipeline />} />
       <Route path="/queue" element={<ReviewQueue />} />
       <Route path="/approved" element={<Approved />} />
+      <Route path="/sent" element={<Sent />} />
       <Route path="/applications" element={<Applications />} />
       <Route path="/contacts" element={<Contacts />} />
       <Route path="/thread/:id" element={<Thread />} />

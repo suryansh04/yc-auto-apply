@@ -166,18 +166,19 @@ Phase 1 sends step 0 only (ruling R-C): follow-ups are Phase 2.
 - **`scrape` error lines**: that company is skipped for this run; re-run
   `scrape` later (already-known founders keep their outreach state).
 
-## 9. Opt-out line — needs sign-off
+## 9. Opt-out line — deleted (2026-09-23)
 
-Spec §18 requires a single-line opt-out sentence in every email but does
-not fix its wording. The wording lives in one constant,
-`OPT_OUT_LINE` in `app/domain/compose.py`:
+Spec §18 asks for a single-line opt-out sentence in every email. There
+isn't one: the operator's instruction was "delete this line from the
+email", and it is his name on the letter. This is a deliberate departure
+from the spec, not an oversight.
 
-> If you'd rather not hear from me again, reply with a quick "no" and I
-> won't follow up.
-
-It is composed at send time under the signature and shown in `review`.
-**Sign off on (or change) this wording before the first real `send`**
-(ruling R-B / FR-6).
+`OPT_OUT_LINE` in `app/domain/compose.py` is now `""`. The constant was
+emptied rather than removed, and `compose_wire_text` drops empty parts,
+so a letter now ends at the signature with no trailing blank line — and
+putting a sentence back is that one string, nothing else. Because the
+wire text is composed at send and preview time, this applied immediately
+to letters that were already drafted.
 
 ## 10. Phase 1 status (superseded by §12)
 

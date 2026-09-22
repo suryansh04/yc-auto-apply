@@ -72,3 +72,22 @@ def test_an_approved_letter_can_be_made_generic_too(client, repos, approved_draf
     r = client.post(f"/api/outreach/{approved_draft.outreach.id}/generic-line")
     assert r.status_code == 200
     assert repos.outreach.get(approved_draft.outreach.id).state.value == "approved"
+
+
+def test_the_queue_carries_the_generic_line_for_a_preview(client, repos, pending_draft):
+    # Operator request (2026-09-23): hovering the button shows the line
+    # before he commits to the swap. It comes from the API rather than
+    # from the JavaScript so the preview and what the swap actually
+    # writes cannot drift apart.
+    _assembled(repos, pending_draft)
+    item = client.get(f"/api/queue/{pending_draft.outreach.id}").json()
+    assert item["generic_line"] == letter.generic_insight("Vahan")
+
+
+def test_no_preview_is_offered_for_a_letter_that_cannot_be_swapped(client, repos, pending_draft):
+    # `use_generic_line` refuses a letter without the assembled shape, so
+    # the button must not promise what the backend will decline.
+    row = repos.message.get_outbound(pending_draft.outreach.id, 0)
+    repos.message.upsert(id=row.id, body="A letter written some other way entirely.")
+    item = client.get(f"/api/queue/{pending_draft.outreach.id}").json()
+    assert item["generic_line"] is None

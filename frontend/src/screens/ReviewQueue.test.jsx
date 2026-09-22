@@ -807,3 +807,26 @@ it('says so when a letter has no company paragraph to swap', async () => {
   await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
   expect(await screen.findByText(/edit it by hand/i)).toBeInTheDocument()
 })
+
+it('shows the generic line on hover, before it is swapped in', async () => {
+  // "also give the hover effect for generic line also" - the same read-
+  // before-you-commit the amber highlights give.
+  mockQueue([item({})])
+  const generic = mockGenericLine({ notes: [] })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByRole('button', { name: /use a generic line/i }))
+  expect(await screen.findByText(/replaces the paragraph about them with/i)).toBeInTheDocument()
+  expect(screen.getByText(/yours is one I kept reading about/)).toBeInTheDocument()
+  // Hovering is a read: nothing is written until the button is pressed.
+  expect(generic).not.toHaveBeenCalled()
+})
+
+it('offers no generic line for a letter that has no company paragraph', async () => {
+  // The backend refuses the swap for a letter without the assembled
+  // shape, and says so by sending no line. The button must not promise
+  // what the backend will decline.
+  mockQueue([item({ generic_line: null })])
+  render(<ReviewQueue />)
+  await screen.findByText('Review queue')
+  expect(screen.queryByRole('button', { name: /use a generic line/i })).not.toBeInTheDocument()
+})

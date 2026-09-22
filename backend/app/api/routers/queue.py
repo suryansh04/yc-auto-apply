@@ -36,6 +36,7 @@ from app.api.schemas import (
 )
 from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
 from app.application.suggest_fixes import run_reviser
+from app.domain import letter
 from app.domain.compose import compose_wire_text, first_name
 from app.domain.highlight import highlights_for
 from app.domain.states import IllegalTransition
@@ -91,9 +92,20 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
     message = item.message
     body = getattr(message, "body", None) or ""
     source = item.source
+    company_name = getattr(item.company, "name", None) if item.company is not None else None
+    # Only offered when there is actually a company paragraph to replace:
+    # a letter that does not have the assembled shape would have the
+    # generic line put in the wrong place, and `use_generic_line` refuses
+    # it. Saying so by omission here is what keeps the button from
+    # promising something the backend will decline.
+    generic = (
+        letter.generic_insight(company_name or "")
+        if company_name and letter.insight_region(body) is not None
+        else None
+    )
     return QueueItemOut(
         outreach_id=item.outreach.id,
-        company_name=getattr(item.company, "name", None) if item.company is not None else None,
+        company_name=company_name,
         company_one_liner=getattr(item.company, "one_liner", None) if item.company is not None else None,
         founder_name=item.founder.full_name,
         founder_title=getattr(item.founder, "title", None),
@@ -110,6 +122,7 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
         critic_note=getattr(message, "critic_overall_note", None),
         sequence_step=int(getattr(item.outreach, "sequence_step", 0) or 0),
         attachment_name=attachment_name,
+        generic_line=generic,
     )
 
 

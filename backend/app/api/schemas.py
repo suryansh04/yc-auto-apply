@@ -99,6 +99,13 @@ class QueueItemOut(BaseModel):
     # said so. Basename only (never the operator's filesystem path); None
     # when RESUME_PATH is unset, which is exactly the case `send` refuses.
     attachment_name: str | None = None
+    # The generic company paragraph as it would read for THIS company, so
+    # the screen can show it on hover before the operator commits to the
+    # swap (operator request, 2026-09-23). Sent from here rather than
+    # written into the JavaScript because the copy lives in
+    # `app.domain.letter` and must have exactly one home - the preview and
+    # what `generic-line` actually writes are the same string.
+    generic_line: str | None = None
 
 
 class EditIn(BaseModel):

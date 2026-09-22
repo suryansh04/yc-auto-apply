@@ -103,6 +103,12 @@ export function item(overrides = {}) {
     critic_note: null,
     sequence_step: 0,
     attachment_name: 'resume.pdf',
+    // The generic company line as the backend would render it for this
+    // company. Null means this letter has no company paragraph to swap,
+    // and the screen offers no button.
+    generic_line:
+      'I came across Vahan while looking for teams working on problems worth the years ' +
+      'it takes to solve them, and yours is one I kept reading about instead of scrolling past.',
     ...overrides,
   }
 }

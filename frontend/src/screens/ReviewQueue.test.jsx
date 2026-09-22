@@ -25,6 +25,8 @@ import {
   mockQueueSequence,
   mockRedraft,
   mockCheckDraft,
+  mockSuggestFixes,
+  mockSuggestFailure,
 } from '../test/mocks'
 import ReviewQueue from './ReviewQueue'
 
@@ -649,7 +651,7 @@ it('marks the words a note objects to, in the letter itself', async () => {
   })
   render(<ReviewQueue />)
   await userEvent.click(await screen.findByRole('button', { name: /re-check/i }))
-  const mark = await screen.findByTitle('contains a semicolon')
+  const mark = await screen.findByLabelText('contains a semicolon')
   expect(mark.tagName).toBe('MARK')
   expect(mark).toHaveTextContent(';')
 })
@@ -682,4 +684,89 @@ it('a note with no quote leaves the letter unmarked', async () => {
   await userEvent.click(await screen.findByRole('button', { name: /re-check/i }))
   await screen.findByRole('button', { name: /body exceeds 380 words/ })
   expect(container.querySelectorAll('mark')).toHaveLength(0)
+})
+
+
+// --- the rewrite behind a highlight (operator request 2026-09-23) ----------
+//
+// "i want when i hover over it, it shows suggestion just like grammarly
+// use sarvam for suggestion". `/check` is instant; `/suggest` is the LLM
+// call, fired after it so the amber marks never wait on a model.
+
+const MARKED = {
+  wire_text: ['Hi Madhav,', '', 'One thing; another thing.', '', 'Suryansh'].join('\n'),
+  body: 'One thing; another thing.',
+}
+
+function checkFindsASemicolon() {
+  return mockCheckDraft({
+    notes: ['contains a semicolon'],
+    highlights: [{ message: 'contains a semicolon', quote: ';' }],
+  })
+}
+
+it('asks for rewrites once the checks have found words to mark', async () => {
+  mockQueue([item(MARKED)])
+  checkFindsASemicolon()
+  const suggest = mockSuggestFixes({ suggestions: [] })
+  render(<ReviewQueue />)
+  await screen.findByLabelText('contains a semicolon')
+  await waitFor(() => expect(suggest).toHaveBeenCalled())
+})
+
+it('does not spend a model call on a letter with nothing marked', async () => {
+  // An LLM call per draft is the operator's money, and there is nothing
+  // to rewrite when no note resolved to actual words.
+  mockQueue([item({ wire_text: ['Hi Madhav,', '', 'A clean letter.', '', 'Suryansh'].join('\n') })])
+  mockCheckDraft({
+    notes: ['body exceeds 380 words'],
+    highlights: [{ message: 'body exceeds 380 words', quote: null }],
+  })
+  const suggest = mockSuggestFixes({ suggestions: [] })
+  render(<ReviewQueue />)
+  expect(await screen.findByText('body exceeds 380 words')).toBeInTheDocument()
+  expect(suggest).not.toHaveBeenCalled()
+})
+
+it('shows the rewrite when the mark is hovered', async () => {
+  mockQueue([item(MARKED)])
+  checkFindsASemicolon()
+  mockSuggestFixes({
+    suggestions: [{ index: 0, quote: ';', message: 'contains a semicolon',
+                    replacement: '.', why: 'a full stop reads plainer' }],
+  })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText('contains a semicolon'))
+  expect(await screen.findByText('a full stop reads plainer')).toBeInTheDocument()
+})
+
+it('accepting a rewrite saves the letter with the words replaced', async () => {
+  mockQueue([item(MARKED)])
+  checkFindsASemicolon()
+  mockSuggestFixes({
+    suggestions: [{ index: 0, quote: ';', message: 'contains a semicolon',
+                    replacement: '.', why: 'plainer' }],
+  })
+  const edit = mockEdit({ notes: [] })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText('contains a semicolon'))
+  await userEvent.click(await screen.findByRole('button', { name: /use this/i }))
+  // The quote is a substring of the BODY, never of the wire text - what
+  // is saved is the body with those characters replaced, and nothing
+  // else touched.
+  await waitFor(() => expect(edit).toHaveBeenCalledWith(
+    1, expect.objectContaining({ body: 'One thing. another thing.' }),
+  ))
+})
+
+it('a failed rewrite call leaves the checks exactly where they were', async () => {
+  mockQueue([item(MARKED)])
+  checkFindsASemicolon()
+  mockSuggestFailure()
+  render(<ReviewQueue />)
+  // The highlight and the note are both still there; only the rewrite is
+  // missing, and the hover card says so.
+  const mark = await screen.findByLabelText('contains a semicolon')
+  await userEvent.hover(mark)
+  expect(await screen.findByText(/no rewrite for this one/i)).toBeInTheDocument()
 })

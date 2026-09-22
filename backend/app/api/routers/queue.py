@@ -23,13 +23,23 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.api.deps import Repos, get_repos
-from app.api.schemas import CheckIn, CheckOut, EditIn, HighlightOut, OkOut, QueueItemOut
+from app.api.deps import Repos, build_reviser, get_repos
+from app.api.schemas import (
+    CheckIn,
+    CheckOut,
+    EditIn,
+    HighlightOut,
+    OkOut,
+    QueueItemOut,
+    SuggestOut,
+    SuggestionOut,
+)
 from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
+from app.application.suggest_fixes import run_reviser
 from app.domain.compose import compose_wire_text, first_name
 from app.domain.highlight import highlights_for
 from app.domain.states import IllegalTransition
-from app.config import get_operator_settings
+from app.config import get_operator_settings, get_settings
 
 router = APIRouter(tags=["queue"])
 
@@ -166,6 +176,64 @@ def check(outreach_id: int, payload: CheckIn | None = None,
     except ValueError as exc:
         raise _action_error(exc)
     return _checked(repos, outreach_id, notes, payload.body if payload else None)
+
+
+@router.post("/outreach/{outreach_id}/suggest", response_model=SuggestOut)
+def suggest(outreach_id: int, payload: CheckIn | None = None,
+            repos: Repos = Depends(get_repos)) -> SuggestOut:
+    """What to write instead, for each span `/check` highlighted.
+
+    Operator request (2026-09-22): "when i hover over it, it shows
+    suggestion just like grammarly use sarvam for suggestion". `/check` is
+    deterministic and instant; this is the LLM call, deliberately a second
+    request so the highlights appear immediately and the rewrites fill in
+    behind them.
+
+    Advice on top of advice, so it cannot fail loudly: an unconfigured or
+    failing provider answers 200 with no suggestions (and, for a missing
+    key, the NAME of the setting), never an error that would take the
+    checks off the screen with it. Writes nothing - there is no commit
+    here, and the operator's text is only ever changed by `edit`.
+    """
+    try:
+        item = _use_case(repos).load(outreach_id)
+    except (OutreachNotFound, ValueError):
+        raise HTTPException(404, "no such outreach")
+
+    body = (payload.body if payload and payload.body is not None else None)
+    if body is None:
+        body = getattr(item.message, "body", "") or ""
+    notes = _use_case(repos).check(
+        outreach_id,
+        subject=payload.subject if payload else None,
+        body=payload.body if payload else None,
+    )
+    highlights = highlights_for(notes, body)
+
+    # `getattr`, not `repos.reviser`: the offline `FakeRepos` carries the
+    # attribute only when a test injected one, and a test that did not
+    # inject one must take the unavailable path rather than crash.
+    reviser = getattr(repos, "reviser", None)
+    if reviser is None:
+        try:
+            reviser = build_reviser(get_settings())
+        except RuntimeError as exc:
+            # The message is a setting NAME ("SARVAM_API_KEY is not set"),
+            # never a key or a response body - `build_reviser` raises
+            # nothing else.
+            return SuggestOut(suggestions=[], unavailable=str(exc))
+
+    company_name = getattr(item.company, "name", None) or ""
+    return SuggestOut(suggestions=[
+        SuggestionOut(
+            index=s.index,
+            quote=highlights[s.index]["quote"],
+            message=highlights[s.index]["message"],
+            replacement=s.replacement,
+            why=s.why,
+        )
+        for s in run_reviser(reviser, body, highlights, company_name)
+    ])
 
 
 @router.post("/outreach/{outreach_id}/approve", response_model=OkOut)

@@ -208,6 +208,33 @@ export function mockCheckDraft({ notes = [], highlights = null } = {}) {
   return spy
 }
 
+/**
+ * POST /api/outreach/:id/suggest - what Sarvam would write instead, for
+ * the spans `/check` highlighted. Advice on top of advice: 200 always,
+ * and `index` is a position in the check's `highlights`, never a match on
+ * text.
+ */
+export function mockSuggestFixes({ suggestions = [], unavailable = null } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/suggest', async ({ params, request }) => {
+      spy(Number(params.id), await request.json())
+      return HttpResponse.json({ suggestions, unavailable })
+    }),
+  )
+  return spy
+}
+
+/** POST /api/outreach/:id/suggest that fails outright - the hover cards
+ *  must fall back to the note alone, and the checks must stay put. */
+export function mockSuggestFailure(status = 500) {
+  server.use(
+    http.post('/api/outreach/:id/suggest', () =>
+      HttpResponse.json({ detail: 'nope' }, { status }),
+    ),
+  )
+}
+
 export function mockApproveFailure(status = 500, detail = 'could not approve') {
   server.use(
     http.post('/api/outreach/:id/approve', () => HttpResponse.json({ detail }, { status })),

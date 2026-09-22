@@ -55,6 +55,13 @@ class Repos:
     # is the seam that makes a real Gmail send structurally impossible from
     # the offline test suite: nothing here ever builds a real sender.
     sender: Any = None
+    # A pre-built `Reviser` (the rewrite behind each highlight on the
+    # review screen), present only when a caller injected one - the test
+    # harness's fake. `None` in production: `app.api.routers.queue` builds
+    # a real one itself, the one time it is actually needed. Same seam as
+    # `sender` above, and it exists for the same reason: nothing in the
+    # offline suite can ever reach a real provider.
+    reviser: Any = None
 
 
 def _session() -> Session:
@@ -218,6 +225,31 @@ def build_critic(settings: Settings):
         raise RuntimeError("GEMINI_API_KEY is not set")
     client = genai.Client(api_key=settings.gemini_api_key)
     return GeminiCritic(client, model=settings.gemini_model)
+
+
+def build_reviser(settings: Settings):
+    """The same LLM-provider switch as `build_drafter`/`build_classifier`/
+    `build_critic` above, for a `Reviser` adapter - the rewrite behind each
+    amber highlight on the review screen. Kept beside them rather than
+    duplicated a seventh time, for the reason `build_drafter`'s docstring
+    gives (T6-6). Advisory like the critic: a caller that cannot build one
+    (missing key) should show the checks without rewrites rather than fail
+    the request."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamReviser(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiReviser
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiReviser(client, model=settings.gemini_model)
 
 
 def require_send_config(settings: Settings) -> list[str]:

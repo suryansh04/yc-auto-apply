@@ -148,6 +148,37 @@ class HighlightOut(BaseModel):
     quote: str | None = None
 
 
+class SuggestionOut(BaseModel):
+    """One rewrite for one highlighted span.
+
+    `index` is the position in the same `highlights` list `/check`
+    returned, so the screen pairs a rewrite with its note without matching
+    on text. `quote` is repeated here so a hover card has everything it
+    needs in one object. `replacement` is the new text for that span
+    alone; an empty string is a real suggestion - it means delete it."""
+
+    index: int
+    quote: str
+    message: str
+    replacement: str
+    why: str = ""
+
+
+class SuggestOut(BaseModel):
+    """What the model would write instead, for the spans the checks
+    flagged. Advice on top of advice: the route writes nothing, refuses
+    nothing, and a provider that is unconfigured or failing yields an
+    empty list rather than an error - the checks are already on screen and
+    must stay there.
+
+    `unavailable` names the missing SETTING when no rewriter could be
+    built (never its value), so the screen can say why the hover cards are
+    empty instead of looking broken."""
+
+    suggestions: list[SuggestionOut] = []
+    unavailable: str | None = None
+
+
 class CheckOut(BaseModel):
     """What the checks say about a draft. Advice, not a gate (operator
     decision, 2026-09-22): the route writes nothing and refuses nothing -

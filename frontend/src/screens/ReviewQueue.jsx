@@ -33,6 +33,7 @@ import {
   useEdit,
   useQueue,
   useRedraft,
+  useSuggestFixes,
   useReject,
 } from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -103,18 +104,45 @@ function idAfter(list, id) {
   return null
 }
 
+/** `/suggest`'s list, keyed by the note it answers. */
+function byIndex(suggestions) {
+  const out = {}
+  for (const suggestion of suggestions ?? []) out[suggestion.index] = suggestion
+  return out
+}
+
 export default function ReviewQueue() {
   const queueQuery = useQueue()
   const approve = useApprove()
   const edit = useEdit()
   const reject = useReject()
   const redraft = useRedraft()
+  // The rewrite behind each highlight. A second request on purpose: the
+  // checks are instant and this one waits on Sarvam, so the amber marks
+  // appear immediately and the hover cards fill in behind them.
+  const suggestFixes = useSuggestFixes({
+    onSuccess: (data, { id }) => {
+      setRewrites(byIndex(data?.suggestions))
+      setSuggestedId(id)
+    },
+    // Advice on top of advice: a failure leaves the notes exactly where
+    // they are. The hover cards just say there is no rewrite.
+    onError: () => setRewrites({}),
+  })
   const checkDraft = useCheckDraft({
     onSuccess: (data, { id }) => {
       setCheckNotes(data?.notes ?? [])
       setCheckHighlights(data?.highlights ?? [])
       setCheckedId(id)
       setActiveNote(null)
+      // Rewrites are only worth asking for when something was flagged,
+      // and only for spans that resolved to real words - an LLM call per
+      // draft is the operator's money.
+      setRewrites({})
+      setSuggestedId(null)
+      if ((data?.highlights ?? []).some((h) => h.quote)) {
+        suggestFixes.mutate({ id })
+      }
     },
   })
 
@@ -141,6 +169,11 @@ export default function ReviewQueue() {
   // operator last clicked on - in the letter or in the panel.
   const [checkHighlights, setCheckHighlights] = useState([])
   const [activeNote, setActiveNote] = useState(null)
+  // What the model would write instead, keyed by position in
+  // `checkHighlights` - never matched on text, so a rewrite cannot land
+  // on the wrong note - and which draft it was asked about.
+  const [rewrites, setRewrites] = useState({})
+  const [suggestedId, setSuggestedId] = useState(null)
 
   // Prune settled ids the backend has already confirmed (no longer in
   // `items` at all) - once gone, holding onto the id serves no purpose.
@@ -414,6 +447,21 @@ export default function ReviewQueue() {
   // draft time is just a sentence. So the letter is marked up after a
   // re-check or a save, and reads plainly before that.
   const highlights = checkedId === current.outreach_id ? checkHighlights : []
+  const shownRewrites = suggestedId === current.outreach_id ? rewrites : {}
+  // "Still thinking" is only honest while the call is in flight for THIS
+  // draft and something was actually flagged.
+  const suggestionsPending = suggestFixes.isPending && highlights.some((h) => h.quote)
+
+  // Accept a rewrite: paste it in where the flagged words were, and save.
+  // The quote came back as a verbatim substring of the BODY (never the
+  // wire text), so this is a plain replacement - and `edit` re-runs the
+  // checks, so the letter re-marks itself around what just changed.
+  function applySuggestion(index) {
+    const suggestion = shownRewrites[index]
+    const body = current.body ?? ''
+    if (!suggestion || !body.includes(suggestion.quote)) return
+    saveEdit(current.subject ?? '', body.replace(suggestion.quote, suggestion.replacement))
+  }
   const hasSuggestions = suggestions.length > 0 || showCriticNote
   const suggestionCount = suggestions.length + (showCriticNote ? 1 : 0)
 
@@ -483,6 +531,9 @@ export default function ReviewQueue() {
                   ? markUp(current.wire_text, highlights, {
                       onSelect: setActiveNote,
                       activeIndex: activeNote,
+                      suggestions: shownRewrites,
+                      pending: suggestionsPending,
+                      onApply: applySuggestion,
                     })
                   : current.wire_text}
               </pre>
@@ -591,7 +642,10 @@ export default function ReviewQueue() {
                                 like a broken highlight. */}
                             {marked && (
                               <span className="text-muted-foreground ml-1 text-xs">
-                                &mdash; highlighted
+                                &mdash;{' '}
+                                {shownRewrites[index]
+                                  ? 'highlighted, hover it for a rewrite'
+                                  : 'highlighted'}
                               </span>
                             )}
                           </button>

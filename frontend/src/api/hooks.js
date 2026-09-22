@@ -272,6 +272,24 @@ export function useCheckDraft(options = {}) {
   })
 }
 
+/**
+ * POST /api/outreach/{id}/suggest - what to write instead, for each span
+ * `/check` highlighted. A separate request from the check on purpose: the
+ * checks are deterministic and instant, this one waits on Sarvam, and the
+ * highlights must not wait with it.
+ *
+ * Answers `{suggestions: [{index, quote, message, replacement, why}],
+ * unavailable}`. `index` is a position in the check's `highlights`, so a
+ * rewrite is paired with its note without matching on text.
+ */
+export function useSuggestFixes(options = {}) {
+  return useMutation({
+    mutationFn: ({ id, subject, body }) =>
+      apiPost(`/outreach/${id}/suggest`, subject != null || body != null ? { subject, body } : {}),
+    ...options,
+  })
+}
+
 export function useSetEmail() {
   const queryClient = useQueryClient()
   return useMutation({

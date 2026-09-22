@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/card'
 import { Item, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item'
 import { Spinner } from '@/components/ui/spinner'
+import SetupGuide from './SetupGuide'
 
 // The outcomes `GET /api/gmail/callback` can redirect back with. Each
 // one says what happened and what to do next - an error that leaves the
@@ -64,7 +65,7 @@ export default function ConnectGmail({ status, outcome }) {
 
   if (!status?.configured) {
     return (
-      <Card className="max-w-xl">
+      <Card className="max-w-2xl">
         <CardHeader>
           <CardTitle>
             <h1>Gmail is not set up yet</h1>
@@ -75,7 +76,7 @@ export default function ConnectGmail({ status, outcome }) {
             before the app can send anything. Add them, then restart the API.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="grid gap-4">
           <ul className="grid gap-1">
             {(status?.missing_config ?? []).map((item) => (
               <li key={item} className="font-mono text-sm">
@@ -83,13 +84,16 @@ export default function ConnectGmail({ status, outcome }) {
               </li>
             ))}
           </ul>
+          {/* Open on this branch: nothing is configured, so whoever is
+              reading this has not done the Google side either. */}
+          <SetupGuide defaultOpen />
         </CardContent>
       </Card>
     )
   }
 
   return (
-    <Card className="max-w-xl">
+    <Card className="max-w-2xl">
       <CardHeader>
         <CardTitle>
           <h1>{reconnecting ? 'Reconnect Gmail' : 'Connect Gmail'}</h1>
@@ -131,6 +135,12 @@ export default function ConnectGmail({ status, outcome }) {
             <AlertDescription>{connect.error.message}</AlertDescription>
           </Alert>
         )}
+
+        {/* Closed here: the settings are in place, so this is either a
+            reconnect or a first connect by someone who has already done
+            the Google side. Still one click away, because step 13 is the
+            one people come back for. */}
+        <SetupGuide />
       </CardContent>
 
       <CardFooter className="flex-col items-start gap-3">

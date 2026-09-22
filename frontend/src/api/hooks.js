@@ -169,6 +169,23 @@ export function useEdit() {
   })
 }
 
+/**
+ * POST /api/outreach/{id}/unapprove - send an approved letter back to the
+ * review queue. Neither sending it nor discarding it: it leaves the
+ * Approved screen and reappears in Review with its text untouched.
+ */
+export function useUnapprove() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => apiPost(`/outreach/${id}/unapprove`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
+      queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+}
+
 export function useReject() {
   const queryClient = useQueryClient()
   return useMutation({

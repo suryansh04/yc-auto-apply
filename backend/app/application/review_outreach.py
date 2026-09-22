@@ -182,6 +182,31 @@ class ReviewOutreach:
         self._repos.message.upsert(id=row.id, approved_at=now)
         self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.APPROVED))
 
+    def unapprove(self, outreach_id: int) -> None:
+        """Send an approved letter back to the review queue.
+
+        Operator request (2026-09-22): a way out of the Approved screen
+        that is neither "send it" nor "discard it". Reject throws the
+        founder away and redraft spends a model call; this just undoes the
+        decision.
+
+        `approved_at` is cleared with the state, because a PENDING_APPROVAL
+        row still carrying an approval is exactly the inconsistency
+        `send`'s own guard exists to catch.
+        """
+        outreach = self._outreach(outreach_id)
+        state = OutreachState(outreach.state)
+        if state is not OutreachState.APPROVED:
+            raise ValueError(
+                f"only an APPROVED letter can be sent back to review (this one is {outreach.state})"
+            )
+        assert_transition(state, OutreachState.PENDING_APPROVAL)
+        row = self._repos.message.get_outbound(outreach.id, outreach.sequence_step)
+        if row is not None:
+            self._repos.message.upsert(id=row.id, approved_at=None)
+        self._repos.outreach.upsert(founder_id=outreach.founder_id,
+                                    state=str(OutreachState.PENDING_APPROVAL))
+
     def redraft(self, outreach_id: int) -> None:
         outreach = self._outreach(outreach_id)
         # Final fix wave (F6): `READY_TO_DRAFT` is a legal target from

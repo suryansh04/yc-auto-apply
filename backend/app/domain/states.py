@@ -30,7 +30,13 @@ _LEGAL: dict[OutreachState, set[OutreachState]] = {
     S.NEEDS_MANUAL_EMAIL: {S.READY_TO_DRAFT, S.UNRESOLVED},
     S.READY_TO_DRAFT: {S.PENDING_APPROVAL},
     S.PENDING_APPROVAL: {S.APPROVED, S.DISCARDED, S.READY_TO_DRAFT},
-    S.APPROVED: {S.SENT},
+    # PENDING_APPROVAL is the "send it back to review" edge (operator
+    # request, 2026-09-22): an approved letter he has changed his mind
+    # about returns to the queue instead of being discarded or sent. The
+    # caller must clear `approved_at` with it - a PENDING_APPROVAL row
+    # carrying an approval is the inconsistency `send`'s own guard warns
+    # about.
+    S.APPROVED: {S.SENT, S.PENDING_APPROVAL},
     S.SENT: {S.REPLIED, S.READY_TO_DRAFT, S.CLOSED, S.BOUNCED},
     # Task 10 (T9-1): REPLIED -> SENT is legal ONLY via the label-correction
     # path (`ClassifyReply.apply_label`'s `_restore_sent`, reached from

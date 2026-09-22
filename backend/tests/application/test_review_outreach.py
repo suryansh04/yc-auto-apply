@@ -497,3 +497,45 @@ def test_an_operator_edit_keeps_his_own_word_choice(repos, one_pending):
     )
     assert ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body) == []
     assert repos.message.get_outbound(one_pending.id, 0).body == body
+
+
+# --- back to review (operator request 2026-09-22) --------------------------
+
+def test_unapprove_returns_an_approved_letter_to_the_queue(repos, one_approved):
+    """Neither "send it" nor "discard it": reject throws the founder away
+    and redraft spends a model call. This just undoes the decision."""
+    ReviewOutreach(repos).unapprove(one_approved.id)
+    assert repos.outreach.get(one_approved.id).state == S.PENDING_APPROVAL
+    # The approval goes with it - a PENDING_APPROVAL row still carrying
+    # `approved_at` is the inconsistency `send`'s own guard catches.
+    assert repos.message.get_outbound(one_approved.id, 0).approved_at is None
+
+
+def test_an_unapproved_letter_shows_up_in_the_review_queue_again(repos, one_approved):
+    uc = ReviewOutreach(repos)
+    assert [i.founder.id for i in uc.pending()] == []
+    uc.unapprove(one_approved.id)
+    assert [i.founder.id for i in uc.pending()] == [one_approved.id]
+    assert [i.founder.id for i in uc.approved()] == []
+
+
+def test_unapprove_keeps_the_text_exactly_as_it_was(repos, one_approved):
+    before = repos.message.get_outbound(one_approved.id, 0)
+    subject, body = before.subject, before.body
+    ReviewOutreach(repos).unapprove(one_approved.id)
+    row = repos.message.get_outbound(one_approved.id, 0)
+    assert (row.subject, row.body) == (subject, body)
+
+
+def test_unapprove_is_refused_for_a_letter_that_was_never_approved(repos, one_pending):
+    with pytest.raises(ValueError, match="APPROVED"):
+        ReviewOutreach(repos).unapprove(one_pending.id)
+    assert repos.outreach.get(one_pending.id).state == S.PENDING_APPROVAL
+
+
+def test_an_unapproved_letter_can_be_approved_again(repos, one_approved):
+    uc = ReviewOutreach(repos)
+    uc.unapprove(one_approved.id)
+    uc.approve(one_approved.id, NOW)
+    assert repos.outreach.get(one_approved.id).state == S.APPROVED
+    assert repos.message.get_outbound(one_approved.id, 0).approved_at == NOW

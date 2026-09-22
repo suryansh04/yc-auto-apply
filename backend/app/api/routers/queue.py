@@ -166,6 +166,19 @@ def approve(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     return OkOut()
 
 
+@router.post("/outreach/{outreach_id}/unapprove", response_model=OkOut)
+def unapprove(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
+    """Send an approved letter back to the review queue."""
+    try:
+        _use_case(repos).unapprove(outreach_id)
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except (ValueError, IllegalTransition) as exc:
+        raise _action_error(exc)
+    repos.session.commit()
+    return OkOut()
+
+
 @router.post("/outreach/{outreach_id}/reject", response_model=OkOut)
 def reject(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     try:

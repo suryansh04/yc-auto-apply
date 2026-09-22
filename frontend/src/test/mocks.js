@@ -454,3 +454,16 @@ export function mockSend(result = {}) {
 export function mockApproved(items = []) {
   server.use(http.get('/api/approved', () => HttpResponse.json(items)))
 }
+
+
+/** POST /api/outreach/:id/unapprove - back to the review queue. */
+export function mockUnapprove() {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/unapprove', ({ params }) => {
+      spy(Number(params.id))
+      return HttpResponse.json({ ok: true })
+    }),
+  )
+  return spy
+}

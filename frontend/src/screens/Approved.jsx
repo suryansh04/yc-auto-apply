@@ -14,8 +14,8 @@
 // longer exist.
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, Pencil, Send } from 'lucide-react'
-import { useApproved, useEdit, useSend } from '../api/hooks'
+import { ChevronDown, Pencil, Send, Undo2 } from 'lucide-react'
+import { useApproved, useEdit, useSend, useUnapprove } from '../api/hooks'
 import { describeSendResult } from './Pipeline'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -115,6 +115,7 @@ function ApprovedLetter({ item, defaultOpen }) {
   const [sent, setSent] = useState(null)
   const edit = useEdit()
   const send = useSend()
+  const unapprove = useUnapprove()
   const needsYourParagraph = blocked(item)
 
   function save(subject, body) {
@@ -143,6 +144,12 @@ function ApprovedLetter({ item, defaultOpen }) {
     )
   }
 
+  function backToReview() {
+    // No confirmation: nothing is lost. The text is untouched and the
+    // letter reappears in Review, where approving it again is one key.
+    unapprove.mutate(item.outreach_id)
+  }
+
   return (
     <Card>
       <Collapsible defaultOpen={defaultOpen} open={isEditing ? true : undefined}>
@@ -163,6 +170,15 @@ function ApprovedLetter({ item, defaultOpen }) {
                   }}
                 >
                   <Pencil /> Edit
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={unapprove.isPending || Boolean(sent)}
+                  onClick={backToReview}
+                >
+                  {unapprove.isPending ? <Spinner /> : <Undo2 />}
+                  Back to review
                 </Button>
                 <Button
                   size="sm"
@@ -197,6 +213,14 @@ function ApprovedLetter({ item, defaultOpen }) {
             <Alert variant="destructive" role="alert">
               <AlertTitle>Could not send</AlertTitle>
               <AlertDescription>{send.error.message}</AlertDescription>
+            </Alert>
+          </CardContent>
+        )}
+        {unapprove.isError && (
+          <CardContent>
+            <Alert variant="destructive" role="alert">
+              <AlertTitle>Could not send it back</AlertTitle>
+              <AlertDescription>{unapprove.error.message}</AlertDescription>
             </Alert>
           </CardContent>
         )}
@@ -283,8 +307,8 @@ export default function Approved() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Approved</h1>
           <p className="text-muted-foreground text-sm">
-            Letters you have approved, waiting to be sent. Edit or send them one at a time, or
-            send the lot &mdash; after this they are in someone&rsquo;s inbox.
+            Letters you have approved, waiting to be sent. Edit one, send one, send them back
+            to Review, or send the lot &mdash; after that they are in someone&rsquo;s inbox.
           </p>
         </div>
         {items.length > 0 && (

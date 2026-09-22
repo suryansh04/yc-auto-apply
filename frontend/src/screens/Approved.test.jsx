@@ -8,7 +8,13 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithQuery } from '../test/render'
-import { mockApproved, mockEdit, mockEditFailure, mockSend } from '../test/mocks'
+import {
+  mockApproved,
+  mockEdit,
+  mockEditFailure,
+  mockSend,
+  mockUnapprove,
+} from '../test/mocks'
 import Approved from './Approved'
 
 const render = () => renderWithQuery(<MemoryRouter><Approved /></MemoryRouter>)
@@ -156,4 +162,24 @@ it('cancelling an edit changes nothing', async () => {
   await userEvent.click(screen.getByRole('button', { name: /cancel/i }))
   expect(edit).not.toHaveBeenCalled()
   expect(screen.queryByLabelText('Body')).not.toBeInTheDocument()
+})
+
+
+it('sends a letter back to the review queue', async () => {
+  // Neither sending nor discarding: reject throws the founder away and
+  // redraft spends a model call. This just undoes the decision.
+  mockApproved([letter(), letter({ outreach_id: 2 })])
+  const unapprove = mockUnapprove()
+  render()
+  const buttons = await screen.findAllByRole('button', { name: /back to review/i })
+  await userEvent.click(buttons[1])
+  await waitFor(() => expect(unapprove).toHaveBeenCalledWith(2))
+})
+
+it('offers back-to-review even for a letter that cannot be sent', async () => {
+  // The blocked one is exactly the letter most likely to need it.
+  mockApproved([letter({ wire_text: 'Hi there,\n\n>>> YOUR TURN: are you their user?' })])
+  render()
+  expect(await screen.findByRole('button', { name: /back to review/i })).toBeEnabled()
+  expect(screen.getByRole('button', { name: /^send$/i })).toBeDisabled()
 })

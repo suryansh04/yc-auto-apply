@@ -61,3 +61,15 @@ def test_approved_carries_the_whole_letter_not_just_a_row(client, one_approved):
 
 def test_approved_is_empty_when_nothing_is_approved(client, one_pending):
     assert client.get("/api/approved").json() == []
+
+
+def test_unapprove_route_returns_the_letter_to_the_queue(client, repos, one_approved):
+    r = client.post(f"/api/outreach/{one_approved.id}/unapprove")
+    assert r.status_code == 200
+    assert repos.outreach.get(one_approved.id).state == "pending_approval"
+    assert [x["outreach_id"] for x in client.get("/api/approved").json()] == []
+    assert [x["outreach_id"] for x in client.get("/api/queue").json()] == [one_approved.id]
+
+
+def test_unapprove_route_refuses_a_letter_that_was_never_approved(client, one_pending):
+    assert client.post(f"/api/outreach/{one_pending.id}/unapprove").status_code == 409

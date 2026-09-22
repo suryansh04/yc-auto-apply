@@ -182,6 +182,44 @@ class ReviewOutreach:
         assert_transition(OutreachState(outreach.state), OutreachState.DISCARDED)
         self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.DISCARDED))
 
+    def check(self, outreach_id: int, subject: str | None = None,
+              body: str | None = None) -> list[str]:
+        """Run the checks over a draft and return what they say - writing
+        nothing.
+
+        Operator request (2026-09-22): the checks are advice, not a gate.
+        He wants to re-run them on demand, see what they say, and decide
+        for himself. `edit` already validates, but only as a condition of
+        saving; this is the same verdict without the save, so asking "is
+        this any good?" costs nothing and changes nothing.
+
+        With `subject`/`body` omitted it judges the stored draft. Passing
+        them judges text the operator is still typing.
+        """
+        outreach = self._outreach(outreach_id)
+        founder = self._repos.founder.get(outreach.founder_id)
+        company = self._repos.company.get(founder.company_id) if founder is not None else None
+        if founder is None or company is None:
+            raise ValueError(f"outreach {outreach_id} has no founder/company")
+        step = int(getattr(outreach, "sequence_step", 0) or 0)
+        row = self._repos.message.get_outbound(outreach.id, step)
+        if row is None and (subject is None or body is None):
+            return ["there is no draft to check yet"]
+        source_type = getattr(row, "research_source_type", None) if row is not None else None
+        source_id = getattr(row, "research_source_id", None) if row is not None else None
+        sources = self._sources(company)
+        source = sources.resolvable.get((source_type, source_id)) if source_type and source_id is not None else None
+        draft = Draft(
+            subject=(subject if subject is not None else getattr(row, "subject", "")) or "",
+            body=(body if body is not None else getattr(row, "body", "")) or "",
+            research_source_type=source_type or "",
+            research_source_id=source_id,
+            sequence_step=step,
+        )
+        return self._validate(draft, source, company, founder,
+                              self._previous_body(outreach, step),
+                              all_publications=sources.publications)
+
     def edit(self, outreach_id: int, subject: str, body: str) -> list[str]:
         outreach = self._outreach(outreach_id)
         if OutreachState(outreach.state) is not OutreachState.PENDING_APPROVAL:

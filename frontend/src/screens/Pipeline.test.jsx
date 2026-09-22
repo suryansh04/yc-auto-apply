@@ -7,8 +7,8 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithQuery } from '../test/render'
-import { mockJobs, mockStartJob, mockStats } from '../test/mocks'
-import Pipeline, { funnelDomainMax } from './Pipeline'
+import { mockJobs, mockStartJob, mockStats, mockSend } from '../test/mocks'
+import Pipeline, { describeSendResult, funnelDomainMax } from './Pipeline'
 
 // The screen links the two counts that need a decision through to the
 // screens where that decision gets made, so it needs a router.
@@ -157,7 +157,11 @@ it('renders exactly the seven registered job kinds as stage buttons, in order', 
   render(<Pipeline />)
   await screen.findByText('Pipeline')
 
-  const buttons = screen.getAllByRole('button')
+  // Scoped to the stage tables: the screen has other buttons (Send now,
+  // the two queue links), and this test is about the job registry.
+  const buttons = screen
+    .getAllByRole('button')
+    .filter((b) => b.closest('table'))
   expect(buttons.map((b) => b.textContent)).toEqual([
     'Sync',
     'Scrape',
@@ -280,4 +284,54 @@ it('draws both funnel groups on one scale', () => {
   expect(funnelDomainMax({ new: 2, discarded: 57 })).toBe(57)
   // Never zero: an all-empty pipeline must not divide by it.
   expect(funnelDomainMax({})).toBe(1)
+})
+
+
+// --- sending (operator finding 2026-09-22) ---------------------------------
+
+it('sends the approved letters, after asking', async () => {
+  // "clicking approve does nothing, not sending the email": approve was
+  // working, but approving and sending are two steps and there was no way
+  // to do the second one from the UI at all.
+  mockStats({ counts: { approved: 3 } })
+  mockJobs([])
+  const send = mockSend({ sent: 3 })
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  render(<Pipeline />)
+  await userEvent.click(await screen.findByRole('button', { name: /send now/i }))
+  await waitFor(() => expect(send).toHaveBeenCalled())
+  expect(confirm.mock.calls[0][0]).toMatch(/send 3 approved letters/i)
+  expect(await screen.findByText('3 letters sent')).toBeInTheDocument()
+  confirm.mockRestore()
+})
+
+it('does not send when the confirmation is declined', async () => {
+  mockStats({ counts: { approved: 2 } })
+  mockJobs([])
+  const send = mockSend({ sent: 2 })
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  render(<Pipeline />)
+  await userEvent.click(await screen.findByRole('button', { name: /send now/i }))
+  expect(send).not.toHaveBeenCalled()
+  confirm.mockRestore()
+})
+
+it('offers nothing to send when nothing is approved', async () => {
+  mockStats({ counts: { approved: 0 } })
+  mockJobs([])
+  render(<Pipeline />)
+  expect(await screen.findByRole('button', { name: /send now/i })).toBeDisabled()
+})
+
+it('names every outcome of a send, not just the ones that went', () => {
+  // "sent 3" alone hides the four the operator has to act on.
+  expect(describeSendResult({ sent: 3, skipped_cap: 4, needs_manual_check: 0,
+                              skipped_not_reservable: 0, errors: 0 }))
+    .toMatch(/4 held back by the daily cap/)
+  expect(describeSendResult({ sent: 1, skipped_cap: 0, needs_manual_check: 2,
+                              skipped_not_reservable: 0, errors: 1 }))
+    .toMatch(/2 need a manual check.*1 could not be sent/)
+  expect(describeSendResult({ sent: 1, skipped_cap: 0, needs_manual_check: 0,
+                              skipped_not_reservable: 0, errors: 0 }))
+    .toBe('Nothing else was waiting.')
 })

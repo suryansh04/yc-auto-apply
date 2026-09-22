@@ -190,6 +190,19 @@ export function mockRedraft({ delayMs = 0 } = {}) {
  * (app/application/review_outreach.py's `approve`), whose message the
  * screen must show verbatim.
  */
+/** POST /api/outreach/:id/check - the re-run checks. Advice, never a
+ *  refusal, so this always answers 200 with the notes in the body. */
+export function mockCheckDraft({ notes = [] } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/check', async ({ params }) => {
+      spy(Number(params.id))
+      return HttpResponse.json({ notes })
+    }),
+  )
+  return spy
+}
+
 export function mockApproveFailure(status = 500, detail = 'could not approve') {
   server.use(
     http.post('/api/outreach/:id/approve', () => HttpResponse.json({ detail }, { status })),
@@ -416,4 +429,21 @@ export function mockSetEmailFailure(errors) {
   server.use(
     http.post('/api/outreach/:id/email', () => HttpResponse.json({ errors }, { status: 422 })),
   )
+}
+
+
+/** POST /api/send - the one irreversible action. Answers with the five
+ *  counts `SendResultOut` carries. */
+export function mockSend(result = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/send', async ({ request }) => {
+      spy(await request.json().catch(() => ({})))
+      return HttpResponse.json({
+        sent: 0, skipped_cap: 0, skipped_not_reservable: 0,
+        needs_manual_check: 0, errors: 0, ...result,
+      })
+    }),
+  )
+  return spy
 }

@@ -23,6 +23,7 @@ import {
   mockQueue,
   mockQueueSequence,
   mockRedraft,
+  mockCheckDraft,
 } from '../test/mocks'
 import ReviewQueue from './ReviewQueue'
 
@@ -84,10 +85,37 @@ it('keeps the typed text when an edit is rejected', async () => {
   expect(await screen.findByDisplayValue(/my own words/)).toBeInTheDocument()
 })
 
-it('marks a needs-manual-write draft and refuses a bare approve', async () => {
+it('shows what the checks noticed as advice, not as a refusal', async () => {
+  // 2026-09-22: this used to shout "Needs a fix before approving" in red,
+  // which read as a gate. Nothing ever stopped the approve, and it is the
+  // operator's name on the letter, so the note is grouped as a suggestion.
   mockQueue([item({ last_error: 'cited posting is not intern-appropriate' })])
   render(<ReviewQueue />)
-  expect(await screen.findByText(/needs a fix before approving/i)).toBeInTheDocument()
+  expect(await screen.findByText(/ai suggestions/i)).toBeInTheDocument()
+  expect(screen.getByText(/cited posting is not intern-appropriate/)).toBeInTheDocument()
+  expect(screen.getByText(/you can approve anyway/i)).toBeInTheDocument()
+  expect(screen.queryByText(/needs a fix before approving/i)).not.toBeInTheDocument()
+  // ...and Approve is live, not disabled.
+  expect(screen.getByRole('button', { name: /approve/i })).toBeEnabled()
+})
+
+it('re-checks the draft on demand and shows the fresh notes', async () => {
+  mockQueue([item({ last_error: 'cited posting is not intern-appropriate' })])
+  const check = mockCheckDraft({ notes: ['contains a semicolon'] })
+  render(<ReviewQueue />)
+  await screen.findByText(/ai suggestions/i)
+  await userEvent.click(screen.getByRole('button', { name: /re-check/i }))
+  expect(await screen.findByText('contains a semicolon')).toBeInTheDocument()
+  expect(check).toHaveBeenCalled()
+})
+
+it('a re-check that finds nothing says so', async () => {
+  mockQueue([item({ last_error: 'cited posting is not intern-appropriate' })])
+  mockCheckDraft({ notes: [] })
+  render(<ReviewQueue />)
+  await screen.findByText(/ai suggestions/i)
+  await userEvent.click(screen.getByRole('button', { name: /re-check/i }))
+  expect(await screen.findByText(/nothing flagged on the last check/i)).toBeInTheDocument()
 })
 
 it('shows the critic note as one dismissible line', async () => {

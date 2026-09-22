@@ -106,6 +106,22 @@ class EditIn(BaseModel):
     body: str
 
 
+class CheckIn(BaseModel):
+    """Optional text to judge instead of the stored draft, so the operator
+    can ask "is this any good?" about something he is still typing."""
+
+    subject: str | None = None
+    body: str | None = None
+
+
+class CheckOut(BaseModel):
+    """What the checks say about a draft. Advice, not a gate (operator
+    decision, 2026-09-22): the route writes nothing and refuses nothing -
+    the human decides what to do about it."""
+
+    notes: list[str] = []
+
+
 class OkOut(BaseModel):
     ok: bool = True
 

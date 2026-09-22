@@ -181,6 +181,21 @@ export function useRedraft() {
   })
 }
 
+/**
+ * POST /api/outreach/{id}/check - re-run the checks and return what they
+ * say. Writes nothing and refuses nothing (operator decision,
+ * 2026-09-22): the notes are advice, so asking for them can never block
+ * the person who signs the letter. Optionally judges text being typed
+ * rather than the stored draft.
+ */
+export function useCheckDraft(options = {}) {
+  return useMutation({
+    mutationFn: ({ id, subject, body }) =>
+      apiPost(`/outreach/${id}/check`, subject != null || body != null ? { subject, body } : {}),
+    ...options,
+  })
+}
+
 export function useSetEmail() {
   const queryClient = useQueryClient()
   return useMutation({

@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.api.deps import Repos, get_repos
-from app.api.schemas import EditIn, OkOut, QueueItemOut
+from app.api.schemas import CheckIn, CheckOut, EditIn, OkOut, QueueItemOut
 from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
 from app.domain.compose import compose_wire_text, first_name
 from app.domain.states import IllegalTransition
@@ -120,6 +120,28 @@ def get_queue_item(outreach_id: int, repos: Repos = Depends(get_repos)) -> Queue
         # no refused-but-real-row case on a plain read.
         raise HTTPException(404, "no such outreach")
     return _to_out(item)
+
+
+@router.post("/outreach/{outreach_id}/check", response_model=CheckOut)
+def check(outreach_id: int, payload: CheckIn | None = None,
+          repos: Repos = Depends(get_repos)) -> CheckOut:
+    """Re-run the checks and say what they found. Writes nothing.
+
+    Operator decision (2026-09-22): these are suggestions, so asking for
+    them is a read, never a refusal - a draft the checks dislike still
+    returns 200 with the notes in the body.
+    """
+    try:
+        notes = _use_case(repos).check(
+            outreach_id,
+            subject=payload.subject if payload else None,
+            body=payload.body if payload else None,
+        )
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except ValueError as exc:
+        raise _action_error(exc)
+    return CheckOut(notes=notes)
 
 
 @router.post("/outreach/{outreach_id}/approve", response_model=OkOut)

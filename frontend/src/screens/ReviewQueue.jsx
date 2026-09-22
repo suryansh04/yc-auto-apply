@@ -27,13 +27,22 @@
 // call even resolves), so a stale, already-acted-on draft can never be
 // shown as current again, regardless of how slow the refetch is.
 import { useState } from 'react'
-import { useApprove, useEdit, useQueue, useRedraft, useReject } from '../api/hooks'
+import {
+  useApprove,
+  useCheckDraft,
+  useEdit,
+  useQueue,
+  useRedraft,
+  useReject,
+} from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
+import { RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -47,6 +56,7 @@ import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 
 // app/domain/letter.py's USER_FIT_MARKER, mirrored by hand - there is no
@@ -98,6 +108,12 @@ export default function ReviewQueue() {
   const edit = useEdit()
   const reject = useReject()
   const redraft = useRedraft()
+  const checkDraft = useCheckDraft({
+    onSuccess: (data, { id }) => {
+      setCheckNotes(data?.notes ?? [])
+      setCheckedId(id)
+    },
+  })
 
   const items = queueQuery.data ?? []
 
@@ -114,6 +130,10 @@ export default function ReviewQueue() {
   // screen has acted, so the same filter is correct for all three
   // actions). A failed action removes its id again immediately.
   const [settledIds, setSettledIds] = useState(() => new Set())
+  // The result of the operator pressing "Re-check", and which draft it
+  // belongs to.
+  const [checkNotes, setCheckNotes] = useState([])
+  const [checkedId, setCheckedId] = useState(null)
 
   // Prune settled ids the backend has already confirmed (no longer in
   // `items` at all) - once gone, holding onto the id serves no purpose.
@@ -350,6 +370,13 @@ export default function ReviewQueue() {
   const progress = Math.round((position / visibleItems.length) * 100)
   const needsYourParagraph = (current.wire_text ?? '').includes(USER_FIT_MARKER)
   const critic = criticCheck(current.critic_verdict)
+  // A fresh re-check wins over the note stored at draft time, but only
+  // for the draft it was run on - otherwise moving to the next letter
+  // would show it the previous one's verdict.
+  const suggestions =
+    checkedId === current.outreach_id
+      ? checkNotes
+      : (current.last_error ? [current.last_error] : [])
   const showCriticNote = Boolean(current.critic_note) && !dismissedIds.has(current.outreach_id)
 
   return (
@@ -488,29 +515,65 @@ export default function ReviewQueue() {
               </CardContent>
             </Card>
 
-            <div className="grid gap-2">
-              {current.last_error && (
-                <Alert variant="destructive" role="alert">
-                  <AlertTitle>Needs a fix before approving</AlertTitle>
-                  <AlertDescription>{current.last_error}</AlertDescription>
-                </Alert>
-              )}
+            {/* Operator decision (2026-09-22): these are SUGGESTIONS, not
+                a gate. They used to shout "Needs a fix before approving"
+                in red, which read as a refusal - but nothing actually
+                stops him approving, and it is his letter and his name.
+                One quiet card, everything the machine noticed in one
+                place, and a button to ask again. */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">AI suggestions</CardTitle>
+                <CardDescription>
+                  What the checks noticed. Advice only &mdash; you can approve anyway.
+                </CardDescription>
+                <CardAction>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={checkDraft.isPending}
+                    onClick={() => checkDraft.mutate({ id: current.outreach_id })}
+                  >
+                    {checkDraft.isPending ? <Spinner /> : <RefreshCw />}
+                    Re-check
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                <Badge variant={critic.variant} className="w-fit">
+                  {critic.label}
+                </Badge>
 
-              <Badge variant={critic.variant} className="w-fit">
-                {critic.label}
-              </Badge>
+                {suggestions.length > 0 ? (
+                  <ul className="grid list-disc gap-1 pl-4 text-sm">
+                    {suggestions.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-muted-foreground text-sm">
+                    {checkedId === current.outreach_id
+                      ? 'Nothing flagged on the last check.'
+                      : 'Nothing flagged.'}
+                  </p>
+                )}
 
-              {showCriticNote && (
-                <Alert>
-                  <AlertDescription className="grid gap-2">
-                    <span>{current.critic_note}</span>
-                    <Button variant="outline" size="sm" className="w-fit" onClick={dismissCritic}>
+                {showCriticNote && (
+                  <div className="grid gap-2 border-l-2 pl-3">
+                    <p className="text-muted-foreground text-sm">{current.critic_note}</p>
+                    <Button variant="ghost" size="sm" className="w-fit" onClick={dismissCritic}>
                       Dismiss
                     </Button>
-                  </AlertDescription>
-                </Alert>
-              )}
-            </div>
+                  </div>
+                )}
+
+                {checkDraft.isError && (
+                  <p className="text-destructive text-xs" role="alert">
+                    Could not re-check: {checkDraft.error.message}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </aside>
         </div>
       )}

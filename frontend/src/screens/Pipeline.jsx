@@ -11,8 +11,9 @@
 // than a screen that goes quiet.
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
+import { Send } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from 'recharts'
-import { useJobs, useStartJob, useStats } from '../api/hooks'
+import { useJobs, useSend, useStartJob, useStats } from '../api/hooks'
 import { outreachStateLabel } from '../labels'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +31,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from '@/components/ui/chart'
+import { Spinner } from '@/components/ui/spinner'
 import {
   Table,
   TableBody,
@@ -147,6 +149,19 @@ export function funnelDomainMax(counts) {
     ...[...FUNNEL_STATES, ...EXCEPTION_STATES].map((state) => counts?.[state] ?? 0),
     1,
   )
+}
+
+// `POST /api/send` answers with five counts. Saying only "sent 3" hides
+// the four that were capped or need a manual check, which are the ones
+// the operator has to do something about.
+export function describeSendResult(result) {
+  const parts = []
+  if (result.skipped_cap) parts.push(`${result.skipped_cap} held back by the daily cap`)
+  if (result.needs_manual_check) parts.push(`${result.needs_manual_check} need a manual check`)
+  if (result.skipped_not_reservable) parts.push(`${result.skipped_not_reservable} were already taken`)
+  if (result.errors) parts.push(`${result.errors} could not be sent`)
+  if (parts.length === 0) return 'Nothing else was waiting.'
+  return `${parts.join(', ')}.`
 }
 
 function latestJobByKind(jobs) {
@@ -331,6 +346,7 @@ export default function Pipeline() {
   const statsQuery = useStats()
   const jobsQuery = useJobs()
   const startJob = useStartJob()
+  const send = useSend()
 
   const counts = statsQuery.data?.counts ?? {}
   const latest = useMemo(() => latestJobByKind(jobsQuery.data), [jobsQuery.data])
@@ -357,6 +373,17 @@ export default function Pipeline() {
   const domainMax = funnelDomainMax(counts)
   const waiting = counts.pending_approval ?? 0
   const missingAddresses = counts.needs_manual_email ?? 0
+  const approvedNotSent = counts.approved ?? 0
+
+  function handleSend() {
+    // Sending is the one irreversible thing this app does, so it asks
+    // first and says exactly how many letters are about to leave.
+    const ok = window.confirm(
+      `Send ${approvedNotSent} approved ${approvedNotSent === 1 ? 'letter' : 'letters'} now? ` +
+        'This cannot be undone.',
+    )
+    if (ok) send.mutate()
+  }
 
   return (
     <>
@@ -392,9 +419,12 @@ export default function Pipeline() {
         </Alert>
       )}
 
-      {/* The one thing this screen exists to tell you: how much is
-          waiting on a decision only you can make. */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      {/* Operator finding (2026-09-22): "clicking approve does nothing,
+          not sending the email". Approve was working - it moves the
+          letter to approved - but approving and sending are two steps on
+          purpose, and there was no way to do the second one from the UI
+          at all. This is it. */}
+      <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader>
             <CardDescription>
@@ -410,6 +440,25 @@ export default function Pipeline() {
         </Card>
         <Card>
           <CardHeader>
+            <CardDescription>
+              {approvedNotSent === 1 ? 'Letter approved, not sent' : 'Letters approved, not sent'}
+            </CardDescription>
+            <CardTitle className="text-4xl tabular-nums">{approvedNotSent}</CardTitle>
+            <CardAction>
+              <Button
+                size="sm"
+                disabled={approvedNotSent === 0 || send.isPending}
+                onClick={handleSend}
+              >
+                {send.isPending ? <Spinner /> : <Send />}
+                Send now
+              </Button>
+            </CardAction>
+          </CardHeader>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardDescription>Founders still need an address</CardDescription>
             <CardTitle className="text-4xl tabular-nums">{missingAddresses}</CardTitle>
             <CardAction>
@@ -420,6 +469,23 @@ export default function Pipeline() {
           </CardHeader>
         </Card>
       </div>
+
+      {send.isSuccess && (
+        <Alert>
+          <AlertTitle>
+            {send.data.sent === 1 ? '1 letter sent' : `${send.data.sent} letters sent`}
+          </AlertTitle>
+          <AlertDescription>
+            {describeSendResult(send.data)}
+          </AlertDescription>
+        </Alert>
+      )}
+      {send.isError && (
+        <Alert variant="destructive">
+          <AlertTitle>Could not send</AlertTitle>
+          <AlertDescription>{send.error.message}</AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <FunnelCard

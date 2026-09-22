@@ -192,12 +192,17 @@ export function mockRedraft({ delayMs = 0 } = {}) {
  */
 /** POST /api/outreach/:id/check - the re-run checks. Advice, never a
  *  refusal, so this always answers 200 with the notes in the body. */
-export function mockCheckDraft({ notes = [] } = {}) {
+export function mockCheckDraft({ notes = [], highlights = null } = {}) {
   const spy = vi.fn()
   server.use(
     http.post('/api/outreach/:id/check', async ({ params }) => {
       spy(Number(params.id))
-      return HttpResponse.json({ notes })
+      // Each note paired with the words it is about; by default nothing
+      // resolves, which is the shape a note about the whole letter has.
+      return HttpResponse.json({
+        notes,
+        highlights: highlights ?? notes.map((message) => ({ message, quote: null })),
+      })
     }),
   )
   return spy

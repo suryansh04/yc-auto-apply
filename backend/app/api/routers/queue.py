@@ -24,9 +24,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.api.deps import Repos, get_repos
-from app.api.schemas import CheckIn, CheckOut, EditIn, OkOut, QueueItemOut
+from app.api.schemas import CheckIn, CheckOut, EditIn, HighlightOut, OkOut, QueueItemOut
 from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
 from app.domain.compose import compose_wire_text, first_name
+from app.domain.highlight import highlights_for
 from app.domain.states import IllegalTransition
 from app.config import get_operator_settings
 
@@ -132,6 +133,19 @@ def get_queue_item(outreach_id: int, repos: Repos = Depends(get_repos)) -> Queue
     return _to_out(item)
 
 
+def _checked(repos: Repos, outreach_id: int, notes: list[str], body: str | None) -> CheckOut:
+    """Pair each note with the words it is about, against the body the
+    notes were produced from - the text just supplied, or the stored one."""
+    text = body
+    if text is None:
+        item = _use_case(repos).load(outreach_id)
+        text = getattr(item.message, "body", "") or ""
+    return CheckOut(
+        notes=notes,
+        highlights=[HighlightOut(**h) for h in highlights_for(notes, text)],
+    )
+
+
 @router.post("/outreach/{outreach_id}/check", response_model=CheckOut)
 def check(outreach_id: int, payload: CheckIn | None = None,
           repos: Repos = Depends(get_repos)) -> CheckOut:
@@ -151,7 +165,7 @@ def check(outreach_id: int, payload: CheckIn | None = None,
         raise HTTPException(404, "no such outreach")
     except ValueError as exc:
         raise _action_error(exc)
-    return CheckOut(notes=notes)
+    return _checked(repos, outreach_id, notes, payload.body if payload else None)
 
 
 @router.post("/outreach/{outreach_id}/approve", response_model=OkOut)
@@ -242,4 +256,4 @@ def edit(outreach_id: int, payload: EditIn, repos: Repos = Depends(get_repos)) -
     except (ValueError, IllegalTransition) as exc:
         raise _action_error(exc)
     repos.session.commit()
-    return CheckOut(notes=notes)
+    return _checked(repos, outreach_id, notes, payload.body)

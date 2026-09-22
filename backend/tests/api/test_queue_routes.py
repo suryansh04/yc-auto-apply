@@ -73,3 +73,29 @@ def test_unapprove_route_returns_the_letter_to_the_queue(client, repos, one_appr
 
 def test_unapprove_route_refuses_a_letter_that_was_never_approved(client, one_pending):
     assert client.post(f"/api/outreach/{one_pending.id}/unapprove").status_code == 409
+
+
+def test_check_pairs_each_note_with_the_words_it_is_about(client, one_pending):
+    """Operator request (2026-09-22): mark the offending text, the way a
+    writing assistant does."""
+    r = client.post(f"/api/outreach/{one_pending.id}/check",
+                    json={"subject": "A subject here", "body": "One thing; another thing."})
+    assert r.status_code == 200
+    body = r.json()
+    assert [h["message"] for h in body["highlights"]] == body["notes"]
+    semicolon = [h for h in body["highlights"] if "semicolon" in h["message"]]
+    assert semicolon and semicolon[0]["quote"] == ";"
+
+
+def test_a_note_about_the_whole_letter_carries_no_quote(client, one_pending):
+    r = client.post(f"/api/outreach/{one_pending.id}/check",
+                    json={"subject": "x", "body": "Too short."})
+    highlights = r.json()["highlights"]
+    assert any(h["quote"] is None for h in highlights)
+
+
+def test_edit_also_returns_the_highlights(client, one_pending):
+    r = client.post(f"/api/outreach/{one_pending.id}/edit",
+                    json={"subject": "A subject here", "body": "One thing; another thing."})
+    assert r.status_code == 200
+    assert any(h["quote"] == ";" for h in r.json()["highlights"])

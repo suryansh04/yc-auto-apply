@@ -26,7 +26,7 @@
 // the *rendered* list immediately (optimistically, before the network
 // call even resolves), so a stale, already-acted-on draft can never be
 // shown as current again, regardless of how slow the refetch is.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   useApprove,
   useCheckDraft,
@@ -36,6 +36,7 @@ import {
   useReject,
 } from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
+import { markUp } from '@/lib/marks'
 import { Lightbulb, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -111,7 +112,9 @@ export default function ReviewQueue() {
   const checkDraft = useCheckDraft({
     onSuccess: (data, { id }) => {
       setCheckNotes(data?.notes ?? [])
+      setCheckHighlights(data?.highlights ?? [])
       setCheckedId(id)
+      setActiveNote(null)
     },
   })
 
@@ -134,6 +137,10 @@ export default function ReviewQueue() {
   // belongs to.
   const [checkNotes, setCheckNotes] = useState([])
   const [checkedId, setCheckedId] = useState(null)
+  // The notes paired with the words they are about, and which one the
+  // operator last clicked on - in the letter or in the panel.
+  const [checkHighlights, setCheckHighlights] = useState([])
+  const [activeNote, setActiveNote] = useState(null)
 
   // Prune settled ids the backend has already confirmed (no longer in
   // `items` at all) - once gone, holding onto the id serves no purpose.
@@ -272,7 +279,9 @@ export default function ReviewQueue() {
           setIsEditing(false)
           setEditErrors([])
           setCheckNotes(data?.notes ?? [])
+          setCheckHighlights(data?.highlights ?? [])
           setCheckedId(current.outreach_id)
+          setActiveNote(null)
         },
         // A real failure (the row vanished, the API is down). The editor
         // stays open holding whatever the operator typed.
@@ -287,6 +296,22 @@ export default function ReviewQueue() {
     if (!current) return
     setDismissedIds((prev) => new Set(prev).add(current.outreach_id))
   }
+
+  // The checks run as soon as a draft is shown, so the letter is marked
+  // up on arrival rather than after pressing a button - which is what
+  // "like grammarly" means. It is a cheap call: pure computation over
+  // text the server already has, no model involved.
+  //
+  // Keyed on the id alone, so moving to the next letter re-runs it and
+  // staying put does not. The mutation object is deliberately NOT a
+  // dependency: it changes identity on every state transition of its own,
+  // which would loop.
+  const currentIdForCheck = current?.outreach_id ?? null
+  useEffect(() => {
+    if (currentIdForCheck == null) return
+    checkDraft.mutate({ id: currentIdForCheck })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIdForCheck])
 
   // T16-3/F3: ALL review-queue action keys are suspended while the
   // editor is open - not merely inert inside its own text fields.
@@ -385,6 +410,10 @@ export default function ReviewQueue() {
   // The critic's note counts as a suggestion: it is one more thing the
   // machine noticed, and the panel is tinted when there is anything at
   // all to read.
+  // Only a fresh check knows WHERE each note applies; the note stored at
+  // draft time is just a sentence. So the letter is marked up after a
+  // re-check or a save, and reads plainly before that.
+  const highlights = checkedId === current.outreach_id ? checkHighlights : []
   const hasSuggestions = suggestions.length > 0 || showCriticNote
   const suggestionCount = suggestions.length + (showCriticNote ? 1 : 0)
 
@@ -450,7 +479,12 @@ export default function ReviewQueue() {
             <Separator />
             <CardContent>
               <pre className="font-sans text-[15px] leading-relaxed whitespace-pre-wrap">
-                {current.wire_text}
+                {highlights.length > 0
+                  ? markUp(current.wire_text, highlights, {
+                      onSelect: setActiveNote,
+                      activeIndex: activeNote,
+                    })
+                  : current.wire_text}
               </pre>
             </CardContent>
             <CardFooter>
@@ -536,10 +570,34 @@ export default function ReviewQueue() {
                 </Badge>
 
                 {suggestions.length > 0 ? (
-                  <ul className="grid list-disc gap-1.5 pl-4 text-sm font-medium">
-                    {suggestions.map((note) => (
-                      <li key={note}>{note}</li>
-                    ))}
+                  <ul className="grid gap-1.5 text-sm">
+                    {suggestions.map((note, index) => {
+                      const marked = Boolean(highlights[index]?.quote)
+                      return (
+                        <li key={note}>
+                          <button
+                            type="button"
+                            disabled={!marked}
+                            onClick={() => setActiveNote(index)}
+                            className={
+                              'w-full rounded px-1.5 py-1 text-left font-medium ' +
+                              (marked ? 'hover:bg-amber-200/60 dark:hover:bg-amber-900/40 ' : '') +
+                              (activeNote === index ? 'bg-amber-200/70 dark:bg-amber-900/50' : '')
+                            }
+                          >
+                            {note}
+                            {/* Says which notes point at actual words, so
+                                a note with nothing marked does not look
+                                like a broken highlight. */}
+                            {marked && (
+                              <span className="text-muted-foreground ml-1 text-xs">
+                                &mdash; highlighted
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      )
+                    })}
                   </ul>
                 ) : (
                   <p className="text-muted-foreground text-sm">

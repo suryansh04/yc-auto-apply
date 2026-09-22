@@ -637,3 +637,49 @@ it('saves an edit the checks dislike, and shows what they said', async () => {
   await waitFor(() => expect(screen.queryByLabelText('Body')).not.toBeInTheDocument())
   expect(await screen.findByText('implies seniority: my team')).toBeInTheDocument()
 })
+
+
+// --- highlighting what a note is about (operator request 2026-09-22) -------
+
+it('marks the words a note objects to, in the letter itself', async () => {
+  mockQueue([item({ wire_text: 'Hi Madhav,\n\nOne thing; another thing.\n\nSuryansh' })])
+  mockCheckDraft({
+    notes: ['contains a semicolon'],
+    highlights: [{ message: 'contains a semicolon', quote: ';' }],
+  })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /re-check/i }))
+  const mark = await screen.findByTitle('contains a semicolon')
+  expect(mark.tagName).toBe('MARK')
+  expect(mark).toHaveTextContent(';')
+})
+
+it('says which notes point at actual words', async () => {
+  mockQueue([item({ wire_text: 'Hi Madhav,\n\nOne thing; another thing.\n\nSuryansh' })])
+  mockCheckDraft({
+    notes: ['contains a semicolon', 'body exceeds 380 words'],
+    highlights: [
+      { message: 'contains a semicolon', quote: ';' },
+      { message: 'body exceeds 380 words', quote: null },
+    ],
+  })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /re-check/i }))
+  expect(await screen.findByRole('button', { name: /contains a semicolon.*highlighted/i }))
+    .toBeEnabled()
+  // A note with nothing to mark is not clickable - it would look like a
+  // broken highlight.
+  expect(screen.getByRole('button', { name: /body exceeds 380 words/ })).toBeDisabled()
+})
+
+it('a note with no quote leaves the letter unmarked', async () => {
+  mockQueue([item({ wire_text: 'Hi Madhav,\n\nA clean letter.\n\nSuryansh' })])
+  mockCheckDraft({
+    notes: ['body exceeds 380 words'],
+    highlights: [{ message: 'body exceeds 380 words', quote: null }],
+  })
+  const { container } = render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /re-check/i }))
+  await screen.findByRole('button', { name: /body exceeds 380 words/ })
+  expect(container.querySelectorAll('mark')).toHaveLength(0)
+})

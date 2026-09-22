@@ -135,12 +135,30 @@ class CheckIn(BaseModel):
     body: str | None = None
 
 
+class HighlightOut(BaseModel):
+    """One note, plus the exact words it is about.
+
+    `quote` is a verbatim substring of the draft body, or None when the
+    note is about the letter as a whole (its length, its shape) or its
+    quote could not be resolved. The screen wraps those characters and
+    nothing else - marking the wrong words would be worse than marking
+    none."""
+
+    message: str
+    quote: str | None = None
+
+
 class CheckOut(BaseModel):
     """What the checks say about a draft. Advice, not a gate (operator
     decision, 2026-09-22): the route writes nothing and refuses nothing -
-    the human decides what to do about it."""
+    the human decides what to do about it.
+
+    `notes` is the plain list; `highlights` is the same notes paired with
+    the text each one objects to. Both are sent so a caller that only
+    wants the sentences is not forced to unwrap anything."""
 
     notes: list[str] = []
+    highlights: list[HighlightOut] = []
 
 
 class OkOut(BaseModel):

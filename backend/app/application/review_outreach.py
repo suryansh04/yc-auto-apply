@@ -281,7 +281,8 @@ class ReviewOutreach:
         allowed = [name or "", one_liner or "", *extra_allowed]
         return (validate_style(draft, previous_body, company_name=name or "",
                                operator_edit=True)
-                + validate_claims(draft, claims, allowed_text=allowed))
+                + validate_claims(draft, claims, allowed_text=allowed,
+                                  company_name=name or ""))
 
     def _rank_key(self, item: ReviewItem):
         company = item.company

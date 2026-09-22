@@ -38,6 +38,7 @@ MIN_SUBJECT_WORDS = 3
 MAX_SUBJECT_WORDS = 10
 MAX_EM_DASHES = 2
 MAX_I_START_RATIO = 0.7
+_BRACKETED_CITATION = re.compile(r"\[\s*\d+\s*\]")
 
 # Task 12 (spec §6): a follow-up is not just "shorter than the previous
 # message" (that rule predates this task — see PF-3) but shorter on a
@@ -156,9 +157,30 @@ def _paragraphs(text: str) -> list[str]:
 
 
 def _hook(body: str) -> str:
-    """The first paragraph — spec's part 1 of the three-part structure. The
-    hook-grounding checks score only this, not the whole body, so a later
-    paragraph can't accidentally launder a source or one_liner term."""
+    """The paragraph the grounding checks score - the one that has to earn
+    its place by saying something true about THIS company.
+
+    Historically that was the first paragraph. In an assembled letter
+    (2026-09-22) the first paragraph is the operator's fixed opener, which
+    is the same for every founder and could never share a term with a
+    source; the paragraph that must be grounded is the one the model wrote,
+    under "Now Here's the Important Part:". Scoring the opener instead
+    rejected every draft with "hook shares no distinctive term with the
+    cited source".
+
+    Only that paragraph is scored, never the whole body, so a later
+    paragraph still cannot launder a source or one_liner term.
+    """
+    from app.domain.letter import ASK, SECTION_BREAK
+
+    if SECTION_BREAK in body:
+        after = body.split(SECTION_BREAK, 1)[1]
+        # Everything up to the fixed ask is the model's; the ask and the
+        # close are the operator's again.
+        company_part = after.split(ASK, 1)[0]
+        paras = _paragraphs(company_part)
+        if paras:
+            return "\n\n".join(paras)
     paras = _paragraphs(body)
     return paras[0] if paras else body
 
@@ -199,6 +221,7 @@ def validate_style(
     errs: list[str] = []
     body = draft.body
     low = body.lower()
+    generated_raw = _generated_region(body, company_name)
 
     if len(_words(body)) > MAX_WORDS:
         errs.append(f"body exceeds {MAX_WORDS} words")
@@ -224,6 +247,15 @@ def validate_style(
     if ";" in body:
         errs.append("contains a semicolon")
 
+    # Live finding (2026-09-22): shown a numbered source list, the model
+    # started appending academic citations - "That choice is visible in
+    # what you wrote about the company [17]." The number is our own list
+    # index (or an invented one); a founder reading it learns we have a
+    # bibliography. Deterministic, because telling the model not to only
+    # reduced the rate - the same lesson as the source-kind enum.
+    if _BRACKETED_CITATION.search(generated_raw):
+        errs.append("contains a bracketed citation like '[3]' - never cite by number")
+
     sents = _sentences(body)
     if sents:
         i_starts = sum(1 for s in sents if re.match(r"^I\b", s))
@@ -240,7 +272,7 @@ def validate_style(
     # them would otherwise be rejected forever. So the bans run over the
     # body with those blocks removed - what is left is exactly what the
     # model wrote.
-    generated = _generated_region(body, company_name).lower()
+    generated = generated_raw.lower()
     if not operator_edit:
         for phrase in BANNED_PHRASES:
             if phrase in generated:
@@ -351,6 +383,7 @@ def validate_grounding(draft, source, company_name, one_liner, claims,
     errs: list[str] = []
     body = draft.body
     low = body.lower()
+    generated_raw = _generated_region(body, company_name)
 
     if source is None or draft.research_source_id is None:
         return ["research source does not resolve to a real row"]
@@ -452,12 +485,20 @@ def _numbers_in(text: str) -> set[str]:
     return {n.replace(",", "") for n in _NUMBER.findall(text)}
 
 
-def validate_claims(draft, claims, allowed_text=()) -> list[str]:
+def validate_claims(draft, claims, allowed_text=(), company_name: str = "") -> list[str]:
     """Reject a sentence that asserts a technology/tool/proper noun (first-
     person sentences) or a number (any sentence outside the hook, or any
     first-person sentence) found in no resume claim and not in
     `allowed_text`. One error per offending sentence, listing every
-    unmatched token."""
+    unmatched token.
+
+    The operator's own fixed blocks (app/domain/letter.py) are exempt, for
+    the same reason the phrase bans are: this rule exists to stop the MODEL
+    asserting something about the sender that no resume backs. His own
+    sentences about himself ARE the backing - checking them against the
+    resume rejected "I'm Suryansh, studying Computer Science" for the crime
+    of naming Suryansh.
+    """
     known_text = " ".join(
         [_claim_field(c, "text") + " " + _claim_field(c, "source_span") for c in claims]
         + [str(t or "") for t in allowed_text]
@@ -466,10 +507,11 @@ def validate_claims(draft, claims, allowed_text=()) -> list[str]:
     known_tokens = set(_KNOWN_TOKEN.findall(known_text)) | _CLAIM_STOPWORDS
     known_numbers = _numbers_in(known_text)
 
+    body_to_check = _generated_region(draft.body, company_name)
     hook_sentences = set(_sentences(_hook(draft.body)))
 
     errs: list[str] = []
-    for sentence in _sentences(draft.body):
+    for sentence in _sentences(body_to_check):
         first_person = bool(_FIRST_PERSON.search(sentence))
         unmatched: list[str] = []
 
@@ -567,4 +609,5 @@ def validate_draft(draft, source, company_name, one_liner, claims,
                            operator_edit=operator_edit)
             + validate_grounding(draft, source, company_name, one_liner, claims,
                                  all_publications=all_publications)
-            + validate_claims(draft, claims, allowed_text=allowed))
+            + validate_claims(draft, claims, allowed_text=allowed,
+                              company_name=company_name or ""))

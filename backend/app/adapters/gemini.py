@@ -182,11 +182,8 @@ FIRST_EMAIL_SCHEMA: dict[str, Any] = {
         "subject": {"type": "STRING"},
         "company_paragraphs": {"type": "ARRAY", "items": {"type": "STRING"}},
         "could_be_a_user": {"type": "BOOLEAN"},
-        "research_source_type": {"type": "STRING", "enum": SOURCE_KINDS},
-        "research_source_id": {"type": "INTEGER"},
     },
-    "required": ["subject", "company_paragraphs", "could_be_a_user",
-                 "research_source_type", "research_source_id"],
+    "required": ["subject", "company_paragraphs", "could_be_a_user"],
 }
 
 _FIRST_EMAIL_SYSTEM = """You write ONE part of a cold email from a computer science student to a
@@ -213,8 +210,7 @@ did NOT do with what they did:
 That is the shape to aim for: a thing they avoided, then the thing they
 chose instead. Both halves must be visible in the SOURCE below.
 
-Ground it in exactly one of the AVAILABLE SOURCES and cite that source's
-kind and id.
+Ground it in WHAT THEY SAID below, and in nothing else.
 
 THE SOURCE IS HOW YOU LEARNED IT, never what the sentence is about.
 Naming the founder's own channel is fine and wanted - their launch post,
@@ -222,6 +218,14 @@ their job posting, what they wrote - because that is where you actually
 read it. But NEVER name the news outlet or publication that covered them,
 and never write "the article", "the piece", "coverage", "featured in" or
 a date. A third party's write-up is not the founder's own words.
+
+Naming where you read it is OPTIONAL and only worth doing when it reads
+as a natural clause - "in your launch post you said ...", "the role you
+posted asks for ...". If it will not sit inside a real sentence, leave it
+out and simply state what they chose. Never bolt the channel onto the end
+of a sentence as a fragment: "...sits outside the sterile field - what
+you wrote about the company" is broken English and worse than saying
+nothing. Never write a bracketed citation, a number or an id.
 
 HARD RULES:
 
@@ -255,8 +259,9 @@ company or their product.
 
 OUTPUT: JSON with "subject", "company_paragraphs" (a JSON ARRAY, one
 plain-text string per paragraph, one or two entries, no markdown, no
-greeting, no sign-off), "could_be_a_user", and "research_source_type" /
-"research_source_id" naming exactly the one source you grounded on.
+greeting, no sign-off) and "could_be_a_user". Nothing else - and never a
+citation of any kind in the letter. The founder is reading a letter, not
+a paper.
 """
 
 
@@ -416,15 +421,84 @@ source from AVAILABLE SOURCES that part 1 is grounded on.
 """
 
 
+# Our source-kind enum in the words a person would use. The raw values are
+# database plumbing; a founder who reads "I saw that in your
+# long_description" learns we have a schema.
+# Second person, because the model pastes these labels into the letter
+# verbatim. In the third person that produced "In what they wrote about
+# the company you described AlgoSurg as..." - talking about the founder to
+# the founder.
+SOURCE_KIND_LABELS = {
+    "news": "a news story about you",
+    "launch": "your launch post",
+    "job_posting": "a role you posted",
+    "long_description": "what you wrote about the company",
+}
+
+
+def _format_one_source(sources: list[dict]) -> str:
+    """The single best source, with no number and no kind, for a first
+    email.
+
+    Live finding (2026-09-22), three times over: whatever token the list
+    uses to identify a source, this model pastes it into the letter -
+    `kind=long_description`, then `[17]`, then `Source 1`. Telling it not
+    to supplies another example of the thing to imitate. With one source
+    and no label there is nothing to cite, and `first_email_source` knows
+    the answer without asking.
+    """
+    if not sources:
+        return "(none)"
+    top = sources[0]
+    text = str(top.get("text", "")).replace("\n", " ").strip()
+    label = SOURCE_KIND_LABELS.get(str(top.get("kind")), "their research material")
+    return f"This is {label}:\n{text}"
+
+
 def _format_sources(sources: list[dict]) -> str:
+    """Numbered, in the operator's language - never `kind=long_description`.
+
+    Live finding (2026-09-22): shown the raw enum, the model pasted it
+    straight into the letter ("I saw that in your description
+    (kind=long_description id=19)"), failing validation and burning both
+    attempts. Three earlier founders were discarded for the same error.
+    Telling it not to only reduced the rate; the string has to not be
+    there. `first_email_source` maps the number back.
+    """
     lines = []
     # Fix round 1 (F10): the publication name is deliberately NOT rendered.
     # D29 says the body must never name the outlet, so handing it to the
     # model only creates the temptation; nothing in the draft needs it.
-    for s in sources:
+    for i, s in enumerate(sources, start=1):
         text = str(s.get("text", "")).replace("\n", " ").strip()
-        lines.append(f"- kind={s.get('kind')} id={s.get('id')}: {text}")
+        label = SOURCE_KIND_LABELS.get(str(s.get("kind")), "their research material")
+        # "Source 1", not "[1]": shown a bracketed list the model
+        # imitated the format and wrote academic citations into the
+        # letter ("...what you wrote about the company [17].").
+        lines.append(f"- Source {i} - {label}: {text}")
     return "\n".join(lines) if lines else "- (none)"
+
+
+def first_email_source(context: dict, index=1) -> tuple[str, int | None]:
+    """The `(kind, id)` of the source a first email was grounded on.
+
+    The model is shown exactly one source and never names it, so this is
+    always the priority-ordered first. `index` remains for the follow-up
+    path and for tests; anything out of range falls back to the best one.
+    """
+    sources = context.get("available_sources") or []
+    if not sources:
+        return "", None
+    try:
+        chosen = sources[int(index) - 1]
+    except (TypeError, ValueError, IndexError):
+        chosen = sources[0]
+    source_id = chosen.get("id")
+    try:
+        source_id = int(source_id) if source_id is not None else None
+    except (TypeError, ValueError):
+        source_id = None
+    return str(chosen.get("kind") or ""), source_id
 
 
 def _format_claims(claims: list[dict]) -> str:
@@ -489,9 +563,18 @@ def build_draft_prompt(context: dict) -> str:
         f"title: {founder.get('title') or '(unknown)'}",
         f"bio: {founder.get('bio') or '(none)'}",
         "",
-        "AVAILABLE SOURCES (ground part 1 on exactly one; cite its kind and id;",
-        "listed in priority order - prefer the first one that gives you something specific)",
-        _format_sources(context.get("available_sources") or []),
+        *(
+            [
+                "WHAT THEY SAID (ground your paragraph on this, and nothing else)",
+                _format_one_source(context.get("available_sources") or []),
+            ]
+            if int(context.get("sequence_step") or 0) == 0
+            else [
+                "AVAILABLE SOURCES (ground part 1 on exactly one; cite its kind and id;",
+                "listed in priority order - prefer the first one that gives you something specific)",
+                _format_sources(context.get("available_sources") or []),
+            ]
+        ),
         "",
     ]
     # The resume goes to the model only when it is actually writing about
@@ -620,26 +703,32 @@ class GeminiDrafter:
         data = _decode_json(response.text, "drafter")
         if not isinstance(data, dict):
             raise ValueError("drafter: expected a JSON object")
-        body_key = "company_paragraphs" if first_email else "body"
-        required = ["subject", body_key, "research_source_type", "research_source_id"]
-        missing = [k for k in required if k not in data]
+        if first_email:
+            missing = [k for k in ("subject", "company_paragraphs") if k not in data]
+            if missing:
+                raise ValueError(f"drafter: response missing {', '.join(missing)}")
+            kind, source_id = first_email_source(prompt_context, 1)
+            return {
+                "subject": str(data["subject"]),
+                "company_paragraphs": _paragraph_list(data["company_paragraphs"]),
+                "could_be_a_user": bool(data.get("could_be_a_user")),
+                "research_source_type": kind,
+                "research_source_id": source_id,
+            }
+        missing = [k for k in ("subject", "body", "research_source_type",
+                               "research_source_id") if k not in data]
         if missing:
             raise ValueError(f"drafter: response missing {', '.join(missing)}")
         try:
             source_id = int(data["research_source_id"])
         except (TypeError, ValueError) as exc:
             raise ValueError("drafter: research_source_id is not an integer") from exc
-        out = {
+        return {
             "subject": str(data["subject"]),
+            "body": _paragraph_text(data["body"]),
             "research_source_type": str(data["research_source_type"]),
             "research_source_id": source_id,
         }
-        if first_email:
-            out["company_paragraphs"] = _paragraph_list(data[body_key])
-            out["could_be_a_user"] = bool(data.get("could_be_a_user"))
-        else:
-            out["body"] = _paragraph_text(data[body_key])
-        return out
 
 
 # --- Task 9: GeminiReplyClassifier ---------------------------------------------

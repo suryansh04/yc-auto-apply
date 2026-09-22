@@ -153,9 +153,9 @@ FIRST_EMAIL_JSON = json.dumps({
         "You didn't build another job board. You put the whole thing on a "
         "voice call at Vahan, which is the part I keep thinking about."
     ],
+    # No source field at all: a first email is shown exactly ONE source
+    # and never names it, so there is no token to paste into the letter.
     "could_be_a_user": False,
-    "research_source_type": "news",
-    "research_source_id": 7,
 })
 FOLLOW_UP_CONTEXT = {**CONTEXT, "sequence_step": 1, "thread_history": [
     {"direction": "outbound", "sequence_step": 0, "subject": "s0", "body": "b0", "label": None},
@@ -171,8 +171,11 @@ def _prompt_of(client) -> str:
 def test_drafter_returns_the_decoded_draft_dict():
     client = FakeGenAIClient(FIRST_EMAIL_JSON)
     out = GeminiDrafter(client, model=MODEL).draft(CONTEXT)
-    assert out == json.loads(FIRST_EMAIL_JSON)
-    assert isinstance(out["research_source_id"], int)
+    # The source NUMBER is mapped back to our own (kind, id) here, so
+    # nothing downstream has to know the model was shown a list.
+    assert out["research_source_type"] == CONTEXT["available_sources"][0]["kind"]
+    assert out["research_source_id"] == CONTEXT["available_sources"][0]["id"]
+    assert out["company_paragraphs"] and out["could_be_a_user"] is False
 
 
 def test_drafter_uses_the_injected_model_id():
@@ -189,11 +192,13 @@ def test_drafter_requests_structured_json_with_the_four_field_schema():
     schema = json.dumps(cfg.get("response_schema") or cfg.get("response_json_schema"), default=str)
     # A first email asks for the company paragraphs, not a whole body: the
     # rest of the letter is the operator's own and is assembled in code.
-    for field in ("subject", "company_paragraphs", "could_be_a_user",
-                  "research_source_type", "research_source_id"):
+    for field in ("subject", "company_paragraphs", "could_be_a_user"):
         assert field in schema
-    for kind in ("news", "launch", "job_posting", "long_description"):
-        assert kind in schema
+    # Deliberately absent: the source kinds. The model picks a NUMBER, so
+    # our enum never reaches it - in the schema or the prompt - and it
+    # cannot paste "long_description" into the letter.
+    for kind in ("job_posting", "long_description"):
+        assert kind not in schema
 
 
 def test_a_follow_up_still_asks_for_a_whole_body():
@@ -247,12 +252,19 @@ def test_drafter_prompt_restricts_claims_to_the_resume_and_forbids_greeting_and_
 
 
 def test_drafter_prompt_lists_every_available_source_with_kind_and_id():
-    client = FakeGenAIClient(FIRST_EMAIL_JSON)
-    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(FOLLOW_UP_CONTEXT)
     prompt = _prompt_of(client)
-    assert "news" in prompt and "id=7" in prompt.replace(" ", "").replace(":", "=")
+    # A FOLLOW-UP still gets the full numbered list; only a first email is
+    # narrowed to one source.
+    assert "source 1" in prompt and "source 2" in prompt
+    import re as _re
+    assert not _re.search(r"\[\s*\d+\s*\]", prompt)
     assert "openai backs indian startup" in prompt
-    assert "long_description" in prompt
+    # Second person: the model pastes these labels into the letter.
+    assert "a news story about you" in prompt
+    assert "what you wrote about the company" in prompt
+    assert "long_description" not in prompt
 
 
 def test_drafter_prompt_follow_up_word_target_matches_the_actual_step():
@@ -332,10 +344,24 @@ def test_drafter_does_not_mention_validation_errors_on_a_first_attempt():
     assert "previous attempt" not in _prompt_of(client)
 
 
-def test_drafter_coerces_a_string_source_id_to_int():
-    client = FakeGenAIClient(json.dumps({**json.loads(FIRST_EMAIL_JSON), "research_source_id": "7"}))
+def test_a_first_email_is_grounded_on_the_top_priority_source():
+    """The model is shown one source and never names it, so the citation
+    is known without asking - and cannot be pasted into the letter."""
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     out = GeminiDrafter(client, model=MODEL).draft(CONTEXT)
-    assert out["research_source_id"] == 7
+    top = CONTEXT["available_sources"][0]
+    assert (out["research_source_type"], out["research_source_id"]) == (top["kind"], top["id"])
+
+
+def test_a_first_email_is_shown_only_the_top_source():
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
+    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    prompt = _prompt_of(client)
+    assert "openai backs indian startup" in prompt
+    # The second-priority source is not offered at all, so there is no
+    # list, no numbering, and nothing to cite.
+    assert "in a dozen languages" not in prompt
+    assert "source 1" not in prompt
 
 
 def test_drafter_raises_on_a_response_missing_required_fields():

@@ -41,11 +41,13 @@ from app.adapters.gemini import (
     _CLASSIFIER_SYSTEM,
     _CRITIC_SYSTEM,
     _DRAFTER_SYSTEM,
+    _FIRST_EMAIL_SYSTEM,
     _PARSER_PROMPT,
     _decode_json,
     build_classify_prompt,
     build_critic_prompt,
     build_draft_prompt,
+    first_email_source,
 )
 from app.domain.replies import LABELS
 
@@ -97,6 +99,24 @@ DRAFT_JSON_SCHEMA: dict[str, Any] = {
         "research_source_id": {"type": "integer"},
     },
     "required": ["subject", "body", "research_source_type", "research_source_id"],
+    "additionalProperties": False,
+}
+
+# Mirror of gemini.FIRST_EMAIL_SCHEMA. A first email is assembled from the
+# operator's own blocks (app/domain/letter.py) and the model writes only
+# the paragraph about the company.
+#
+# This adapter is the one that actually runs (LLM_PROVIDER=sarvam), so a
+# change made only in gemini.py changes nothing the operator ever sees -
+# which is exactly what happened on 2026-09-22.
+FIRST_EMAIL_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "subject": {"type": "string"},
+        "company_paragraphs": {"type": "array", "items": {"type": "string"}},
+        "could_be_a_user": {"type": "boolean"},
+    },
+    "required": ["subject", "company_paragraphs", "could_be_a_user"],
     "additionalProperties": False,
 }
 
@@ -271,21 +291,35 @@ class SarvamDrafter:
         self._chat = _SarvamChat(api_key, model, **chat_kwargs)
 
     def draft(self, prompt_context: dict) -> dict:
+        """Same split as `GeminiDrafter.draft`: step 0 writes only the
+        company paragraph (the letter is assembled around it), a follow-up
+        still writes the whole body."""
+        first_email = int(prompt_context.get("sequence_step") or 0) == 0
+        system = _FIRST_EMAIL_SYSTEM if first_email else _DRAFTER_SYSTEM
+        schema = FIRST_EMAIL_JSON_SCHEMA if first_email else DRAFT_JSON_SCHEMA
         content = self._chat.complete(
             "drafter",
             [
-                {"role": "system", "content": _DRAFTER_SYSTEM},
+                {"role": "system", "content": system},
                 {"role": "user", "content": build_draft_prompt(prompt_context)},
             ],
-            DRAFT_JSON_SCHEMA,
+            schema,
             "outreach_draft",
             temperature=0.7,
         )
         data = _decode_json(content, "drafter")
         if not isinstance(data, dict):
             raise ValueError("drafter: expected a JSON object")
-        missing = [k for k in ("subject", "body", "research_source_type", "research_source_id")
-                   if k not in data]
+        if first_email:
+            missing = [k for k in ("subject", "company_paragraphs") if k not in data]
+            if missing:
+                raise ValueError(f"drafter: response missing {', '.join(missing)}")
+            kind, source_id = first_email_source(prompt_context)
+            data["research_source_type"] = kind
+            data["research_source_id"] = source_id
+            return data
+        missing = [k for k in ("subject", "body", "research_source_type",
+                               "research_source_id") if k not in data]
         if missing:
             raise ValueError(f"drafter: response missing {', '.join(missing)}")
         return data

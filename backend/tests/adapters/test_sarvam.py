@@ -19,7 +19,13 @@ import pytest
 import respx
 
 from app.adapters.sarvam import SarvamDrafter, SarvamResumeParser, SarvamError
-from tests.adapters.test_gemini import CLAIMS_JSON, CONTEXT, DRAFT_JSON
+from tests.adapters.test_gemini import (
+    CLAIMS_JSON,
+    CONTEXT,
+    DRAFT_JSON,
+    FIRST_EMAIL_JSON,
+    FOLLOW_UP_CONTEXT,
+)
 
 API_KEY = "sk_super_secret"
 MODEL = "sarvam-105b"
@@ -86,20 +92,36 @@ def test_parser_unwraps_the_claims_envelope():
 
 @respx.mock
 def test_drafter_sends_the_system_instruction_and_the_draft_schema():
-    route = respx.post(URL).mock(return_value=_ok(DRAFT_JSON))
+    """A first email: the model is asked for the company paragraph only.
+
+    This adapter is the one that actually runs (LLM_PROVIDER=sarvam), so
+    the split has to be pinned HERE as well as in the Gemini tests - a
+    change made only in gemini.py changes nothing the operator sees.
+    """
+    route = respx.post(URL).mock(return_value=_ok(FIRST_EMAIL_JSON))
     out = _drafter().draft(CONTEXT)
-    assert set(out) >= {"subject", "body", "research_source_type", "research_source_id"}
+    assert set(out) >= {"subject", "company_paragraphs", "could_be_a_user",
+                        "research_source_type", "research_source_id"}
+    assert out["research_source_type"] == CONTEXT["available_sources"][0]["kind"]
     body = json.loads(route.calls[0].request.content)
     assert body["messages"][0]["role"] == "system"
-    assert "intern" in body["messages"][0]["content"].lower()
+    assert "one part of a cold email" in body["messages"][0]["content"].lower()
     schema = body["response_format"]["json_schema"]["schema"]
+    assert schema["required"] == ["subject", "company_paragraphs", "could_be_a_user"]
+
+
+@respx.mock
+def test_a_follow_up_still_asks_this_adapter_for_a_whole_body():
+    route = respx.post(URL).mock(return_value=_ok(DRAFT_JSON))
+    out = _drafter().draft(FOLLOW_UP_CONTEXT)
+    assert set(out) >= {"subject", "body", "research_source_type", "research_source_id"}
+    schema = json.loads(route.calls[0].request.content)["response_format"]["json_schema"]["schema"]
     assert schema["required"] == ["subject", "body", "research_source_type", "research_source_id"]
-    assert schema["properties"]["research_source_id"]["type"] == "integer"
 
 
 @respx.mock
 def test_drafter_uses_the_injected_model_id():
-    route = respx.post(URL).mock(return_value=_ok(DRAFT_JSON))
+    route = respx.post(URL).mock(return_value=_ok(FIRST_EMAIL_JSON))
     SarvamDrafter(API_KEY, "some-other-model", _sleep=lambda s: None).draft(CONTEXT)
     assert json.loads(route.calls[0].request.content)["model"] == "some-other-model"
 
@@ -141,7 +163,8 @@ def test_transport_error_raises_sarvam_error_without_the_key():
 @respx.mock
 def test_transient_429_and_503_are_retried_with_backoff():
     route = respx.post(URL)
-    route.side_effect = [httpx.Response(503, text="busy"), httpx.Response(429, text="slow"), _ok(DRAFT_JSON)]
+    route.side_effect = [httpx.Response(503, text="busy"), httpx.Response(429, text="slow"),
+                         _ok(FIRST_EMAIL_JSON)]
     sleeps: list[float] = []
     _drafter(_sleep=sleeps.append).draft(CONTEXT)
     assert route.call_count == 3

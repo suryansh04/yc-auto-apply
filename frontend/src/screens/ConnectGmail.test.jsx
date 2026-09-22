@@ -230,3 +230,33 @@ it('says both permissions have to be ticked', async () => {
   )
   expect(await screen.findByText(/Both must be ticked/i)).toBeInTheDocument()
 })
+
+
+// --- what the screen shows when (operator request 2026-09-23) -------------
+
+it('shows the account while it is being set up for the first time', async () => {
+  mockStatus(NOT_CONNECTED)
+  render()
+  expect(await screen.findByText('Account')).toBeInTheDocument()
+  expect(screen.getByText(/Sending mail as you, and reading your mail/)).toBeInTheDocument()
+})
+
+it('drops the account boxes on a reconnect', async () => {
+  // He authorised this account himself, and the heading has just told
+  // him what is wrong with it - repeating the address and the
+  // permissions is two boxes between him and the one button.
+  mockStatus({ ...CONNECTED, can_read_replies: false })
+  render()
+  await screen.findByRole('heading', { name: /reconnect gmail/i })
+  expect(screen.queryByText('Account')).not.toBeInTheDocument()
+  expect(screen.queryByText(/Sending mail as you, and reading your mail/)).not.toBeInTheDocument()
+})
+
+it('puts the setup guide above the account, not under the button', async () => {
+  mockStatus(NOT_CONNECTED)
+  render()
+  const guide = await screen.findByRole('button', { name: /first time\? set up the google side/i })
+  const account = screen.getByText('Account')
+  // It is the only thing on this screen that is work, so it comes first.
+  expect(guide.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})

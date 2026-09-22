@@ -115,19 +115,37 @@ export default function ConnectGmail({ status, outcome }) {
           </Alert>
         )}
 
-        <Item variant="outline">
-          <ItemContent>
-            <ItemDescription>Account</ItemDescription>
-            <ItemTitle>{status.account}</ItemTitle>
-          </ItemContent>
-        </Item>
+        {/* First, because it is the only thing on this screen that is
+            work: on a first connect the Google side has to exist before
+            the button can do anything. Closed by default - the settings
+            are in place, so whoever is here has probably done it - but
+            it sits above the account rather than under the button, where
+            it read as a footnote. */}
+        <SetupGuide />
 
-        <Item variant="outline">
-          <ItemContent>
-            <ItemDescription>Google will be asked for</ItemDescription>
-            <ItemTitle>Sending mail as you, and reading your mail to find replies</ItemTitle>
-          </ItemContent>
-        </Item>
+        {/* Operator request (2026-09-23): only while the account is
+            being set up for the first time. On a reconnect the operator
+            already knows which account this is - he authorised it - and
+            the heading above has just told him what is wrong with it, so
+            repeating the address and the permissions is two boxes
+            between him and the one button he came for. */}
+        {!status.connected && (
+          <>
+            <Item variant="outline">
+              <ItemContent>
+                <ItemDescription>Account</ItemDescription>
+                <ItemTitle>{status.account}</ItemTitle>
+              </ItemContent>
+            </Item>
+
+            <Item variant="outline">
+              <ItemContent>
+                <ItemDescription>Google will be asked for</ItemDescription>
+                <ItemTitle>Sending mail as you, and reading your mail to find replies</ItemTitle>
+              </ItemContent>
+            </Item>
+          </>
+        )}
 
         {connect.isError && (
           <Alert variant="destructive" role="alert">
@@ -135,12 +153,6 @@ export default function ConnectGmail({ status, outcome }) {
             <AlertDescription>{connect.error.message}</AlertDescription>
           </Alert>
         )}
-
-        {/* Closed here: the settings are in place, so this is either a
-            reconnect or a first connect by someone who has already done
-            the Google side. Still one click away, because step 13 is the
-            one people come back for. */}
-        <SetupGuide />
       </CardContent>
 
       <CardFooter className="flex-col items-start gap-3">

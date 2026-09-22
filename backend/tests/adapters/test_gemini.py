@@ -142,6 +142,25 @@ DRAFT_JSON = json.dumps({
     "research_source_id": 7,
 })
 
+# 2026-09-22: a first email is ASSEMBLED from the operator's own blocks
+# (app/domain/letter.py) and the model writes only the paragraph about the
+# company, so step 0 has its own system prompt and its own schema. A
+# follow-up still has the model write the whole body, which is what
+# FOLLOW_UP_CONTEXT + DRAFT_JSON exercise below.
+FIRST_EMAIL_JSON = json.dumps({
+    "subject": "Backend intern at Vahan",
+    "company_paragraphs": [
+        "You didn't build another job board. You put the whole thing on a "
+        "voice call at Vahan, which is the part I keep thinking about."
+    ],
+    "could_be_a_user": False,
+    "research_source_type": "news",
+    "research_source_id": 7,
+})
+FOLLOW_UP_CONTEXT = {**CONTEXT, "sequence_step": 1, "thread_history": [
+    {"direction": "outbound", "sequence_step": 0, "subject": "s0", "body": "b0", "label": None},
+]}
+
 
 def _prompt_of(client) -> str:
     call = client.models.calls[0]
@@ -150,28 +169,40 @@ def _prompt_of(client) -> str:
 
 
 def test_drafter_returns_the_decoded_draft_dict():
-    client = FakeGenAIClient(DRAFT_JSON)
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     out = GeminiDrafter(client, model=MODEL).draft(CONTEXT)
-    assert out == json.loads(DRAFT_JSON)
+    assert out == json.loads(FIRST_EMAIL_JSON)
     assert isinstance(out["research_source_id"], int)
 
 
 def test_drafter_uses_the_injected_model_id():
-    client = FakeGenAIClient(DRAFT_JSON)
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     assert client.models.calls[0]["model"] == MODEL
 
 
 def test_drafter_requests_structured_json_with_the_four_field_schema():
-    client = FakeGenAIClient(DRAFT_JSON)
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     cfg = _config_as_dict(client.models.calls[0]["config"])
     assert cfg["response_mime_type"] == "application/json"
     schema = json.dumps(cfg.get("response_schema") or cfg.get("response_json_schema"), default=str)
-    for field in ("subject", "body", "research_source_type", "research_source_id"):
+    # A first email asks for the company paragraphs, not a whole body: the
+    # rest of the letter is the operator's own and is assembled in code.
+    for field in ("subject", "company_paragraphs", "could_be_a_user",
+                  "research_source_type", "research_source_id"):
         assert field in schema
     for kind in ("news", "launch", "job_posting", "long_description"):
         assert kind in schema
+
+
+def test_a_follow_up_still_asks_for_a_whole_body():
+    client = FakeGenAIClient(DRAFT_JSON)
+    GeminiDrafter(client, model=MODEL).draft(FOLLOW_UP_CONTEXT)
+    cfg = _config_as_dict(client.models.calls[0]["config"])
+    schema = json.dumps(cfg.get("response_schema") or cfg.get("response_json_schema"), default=str)
+    assert "body" in schema
+    assert "company_paragraphs" not in schema
 
 
 def test_drafter_prompt_states_the_structure_and_a_length_range():
@@ -179,7 +210,7 @@ def test_drafter_prompt_states_the_structure_and_a_length_range():
     # a rhythm rule instead of hard per-sentence numbers - clipped uniform
     # sentences were themselves the machine tell.
     client = FakeGenAIClient(DRAFT_JSON)
-    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    GeminiDrafter(client, model=MODEL).draft(FOLLOW_UP_CONTEXT)
     prompt = _prompt_of(client)
     assert "three" in prompt and "part" in prompt
     assert "180 to 240 words" in prompt
@@ -190,7 +221,7 @@ def test_drafter_prompt_states_the_structure_and_a_length_range():
 def test_drafter_prompt_says_the_source_is_never_named_in_the_body():
     # D29: the source is how the sender learned something, never what the
     # sentence is about.
-    client = FakeGenAIClient(DRAFT_JSON)
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
     assert "never" in prompt
@@ -200,7 +231,7 @@ def test_drafter_prompt_says_the_source_is_never_named_in_the_body():
 
 def test_drafter_prompt_forbids_location_and_asks_for_a_swe_internship():
     client = FakeGenAIClient(DRAFT_JSON)
-    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    GeminiDrafter(client, model=MODEL).draft(FOLLOW_UP_CONTEXT)
     prompt = _prompt_of(client)
     assert "location" in prompt and "remote" in prompt
     assert "sde / software engineering" in prompt
@@ -208,7 +239,7 @@ def test_drafter_prompt_forbids_location_and_asks_for_a_swe_internship():
 
 def test_drafter_prompt_restricts_claims_to_the_resume_and_forbids_greeting_and_signoff():
     client = FakeGenAIClient(DRAFT_JSON)
-    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    GeminiDrafter(client, model=MODEL).draft(FOLLOW_UP_CONTEXT)
     prompt = _prompt_of(client)
     assert "built a scheduler in python" in prompt          # the claim is offered
     assert "only" in prompt and "claims" in prompt           # ...and is the only allowed material
@@ -216,7 +247,7 @@ def test_drafter_prompt_restricts_claims_to_the_resume_and_forbids_greeting_and_
 
 
 def test_drafter_prompt_lists_every_available_source_with_kind_and_id():
-    client = FakeGenAIClient(DRAFT_JSON)
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
     assert "news" in prompt and "id=7" in prompt.replace(" ", "").replace(":", "=")
@@ -285,7 +316,7 @@ def test_system_prompt_asks_for_the_shared_problem_voice():
 
 
 def test_drafter_appends_validation_errors_from_a_retry_context():
-    client = FakeGenAIClient(DRAFT_JSON)
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     ctx = {**CONTEXT, "validation_errors": ["banned phrase: 'reach out'", "no explicit internship ask"],
            "previous_draft": {"subject": "old subject here now", "body": "old body"}}
     GeminiDrafter(client, model=MODEL).draft(ctx)
@@ -296,13 +327,13 @@ def test_drafter_appends_validation_errors_from_a_retry_context():
 
 
 def test_drafter_does_not_mention_validation_errors_on_a_first_attempt():
-    client = FakeGenAIClient(DRAFT_JSON)
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     assert "previous attempt" not in _prompt_of(client)
 
 
 def test_drafter_coerces_a_string_source_id_to_int():
-    client = FakeGenAIClient(json.dumps({**json.loads(DRAFT_JSON), "research_source_id": "7"}))
+    client = FakeGenAIClient(json.dumps({**json.loads(FIRST_EMAIL_JSON), "research_source_id": "7"}))
     out = GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     assert out["research_source_id"] == 7
 
@@ -316,7 +347,7 @@ def test_drafter_raises_on_a_response_missing_required_fields():
 # --- fix round 1 ----------------------------------------------------------------
 
 def test_f10_the_publication_name_is_not_handed_to_the_model():
-    client = FakeGenAIClient(DRAFT_JSON)
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     assert "economic times" not in _prompt_of(client)
     assert "publication" not in str(client.models.calls[0]["contents"]).lower()
@@ -324,7 +355,7 @@ def test_f10_the_publication_name_is_not_handed_to_the_model():
 
 def test_f11_the_prompt_requires_the_company_name_in_the_body():
     client = FakeGenAIClient(DRAFT_JSON)
-    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    GeminiDrafter(client, model=MODEL).draft(FOLLOW_UP_CONTEXT)
     assert "name the company once in the body" in _prompt_of(client)
 
 
@@ -386,7 +417,7 @@ def test_parser_retries_a_503_with_backoff_then_succeeds():
 
 
 def test_drafter_retries_a_429_then_succeeds():
-    client = _flaky_client(DRAFT_JSON, [_server_error(429)])
+    client = _flaky_client(FIRST_EMAIL_JSON, [_server_error(429)])
     sleeps: list[float] = []
     out = GeminiDrafter(client, MODEL, _sleep=sleeps.append).draft(CONTEXT)
     assert out["subject"]
@@ -408,18 +439,18 @@ def test_non_transient_errors_are_not_retried():
     assert len(client.models.calls) == 1
 
 
-def test_first_email_prompt_ends_with_a_four_paragraph_checklist():
-    # Live finding (2026-09-17): the four-part structure lived only in the
-    # long system prompt and sarvam returned the hook alone, twice. The
-    # checklist goes at the END of the user prompt, where a small model
-    # still attends.
-    client = FakeGenAIClient(DRAFT_JSON)
+def test_first_email_prompt_ends_with_the_one_paragraph_instruction():
+    # Live finding (2026-09-17): structure that lives only in the long
+    # system prompt gets skipped by a small model. The instruction goes at
+    # the END of the user prompt, where it still attends. Since 2026-09-22
+    # that instruction is "write ONLY the company paragraph" - the rest of
+    # the letter is assembled from the operator's own blocks.
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
-    assert "five entries, in this order" in prompt
-    assert "15-minute chat" in prompt
-    assert prompt.index("five entries, in this order") < prompt.index("write the email now")
-
+    assert "write only the paragraph about this company" in prompt
+    assert "not yours to produce" in prompt
+    assert prompt.index("write only the paragraph") < prompt.index("write the email now")
 
 def test_a_follow_up_prompt_has_no_first_email_checklist():
     # A follow-up is one short paragraph - the four-part checklist would be
@@ -447,12 +478,12 @@ def test_claims_are_grouped_by_the_resume_line_they_came_from():
 
 def test_the_prompt_forbids_mixing_two_fact_groups():
     client = FakeGenAIClient(DRAFT_JSON)
-    GeminiDrafter(client, model=MODEL).draft(CONTEXT)
+    GeminiDrafter(client, model=MODEL).draft(FOLLOW_UP_CONTEXT)
     assert "never attribute a detail from one group" in _prompt_of(client)
 
 
 def test_the_prompt_forbids_claiming_to_have_used_the_product():
-    client = FakeGenAIClient(DRAFT_JSON)
+    client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     assert "never claim to have signed up for, tried, used" in _prompt_of(client)
 

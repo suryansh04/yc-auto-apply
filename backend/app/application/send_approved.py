@@ -78,6 +78,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Protocol
 
 from app.domain.compose import compose_wire_text, first_name
+from app.domain.letter import contains_stub
 from app.domain.states import OutreachState, assert_transition
 
 log = logging.getLogger(__name__)
@@ -212,6 +213,19 @@ class SendApproved:
                 continue
             if not outreach.resolved_email:
                 log.warning("founder %s is APPROVED but has no resolved email", founder.id)
+                result.errors += 1
+                continue
+            # The operator's own paragraph is still a placeholder. This is
+            # the last gate before a founder reads it, and ">>> YOUR TURN"
+            # reaching a founder would be worse than not sending at all.
+            # Approving without filling it in is easy to do at speed, so
+            # the check lives here rather than trusting the review step.
+            if contains_stub(row.body):
+                log.warning(
+                    "founder %s is APPROVED but the draft still has the "
+                    "fill-in-yourself paragraph: not sent, edit or delete it first",
+                    founder.id,
+                )
                 result.errors += 1
                 continue
             if remaining <= 0:

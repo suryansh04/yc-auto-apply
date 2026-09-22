@@ -542,3 +542,66 @@ def test_body_array_drops_empty_entries_and_strips():
 def test_body_none_is_empty_not_the_string_none():
     from app.application.draft_outreach import _body_text
     assert _body_text(None) == ""
+
+
+# --- the assembled first email (2026-09-22) ---------------------------------
+
+def test_a_first_email_is_assembled_from_the_operators_blocks():
+    """The model returns one paragraph about the company; the letter is
+    built around it. Nothing about the sender is regenerated, which is
+    what stops a Better metric being attributed to WaveWatch."""
+    from app.application.draft_outreach import _to_draft
+    from app.domain import letter
+
+    raw = {
+        "subject": "Backend intern at Vahan",
+        "company_paragraphs": ["You put the whole thing on a voice call."],
+        "could_be_a_user": False,
+        "research_source_type": "news",
+        "research_source_id": 7,
+    }
+    draft = _to_draft(raw, 0, "Vahan")
+    assert letter.OPENER in draft.body
+    assert letter.BUILT in draft.body
+    assert "You put the whole thing on a voice call." in draft.body
+    assert "building Vahan!" in draft.body
+    assert not letter.contains_stub(draft.body)
+
+
+def test_could_be_a_user_adds_the_paragraph_only_the_operator_can_write():
+    from app.application.draft_outreach import _to_draft
+    from app.domain import letter
+
+    raw = {
+        "subject": "Backend intern at Vahan",
+        "company_paragraphs": ["A choice you can see from outside."],
+        "could_be_a_user": True,
+        "research_source_type": "news",
+        "research_source_id": 7,
+    }
+    assert letter.contains_stub(_to_draft(raw, 0, "Vahan").body)
+
+
+def test_a_follow_up_is_still_written_whole_by_the_model():
+    """A follow-up has no fixed blocks to assemble - pasting the opener
+    and the whole CV into a second note would be absurd."""
+    from app.application.draft_outreach import _to_draft
+    from app.domain import letter
+
+    raw = {"subject": "Following up", "body": ["Still keen on the voice routing problem."],
+           "research_source_type": "news", "research_source_id": 7}
+    draft = _to_draft(raw, 1, "Vahan")
+    assert draft.body == "Still keen on the voice routing problem."
+    assert letter.OPENER not in draft.body
+
+
+def test_a_paragraph_array_is_never_stringified_into_the_body():
+    """`str(["a", "b"])` renders "['a', 'b']" - brackets, quotes and all -
+    straight into the email."""
+    from app.application.draft_outreach import _to_draft
+
+    raw = {"subject": "s", "company_paragraphs": ["first para", "second para"],
+           "could_be_a_user": False, "research_source_type": "news", "research_source_id": 7}
+    body = _to_draft(raw, 0, "Vahan").body
+    assert "['" not in body and "']" not in body
+    assert "first para\n\nsecond para" in body

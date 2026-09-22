@@ -11,9 +11,19 @@ from app.domain.names import company_display_name, company_name_variants
 # itself the tell. Room to write a real sentence matters more than
 # brevity. These are now sanity bounds (nobody cold-emails a founder 200
 # words), not a style device; rhythm is the prompt's job.
-MAX_WORDS = 280
+#
+# Raised again (2026-09-22) for the operator's assembled letter: the fixed
+# blocks in app/domain/letter.py are 193 words before the model writes a
+# syllable, and the example email the operator supplied is 318. The cap
+# leaves room for two company paragraphs and the operator's own user-fit
+# paragraph on top of that. `test_letter.py` pins the cap against the
+# real block sizes, so shortening the cap below what the blocks need
+# fails a test instead of rejecting every draft at run time.
+MAX_WORDS = 380
 MAX_SENTENCE_WORDS = 45
-MAX_PARAGRAPHS = 6
+# Seven fixed blocks, up to two generated company paragraphs, plus the
+# operator's user-fit paragraph.
+MAX_PARAGRAPHS = 11
 # Live finding (2026-09-13): the cap alone let a one-block email through —
 # hook, pitch and ask run together in a single 3-sentence paragraph, which
 # is exactly the wall-of-text the spec's three-part structure exists to
@@ -71,7 +81,10 @@ BANNED_PHRASES = [
 # REQUIRED to contain (Incredible Health is a YC company) - a draft to them
 # would fail every retry. The prompt and the critic cover single-word praise.
 AI_TELL_PHRASES = [
-    "feels like the exact", "the exact interface", "genuinely",
+    # "genuinely" was here and came out (2026-09-22): a bare adverb, and
+    # the operator uses it honestly in his own example email. Same
+    # over-reach as the bare adjectives the comment above describes.
+    "feels like the exact", "the exact interface",
     "resonates with", "aligns with", "i'm excited", "so impressive",
     "truly impressive", "fascinating", "i was thrilled",
 ]
@@ -150,7 +163,39 @@ def _hook(body: str) -> str:
     return paras[0] if paras else body
 
 
-def validate_style(draft, previous_body: str | None = None, company_name: str = "") -> list[str]:
+def _generated_region(body: str, company_name: str) -> str:
+    """`body` with the operator's fixed blocks removed - i.e. only the text
+    the model actually produced.
+
+    The blocks are exact strings (letter.fixed_blocks), so this is an exact
+    removal, not a fuzzy one. A body that was not assembled from them comes
+    back unchanged, which is the safe direction: every rule still applies.
+    """
+    from app.domain.letter import fixed_blocks
+
+    remaining = body or ""
+    for block in fixed_blocks(company_name or "Company"):
+        remaining = remaining.replace(block, " ")
+    return remaining
+
+
+def validate_style(
+    draft,
+    previous_body: str | None = None,
+    company_name: str = "",
+    *,
+    operator_edit: bool = False,
+) -> list[str]:
+    """`operator_edit` says this text was typed by the person who signs it.
+
+    The phrase bans exist to stop the MODEL reaching for a tell; they are
+    not a style review of the operator's own sentences. Rejecting his
+    edit for a word he chose - "genuinely", "passionate about" - would be
+    the tool arguing with its owner about his own voice. Everything
+    structural (length, paragraphs, semicolons, seniority, location, an
+    unfilled stub) still applies, because those are mistakes rather than
+    taste.
+    """
     errs: list[str] = []
     body = draft.body
     low = body.lower()
@@ -189,9 +234,17 @@ def validate_style(draft, previous_body: str | None = None, company_name: str = 
         if i_starts > len(sents) * MAX_I_START_RATIO:
             errs.append('too many sentences begin with "I"')
 
-    for phrase in BANNED_PHRASES:
-        if phrase in low:
-            errs.append(f"banned phrase: {phrase!r}")
+    # The phrase bans exist to stop the MODEL reaching for a tell. They are
+    # not a review of the operator's own copy: the fixed blocks in
+    # app/domain/letter.py are his words, pasted in unchanged, and two of
+    # them would otherwise be rejected forever. So the bans run over the
+    # body with those blocks removed - what is left is exactly what the
+    # model wrote.
+    generated = _generated_region(body, company_name).lower()
+    if not operator_edit:
+        for phrase in BANNED_PHRASES:
+            if phrase in generated:
+                errs.append(f"banned phrase: {phrase!r}")
     for phrase in SENIORITY_PHRASES:
         if phrase in low:
             errs.append(f"implies seniority: {phrase!r}")
@@ -506,10 +559,12 @@ def _unsourced_work_stories(draft, claims) -> list[str]:
 
 
 def validate_draft(draft, source, company_name, one_liner, claims,
-                   previous_body=None, extra_allowed_text=(), all_publications=()) -> list[str]:
+                   previous_body=None, extra_allowed_text=(), all_publications=(),
+                   *, operator_edit: bool = False) -> list[str]:
     allowed = [company_name or "", one_liner or "", source.text if source else "",
                *extra_allowed_text]
-    return (validate_style(draft, previous_body, company_name=company_name or "")
+    return (validate_style(draft, previous_body, company_name=company_name or "",
+                           operator_edit=operator_edit)
             + validate_grounding(draft, source, company_name, one_liner, claims,
                                  all_publications=all_publications)
             + validate_claims(draft, claims, allowed_text=allowed))

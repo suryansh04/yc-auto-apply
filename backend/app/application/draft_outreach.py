@@ -99,6 +99,8 @@ from app.domain.interns import is_intern_appropriate
 from app.domain.states import OutreachState, assert_transition
 from app.domain.targeting import OUT_OF_BAND_STATUS
 from app.domain.layout import normalise_paragraphs
+from app.domain.letter import assemble_body
+from app.domain.names import company_display_name
 from app.domain.validation import SourceRow, validate_draft
 
 log = logging.getLogger(__name__)
@@ -233,7 +235,7 @@ class DraftOutreach:
                 except Exception as exc:  # noqa: BLE001 — any drafter failure is per-founder
                     failure = exc
                     break
-                draft = _to_draft(raw, step)
+                draft = _to_draft(raw, step, getattr(company, "name", "") or "")
                 source = sources.resolvable.get((draft.research_source_type, draft.research_source_id))
                 errors = validate_draft(
                     draft, source, company.name, getattr(company, "one_liner", None), claims,
@@ -463,23 +465,53 @@ def _body_text(raw_body) -> str:
     return str(raw_body or "")
 
 
-def _to_draft(raw: dict, step: int) -> Draft:
+def _to_draft(raw: dict, step: int, company_name: str = "") -> Draft:
+    """The stored draft.
+
+    Step 0 (2026-09-22): the model returns only `company_paragraphs`, and
+    the letter is ASSEMBLED around them from `app.domain.letter` - the
+    opener, who the sender is, the Better internship, WaveWatch,
+    Lerno.ai, the ask and the close are his own words and are never
+    regenerated. `could_be_a_user` decides whether the draft carries the
+    operator's fill-in-yourself paragraph; the model never asserts that
+    he has used anything.
+
+    A follow-up (step > 0) is unchanged: it has no fixed blocks, so the
+    model still writes the whole body.
+    """
     source_id = raw.get("research_source_id")
     try:
         source_id = int(source_id) if source_id is not None else None
     except (TypeError, ValueError):
         source_id = None
-    return Draft(
-        subject=str(raw.get("subject") or ""),
+    if step == 0 and "company_paragraphs" in raw:
+        body = assemble_body(
+            company_display_name(company_name or ""),
+            _paragraph_list(raw.get("company_paragraphs")),
+            include_user_fit_stub=bool(raw.get("could_be_a_user")),
+        )
+    else:
         # The drafter schema returns one array entry per paragraph (live
         # finding 2026-09-17). A plain string still works - older stored
         # drafts, and any provider that ignores the array - and then
         # `normalise_paragraphs` repairs the breaks (2026-09-16).
-        body=normalise_paragraphs(_body_text(raw.get("body"))),
+        body = normalise_paragraphs(_body_text(raw.get("body")))
+    return Draft(
+        subject=str(raw.get("subject") or ""),
+        body=body,
         research_source_type=str(raw.get("research_source_type") or ""),
         research_source_id=source_id,
         sequence_step=step,
     )
+
+
+def _paragraph_list(raw) -> list[str]:
+    """The model's company paragraphs, list or string, never `str()`-ed:
+    `str(["a", "b"])` renders "['a', 'b']" into the email."""
+    if isinstance(raw, (list, tuple)):
+        return [str(p).strip() for p in raw if str(p).strip()]
+    text = str(raw or "").strip()
+    return [p for p in (x.strip() for x in text.split("\n\n")) if p]
 
 
 def _draft_dict(draft: Draft | None) -> dict:

@@ -161,10 +161,22 @@ def test_reject_of_a_flagged_row_without_a_draft_works(repos, no_material_pendin
 
 BANNED_BODY = "I hope this email finds you well. Would you take an intern?"
 
+# 2026-09-22: the phrase bans no longer apply to an operator's own edit
+# (they police the model's habits, not his word choices), so an edit test
+# that wants a *failure* has to break a structural rule instead. Implying
+# seniority is one the operator is still held to - it is a false claim
+# about him, not a matter of taste.
+SENIORITY_BODY = (
+    "You're matching blue-collar workers to jobs over voice at Vahan. "
+    "That routing problem is what I keep thinking about.\n\n"
+    "I built a scheduler in Python with my team.\n\n"
+    "Would you take an intern?"
+)
+
 
 def test_edit_that_fails_validation_returns_the_errors_and_persists_nothing(repos, one_pending):
-    errors = ReviewOutreach(repos).edit(one_pending.id, "New subject", BANNED_BODY)
-    assert errors and any("banned phrase" in e for e in errors)
+    errors = ReviewOutreach(repos).edit(one_pending.id, "New subject", SENIORITY_BODY)
+    assert errors and any("implies seniority" in e for e in errors)
     row = repos.message.get_outbound(one_pending.id, 0)
     assert (row.subject, row.body, row.edited_by_user) == (PENDING_SUBJECT, PENDING_BODY, False)
     assert repos.outreach.get(one_pending.id).state == S.PENDING_APPROVAL
@@ -238,8 +250,8 @@ def test_edit_creates_the_draft_row_for_a_flagged_row_without_one(repos, no_mate
 
 
 def test_edit_without_a_source_still_applies_style_and_claims_rules(repos, no_material_pending):
-    errors = ReviewOutreach(repos).edit(no_material_pending.id, "Subject", BANNED_BODY)
-    assert any("banned phrase" in e for e in errors)
+    errors = ReviewOutreach(repos).edit(no_material_pending.id, "Subject", SENIORITY_BODY)
+    assert any("implies seniority" in e for e in errors)
     assert repos.message.get_outbound(no_material_pending.id, 0) is None
     errors = ReviewOutreach(repos).edit(no_material_pending.id, "Subject",
                                         "You're building Vahan.\n\nI built it in Rust.\n\nIntern?")
@@ -429,3 +441,19 @@ def test_edit_rejects_a_body_naming_a_non_cited_outlet(repos, one_pending):
     errors = ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body)
     assert any("publication name appears" in e for e in errors)
     assert repos.message.get_outbound(one_pending.id, 0).body == PENDING_BODY
+
+
+def test_an_operator_edit_keeps_his_own_word_choice(repos, one_pending):
+    """The phrase bans stop the MODEL reaching for a tell. They are not a
+    style review of the person who signs the email: rejecting his edit for
+    "genuinely" would be the tool arguing with its owner about his voice.
+
+    Everything structural still applies - the seniority test above edits
+    the same fixture and is still rejected.
+    """
+    body = PENDING_BODY.replace(
+        "That routing problem is what I keep thinking about.",
+        "That routing problem is something I am passionate about.",
+    )
+    assert ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body) == []
+    assert repos.message.get_outbound(one_pending.id, 0).body == body

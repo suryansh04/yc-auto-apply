@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any, Callable
 
@@ -162,6 +163,102 @@ DRAFT_SCHEMA: dict[str, Any] = {
     },
     "required": ["subject", "body", "research_source_type", "research_source_id"],
 }
+
+# --- first emails: the model writes ONE paragraph ----------------------
+
+# Operator decision (2026-09-22). A first email is now ASSEMBLED
+# (app/domain/letter.py), not generated: the opener, who he is, the Better
+# internship, WaveWatch, Lerno.ai, the ask and the close are his own words
+# and are pasted in unchanged. The model's whole job is the paragraph
+# about the company that sits under "Now Here's the Important Part:".
+#
+# This is why the fabrication bugs are gone rather than merely discouraged:
+# the model is no longer handed the sender's resume to paraphrase, so it
+# cannot attribute one project's metric to another, and it is told to
+# write about the company only.
+FIRST_EMAIL_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "subject": {"type": "STRING"},
+        "company_paragraphs": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "could_be_a_user": {"type": "BOOLEAN"},
+        "research_source_type": {"type": "STRING", "enum": SOURCE_KINDS},
+        "research_source_id": {"type": "INTEGER"},
+    },
+    "required": ["subject", "company_paragraphs", "could_be_a_user",
+                 "research_source_type", "research_source_id"],
+}
+
+_FIRST_EMAIL_SYSTEM = """You write ONE part of a cold email from a computer science student to a
+startup founder. The rest of the email is already written by the sender
+himself and you will never see or change it: how he introduces himself,
+what he has built, and what he is asking for.
+
+Your paragraph sits directly under the line "Now Here's the Important
+Part:". It is the part that proves a real person looked at this specific
+company. Everything before it was about the sender; your paragraph is the
+turn to the founder.
+
+WHAT TO WRITE - one or two short paragraphs, nothing else:
+
+Name the CHOICE they made that you can see from outside, and why it is
+not the obvious one. Not what the company does - the founder knows that -
+but the decision underneath it. The strongest version contrasts what they
+did NOT do with what they did:
+
+  "the thing that stuck with me is that you didn't try to build another
+  shopping app. You built a layer that sits on top of where people
+  already shop."
+
+That is the shape to aim for: a thing they avoided, then the thing they
+chose instead. Both halves must be visible in the SOURCE below.
+
+Ground it in exactly one of the AVAILABLE SOURCES and cite that source's
+kind and id.
+
+THE SOURCE IS HOW YOU LEARNED IT, never what the sentence is about.
+Naming the founder's own channel is fine and wanted - their launch post,
+their job posting, what they wrote - because that is where you actually
+read it. But NEVER name the news outlet or publication that covered them,
+and never write "the article", "the piece", "coverage", "featured in" or
+a date. A third party's write-up is not the founder's own words.
+
+HARD RULES:
+
+- Write about THEM. Never a sentence about the sender's skills,
+  education, projects or character - those are already in the email and
+  repeating them wastes the founder's attention.
+- NEVER claim to have signed up for, tried, used, downloaded or tested
+  the product. You do not know whether he has, and the founder can check
+  their own signup list. Say what is visible from outside.
+- Do not say he has NOT tried it either. That is an apology for homework
+  nobody asked for.
+- No praise. Interest is shown by what you noticed, never stated. Never
+  "impressive", "excited", "resonates", "aligns", "fascinating",
+  "passionate about", "I came across".
+- Never restate the company's one-liner back to them.
+- Name the company once.
+- No semicolons. At most two em dashes. Contractions are good.
+- Vary sentence length. Three sentences of the same shape in a row is the
+  clearest sign a machine wrote it.
+
+could_be_a_user: TRUE only if this is something a computer science
+student in India could plausibly be a user of himself - a consumer app, a
+developer tool, a student product. FALSE for anything sold to businesses,
+to factories, to hospitals, to other founders as infrastructure. You are
+judging THE COMPANY, not the sender: do not guess whether he has used it,
+only whether someone like him could. When true, the sender is given a
+blank to fill in with his own real experience; you never write that part.
+
+SUBJECT: three to ten words, no emoji, no all-caps words, naming the
+company or their product.
+
+OUTPUT: JSON with "subject", "company_paragraphs" (a JSON ARRAY, one
+plain-text string per paragraph, one or two entries, no markdown, no
+greeting, no sign-off), "could_be_a_user", and "research_source_type" /
+"research_source_id" naming exactly the one source you grounded on.
+"""
+
 
 _DRAFTER_SYSTEM = """You write a cold email from a student to a startup founder, asking for a
 software engineering internship. The email works by CONNECTION, not by
@@ -396,13 +493,23 @@ def build_draft_prompt(context: dict) -> str:
         "listed in priority order - prefer the first one that gives you something specific)",
         _format_sources(context.get("available_sources") or []),
         "",
-        "RESUME CLAIMS (the only things you may say about the sender).",
-        "Each FACT GROUP is ONE thing the sender did. NEVER attribute a "
-        "detail from one group to the project named in another - saying a "
-        "project did what a different job did is a lie, even though both "
-        "facts are true on their own.",
-        _format_claims(context.get("claims") or []),
     ]
+    # The resume goes to the model only when it is actually writing about
+    # the sender - i.e. a follow-up. A first email's model writes one
+    # paragraph about the COMPANY, so handing it the resume would only
+    # invite it to paraphrase facts that are already in the letter
+    # verbatim. That is precisely how a Better metric ended up attributed
+    # to WaveWatch.
+    if int(context.get("sequence_step") or 0) > 0:
+        parts += [
+            "",
+            "RESUME CLAIMS (the only things you may say about the sender).",
+            "Each FACT GROUP is ONE thing the sender did. NEVER attribute a "
+            "detail from one group to the project named in another - saying a "
+            "project did what a different job did is a lie, even though both "
+            "facts are true on their own.",
+            _format_claims(context.get("claims") or []),
+        ]
     # Task 12: a follow-up (sequence_step > 0) gets its own section naming
     # the word target for this step and showing the thread so far — a
     # first email (step 0, or a context with no `sequence_step` at all)
@@ -440,22 +547,38 @@ def build_draft_prompt(context: dict) -> str:
     if step == 0:
         parts += [
             "",
-            "\"body\" is a JSON ARRAY with one string per paragraph. For a "
-            "first email it has FIVE entries, in this order:",
-            "  1. what they said or built + the same problem you have hit, "
-            "with ONE real example from the resume claims above",
-            "  2. what you noticed in the product (say you tried it ONLY if a "
-            "student really could - otherwise a choice you can see from outside)",
-            "  3. you: year, degree, college, the one relevant project with its "
-            "result, the honest lesson it taught you, why that matters here",
-            "  4. the ask: join as an SDE intern, on a named area of their work",
-            '  5. the close: "resume attached" + ask for a quick 15-minute chat',
-            "An array with fewer than five entries is wrong, and no entry may "
-            "contain a blank line. Name the company in the body. Invent "
-            "nothing about yourself that is not in the resume claims.",
+            "Write ONLY the paragraph about this company - one or two "
+            "entries in \"company_paragraphs\". The sender's own "
+            "introduction, what he has built and his ask are already "
+            "written and are not yours to produce or repeat.",
+            "Name the choice they made that is not the obvious one: what "
+            "they did NOT do, then what they did instead. Both halves must "
+            "be visible in the source you cite.",
+            "No entry may contain a blank line. Name the company once.",
+            "Set could_be_a_user by judging THE COMPANY: could a computer "
+            "science student in India plausibly be a user of this himself?",
         ]
     parts += ["", "Write the email now."]
     return "\n".join(parts)
+
+
+def _paragraph_list(raw) -> list[str]:
+    """The model's paragraphs as a list, whatever shape it sent.
+
+    The schema asks for an ARRAY, but a model that answers with one
+    string must not be turned into a single run-on paragraph, and a list
+    must never be `str()`-ed - that renders "['one', 'two']", brackets
+    and quotes included, into the email.
+    """
+    if isinstance(raw, (list, tuple)):
+        return [str(p).strip() for p in raw if str(p).strip()]
+    text = str(raw or "").strip()
+    return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+
+
+def _paragraph_text(raw) -> str:
+    """The same paragraphs as one body, blank line between each."""
+    return "\n\n".join(_paragraph_list(raw))
 
 
 class GeminiDrafter:
@@ -471,33 +594,52 @@ class GeminiDrafter:
         self._sleep = _sleep
 
     def draft(self, prompt_context: dict) -> dict:
+        """A first email and a follow-up are two different jobs.
+
+        Step 0: the model writes only the paragraph about the company;
+        `draft_outreach` assembles the letter around it from
+        `app.domain.letter`. The returned dict carries
+        `company_paragraphs` and `could_be_a_user` instead of a body.
+
+        Step > 0: unchanged - a follow-up is short, bespoke and has no
+        fixed blocks to assemble, so the model writes the whole body.
+        """
+        first_email = int(prompt_context.get("sequence_step") or 0) == 0
+        system = _FIRST_EMAIL_SYSTEM if first_email else _DRAFTER_SYSTEM
+        schema = FIRST_EMAIL_SCHEMA if first_email else DRAFT_SCHEMA
         response = _generate_with_retry(
             self._client, self._sleep, "drafter",
             model=self._model,
             contents=build_draft_prompt(prompt_context),
             config=types.GenerateContentConfig(
-                system_instruction=_DRAFTER_SYSTEM,
+                system_instruction=system,
                 response_mime_type="application/json",
-                response_schema=DRAFT_SCHEMA,
+                response_schema=schema,
             ),
         )
         data = _decode_json(response.text, "drafter")
         if not isinstance(data, dict):
             raise ValueError("drafter: expected a JSON object")
-        missing = [k for k in ("subject", "body", "research_source_type", "research_source_id")
-                   if k not in data]
+        body_key = "company_paragraphs" if first_email else "body"
+        required = ["subject", body_key, "research_source_type", "research_source_id"]
+        missing = [k for k in required if k not in data]
         if missing:
             raise ValueError(f"drafter: response missing {', '.join(missing)}")
         try:
             source_id = int(data["research_source_id"])
         except (TypeError, ValueError) as exc:
             raise ValueError("drafter: research_source_id is not an integer") from exc
-        return {
+        out = {
             "subject": str(data["subject"]),
-            "body": str(data["body"]),
             "research_source_type": str(data["research_source_type"]),
             "research_source_id": source_id,
         }
+        if first_email:
+            out["company_paragraphs"] = _paragraph_list(data[body_key])
+            out["could_be_a_user"] = bool(data.get("could_be_a_user"))
+        else:
+            out["body"] = _paragraph_text(data[body_key])
+        return out
 
 
 # --- Task 9: GeminiReplyClassifier ---------------------------------------------

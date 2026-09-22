@@ -49,6 +49,13 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 
+// app/domain/letter.py's USER_FIT_MARKER, mirrored by hand - there is no
+// endpoint that exposes it. A draft to a company the sender could
+// plausibly be a user of carries a paragraph only he can write; `send`
+// refuses a body that still has the marker, so saying so here is what
+// stops him approving 47 drafts and finding out later.
+const USER_FIT_MARKER = '>>> YOUR TURN'
+
 // The source kinds are database enum values (`long_description`,
 // `job_posting`). Nobody reviewing a letter thinks in those terms, so
 // say where the fact came from in the words a person would use.
@@ -341,6 +348,7 @@ export default function ReviewQueue() {
   if (!current) return <Skeleton className="h-96 w-full" />
 
   const progress = Math.round((position / visibleItems.length) * 100)
+  const needsYourParagraph = (current.wire_text ?? '').includes(USER_FIT_MARKER)
   const critic = criticCheck(current.critic_verdict)
   const showCriticNote = Boolean(current.critic_note) && !dismissedIds.has(current.outreach_id)
 
@@ -359,6 +367,17 @@ export default function ReviewQueue() {
       {actionError && (
         <Alert variant="destructive">
           <AlertDescription>{actionError}</AlertDescription>
+        </Alert>
+      )}
+
+      {needsYourParagraph && !isEditing && (
+        <Alert>
+          <AlertTitle>This one is waiting on you</AlertTitle>
+          <AlertDescription>
+            Press <kbd className="font-mono">e</kbd> and replace the{' '}
+            <span className="font-mono">{USER_FIT_MARKER}</span> paragraph with the real thing,
+            or delete it. Approving it as it stands will not send.
+          </AlertDescription>
         </Alert>
       )}
 

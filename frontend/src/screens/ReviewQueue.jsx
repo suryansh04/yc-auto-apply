@@ -465,11 +465,33 @@ export default function ReviewQueue() {
   // Only a fresh check knows WHERE each note applies; the note stored at
   // draft time is just a sentence. So the letter is marked up after a
   // re-check or a save, and reads plainly before that.
-  const highlights = checkedId === current.outreach_id ? checkHighlights : []
+  const checkMarks = checkedId === current.outreach_id ? checkHighlights : []
+  // The company paragraph, marked as itself. Appended after the checks so
+  // it keeps the highest index - `activeIndex` and the suggestions panel
+  // are keyed by position, and shifting the checks' indices to make room
+  // would point every rewrite at the wrong note.
+  const highlights = current.insight_text
+    ? [
+        ...checkMarks,
+        {
+          kind: 'insight',
+          message: 'This is the paragraph about them - the only part the letter researches.',
+          quote: current.insight_text,
+          generic: current.generic_line,
+          busy: genericLine.isPending,
+          onUseGeneric: () => {
+            setActionError(null)
+            genericLine.mutate(current.outreach_id, {
+              onError: (err) => setActionError(err.message),
+            })
+          },
+        },
+      ]
+    : checkMarks
   const shownRewrites = suggestedId === current.outreach_id ? rewrites : {}
   // "Still thinking" is only honest while the call is in flight for THIS
   // draft and something was actually flagged.
-  const suggestionsPending = suggestFixes.isPending && highlights.some((h) => h.quote)
+  const suggestionsPending = suggestFixes.isPending && checkMarks.some((h) => h.quote)
 
   // Accept a rewrite: paste it in where the flagged words were, and save.
   // The quote came back as a verbatim substring of the BODY (never the
@@ -686,7 +708,7 @@ export default function ReviewQueue() {
                 {suggestions.length > 0 ? (
                   <ul className="grid gap-1.5 text-sm">
                     {suggestions.map((note, index) => {
-                      const marked = Boolean(highlights[index]?.quote)
+                      const marked = Boolean(checkMarks[index]?.quote)
                       return (
                         <li key={note}>
                           <button

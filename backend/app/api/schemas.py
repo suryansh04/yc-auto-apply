@@ -106,6 +106,13 @@ class QueueItemOut(BaseModel):
     # `app.domain.letter` and must have exactly one home - the preview and
     # what `generic-line` actually writes are the same string.
     generic_line: str | None = None
+    # The company paragraph as it currently stands - a verbatim substring
+    # of `body`, and therefore of `wire_text`. The screen marks exactly
+    # these characters so the operator can SEE which part of the letter
+    # the generic line would replace, rather than being asked to take the
+    # swap on trust. None for a letter that does not have the assembled
+    # shape, which is the same condition `generic_line` is gated on.
+    insight_text: str | None = None
 
 
 class EditIn(BaseModel):

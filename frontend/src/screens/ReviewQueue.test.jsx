@@ -830,3 +830,37 @@ it('offers no generic line for a letter that has no company paragraph', async ()
   await screen.findByText('Review queue')
   expect(screen.queryByRole('button', { name: /use a generic line/i })).not.toBeInTheDocument()
 })
+
+it('marks the company paragraph in the letter, so the swap shows its work', async () => {
+  // "no highlight that section to" - the text that would disappear is on
+  // screen next to the text that would take its place.
+  mockQueue([item({
+    wire_text: ['Hi Akash,', '', 'You built a voice layer.', '', 'Suryansh'].join('\n'),
+    body: 'You built a voice layer.',
+    insight_text: 'You built a voice layer.',
+  })])
+  render(<ReviewQueue />)
+  const mark = await screen.findByLabelText(/paragraph about them/i)
+  expect(mark).toHaveAttribute('data-kind', 'insight')
+})
+
+it('swaps the generic line in from the paragraph itself', async () => {
+  mockQueue([item({
+    wire_text: ['Hi Akash,', '', 'You built a voice layer.', '', 'Suryansh'].join('\n'),
+    body: 'You built a voice layer.',
+    insight_text: 'You built a voice layer.',
+  })])
+  const generic = mockGenericLine({ notes: [] })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  const buttons = await screen.findAllByRole('button', { name: /use a generic line/i })
+  await userEvent.click(buttons[buttons.length - 1])
+  await waitFor(() => expect(generic).toHaveBeenCalledWith(1))
+})
+
+it('leaves the letter unmarked when there is no company paragraph to point at', async () => {
+  mockQueue([item({ insight_text: null })])
+  render(<ReviewQueue />)
+  await screen.findByText('Review queue')
+  expect(screen.queryByLabelText(/paragraph about them/i)).not.toBeInTheDocument()
+})

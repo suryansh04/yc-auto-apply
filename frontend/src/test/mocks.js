@@ -109,6 +109,10 @@ export function item(overrides = {}) {
     generic_line:
       'I came across Vahan while looking for teams working on problems worth the years ' +
       'it takes to solve them, and yours is one I kept reading about instead of scrolling past.',
+    // The company paragraph as it stands, a verbatim substring of the
+    // body. Null by default because this fixture's `wire_text` is not an
+    // assembled letter - a test that wants the paragraph marked says so.
+    insight_text: null,
     ...overrides,
   }
 }

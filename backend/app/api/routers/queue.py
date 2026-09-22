@@ -98,11 +98,8 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
     # generic line put in the wrong place, and `use_generic_line` refuses
     # it. Saying so by omission here is what keeps the button from
     # promising something the backend will decline.
-    generic = (
-        letter.generic_insight(company_name or "")
-        if company_name and letter.insight_region(body) is not None
-        else None
-    )
+    insight = letter.insight_region(body)
+    generic = letter.generic_insight(company_name or "") if company_name and insight else None
     return QueueItemOut(
         outreach_id=item.outreach.id,
         company_name=company_name,
@@ -123,6 +120,7 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
         sequence_step=int(getattr(item.outreach, "sequence_step", 0) or 0),
         attachment_name=attachment_name,
         generic_line=generic,
+        insight_text=insight if generic else None,
     )
 
 

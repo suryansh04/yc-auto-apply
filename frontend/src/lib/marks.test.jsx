@@ -151,3 +151,63 @@ it('a rewrite is keyed to its own note, never to the first mark', async () => {
   await hover(screen.getByLabelText('contains a semicolon'))
   expect(await screen.findByText(/no rewrite for this one/i)).toBeInTheDocument()
 })
+
+
+// --- the company paragraph (operator request 2026-09-23) -------------------
+//
+// "no highlight that section to". The generic-line button had to be taken
+// on trust; marking the paragraph is what makes the swap show its work.
+
+const INSIGHT = {
+  kind: 'insight',
+  message: 'This is the paragraph about them - the only part the letter researches.',
+  quote: 'You built a voice layer.',
+  generic: 'I came across Vahan while looking for teams.',
+}
+
+it('marks the company paragraph in its own colour, not the checks\u2019', async () => {
+  show('One thing. You built a voice layer. Another.', [INSIGHT])
+  const mark = screen.getByLabelText(/paragraph about them/i)
+  expect(mark.tagName).toBe('MARK')
+  expect(mark).toHaveAttribute('data-kind', 'insight')
+  // Sky, never amber: amber means "something here is wrong", and this
+  // mark makes no such claim.
+  expect(mark.className).toMatch(/sky/)
+  expect(mark.className).not.toMatch(/amber/)
+})
+
+it('hovering the company paragraph offers the generic line', async () => {
+  show('One thing. You built a voice layer. Another.', [INSIGHT])
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  expect(await screen.findByText('I came across Vahan while looking for teams.')).toBeInTheDocument()
+})
+
+it('the swap is offered from the paragraph itself', async () => {
+  const onUseGeneric = vi.fn()
+  show('One thing. You built a voice layer. Another.', [{ ...INSIGHT, onUseGeneric }])
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
+  expect(onUseGeneric).toHaveBeenCalled()
+})
+
+it('a check mark wins where the two overlap', async () => {
+  // They overlap by design - a hook note IS about that paragraph - and a
+  // mark inside a mark renders as neither. Something wrong with the
+  // words is the more urgent of the two claims.
+  const { container } = show('One thing. You built a voice layer. Another.', [
+    { message: 'hook shares no distinctive term', quote: 'You built a voice layer.' },
+    INSIGHT,
+  ])
+  const marks = container.querySelectorAll('mark')
+  expect(marks).toHaveLength(1)
+  expect(marks[0]).toHaveAttribute('data-kind', 'check')
+})
+
+it('both are marked when they do not overlap', async () => {
+  const { container } = show('A semicolon; here. You built a voice layer.', [
+    { message: 'contains a semicolon', quote: ';' },
+    INSIGHT,
+  ])
+  const kinds = [...container.querySelectorAll('mark')].map((m) => m.dataset.kind)
+  expect(kinds).toEqual(['check', 'insight'])
+})

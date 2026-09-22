@@ -62,9 +62,53 @@ function Card({ hit, suggestion, pending, onApply }) {
 }
 
 /**
+ * The company paragraph - the one part of the letter that is about the
+ * founder rather than about the sender, and the only part the generic
+ * line would replace.
+ *
+ * Operator request (2026-09-23): "no highlight that section to". The
+ * generic-line button under the letter had to be taken on trust; marking
+ * the paragraph is what makes the swap show its work, because the text
+ * that would disappear is on screen next to the text that would take its
+ * place.
+ */
+function InsightCard({ hit }) {
+  return (
+    <div className="grid gap-2 font-sans">
+      <p className="text-sm leading-snug font-medium">{hit.message}</p>
+      {hit.generic && (
+        <>
+          <p className="text-muted-foreground text-xs leading-snug">
+            Can&rsquo;t find an honest specific line? This replaces it:
+          </p>
+          <div className="rounded-md border border-sky-400/70 bg-sky-50 p-2 text-sm dark:border-sky-500/40 dark:bg-sky-950/40">
+            {hit.generic}
+          </div>
+          {hit.onUseGeneric && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-fit"
+              disabled={hit.busy}
+              onClick={hit.onUseGeneric}
+            >
+              {hit.busy ? <Spinner /> : null}
+              Use a generic line
+            </Button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
  * `text`: what is on screen (the wire text).
  * `highlights`: `[{message, quote}]` from the API; entries with no quote
- *   are ignored here and still listed in the suggestions panel.
+ *   are ignored here and still listed in the suggestions panel. An entry
+ *   may carry `kind: 'insight'` - the company paragraph rather than a
+ *   check - which is marked in sky, never amber, and always loses an
+ *   overlap to a check.
  * `onSelect(index)`: called when a mark is clicked, so the panel can say
  *   which note this is.
  * `suggestions`: `{[index]: {replacement, why}}` from /suggest, keyed by
@@ -90,37 +134,67 @@ export function markUp(
     if (start < 0) return
     found.push({ start, end: start + highlight.quote.length, index, ...highlight })
   })
-  found.sort((a, b) => a.start - b.start)
+
+  // A check mark always beats the company-paragraph mark. They overlap by
+  // design - a hook note IS about that paragraph - and a mark inside a
+  // mark renders as neither. Something wrong with the words is more
+  // urgent than "this is the part about them", and the swap stays
+  // reachable from the button under the letter either way.
+  const accepted = []
+  const taken = []
+  const byPrecedence = [
+    ...found.filter((h) => h.kind !== 'insight'),
+    ...found.filter((h) => h.kind === 'insight'),
+  ]
+  byPrecedence.forEach((hit) => {
+    // A quote can also appear twice in the wire text; taking the first
+    // free position is the same rule in both cases.
+    if (taken.some(([start, end]) => hit.start < end && start < hit.end)) return
+    taken.push([hit.start, hit.end])
+    accepted.push(hit)
+  })
+  accepted.sort((a, b) => a.start - b.start)
 
   const pieces = []
   let cursor = 0
-  found.forEach((hit) => {
-    // The backend already drops overlaps; this is the belt to that
-    // braces, since a quote can also appear twice in the wire text.
-    if (hit.start < cursor) return
+  accepted.forEach((hit) => {
     if (hit.start > cursor) pieces.push(body.slice(cursor, hit.start))
-    const suggestion = suggestions[hit.index]
+    const insight = hit.kind === 'insight'
     pieces.push(
       <HoverCard key={`${hit.index}-${hit.start}`} openDelay={120} closeDelay={120}>
         <HoverCardTrigger asChild>
           <mark
             data-note={hit.message}
+            data-kind={hit.kind ?? 'check'}
             // No `title`: the browser's own tooltip would race the hover
             // card and cover it. Screen readers get the note instead.
             aria-label={hit.message}
             onClick={onSelect ? () => onSelect(hit.index) : undefined}
             className={
-              'cursor-pointer rounded-sm px-0.5 decoration-amber-500 decoration-2 underline-offset-4 ' +
-              (activeIndex === hit.index
-                ? 'bg-amber-300/80 underline dark:bg-amber-500/50'
-                : 'bg-amber-200/70 dark:bg-amber-400/25')
+              'cursor-pointer rounded-sm px-0.5 decoration-2 underline-offset-4 ' +
+              // Sky, not amber, for the company paragraph: amber means
+              // "something here is wrong", and this mark means "this is
+              // the part that is about them". Two colours for two
+              // different claims.
+              (insight
+                ? 'bg-sky-100 decoration-sky-500 decoration-dotted underline dark:bg-sky-400/20 '
+                : 'decoration-amber-500 ') +
+              (insight
+                ? ''
+                : activeIndex === hit.index
+                  ? 'bg-amber-300/80 underline dark:bg-amber-500/50'
+                  : 'bg-amber-200/70 dark:bg-amber-400/25')
             }
           >
             {body.slice(hit.start, hit.end)}
           </mark>
         </HoverCardTrigger>
-        <HoverCardContent align="start" className="w-80">
-          <Card hit={hit} suggestion={suggestion} pending={pending} onApply={onApply} />
+        <HoverCardContent align="start" className={insight ? 'w-96' : 'w-80'}>
+          {insight ? (
+            <InsightCard hit={hit} />
+          ) : (
+            <Card hit={hit} suggestion={suggestions[hit.index]} pending={pending} onApply={onApply} />
+          )}
         </HoverCardContent>
       </HoverCard>,
     )

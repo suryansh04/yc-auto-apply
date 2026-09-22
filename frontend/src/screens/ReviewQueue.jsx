@@ -39,12 +39,7 @@ import {
 } from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { markUp } from '@/lib/marks'
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from '@/components/ui/hover-card'
-import { Lightbulb, RefreshCw, Shuffle } from 'lucide-react'
+import { Lightbulb, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -599,7 +594,7 @@ export default function ReviewQueue() {
                   : current.wire_text}
               </pre>
             </CardContent>
-            <CardFooter className="flex-wrap items-center justify-between gap-3">
+            <CardFooter>
               {/* Live finding (2026-09-16): the operator reviewed a draft
                   and said "there is no resume attached". It is - `send`
                   attaches RESUME_PATH - but nothing said so.
@@ -614,50 +609,6 @@ export default function ReviewQueue() {
                   No resume file configured, so this cannot be sent yet · {current.word_count}{' '}
                   words
                 </p>
-              )}
-              {/* Operator request (2026-09-23): the way out for a company
-                  where no good specific line can be found. It sits under
-                  the letter, next to the line it rewrites, rather than in
-                  the decision rail - it is a rewrite, not a decision.
-                  Hovering shows the line it would write, from the API
-                  (`generic_line`) rather than from a copy kept here, so
-                  the preview and the swap can never disagree. The button
-                  is absent when the backend offers no line, which is
-                  exactly when the swap would be refused. */}
-              {current.generic_line && (
-                <HoverCard openDelay={120} closeDelay={120}>
-                  <HoverCardTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={genericLine.isPending || busy}
-                      onClick={() => {
-                        setActionError(null)
-                        genericLine.mutate(current.outreach_id, {
-                          onError: (err) => setActionError(err.message),
-                        })
-                      }}
-                    >
-                      {genericLine.isPending ? <Spinner /> : <Shuffle />}
-                      Use a generic line
-                    </Button>
-                  </HoverCardTrigger>
-                  <HoverCardContent align="end" className="w-96">
-                    <div className="grid gap-2">
-                      <p className="text-sm leading-snug font-medium">
-                        Replaces the paragraph about them with:
-                      </p>
-                      <div className="rounded-md border border-amber-400/70 bg-amber-50 p-2 text-sm dark:border-amber-500/40 dark:bg-amber-950/40">
-                        {current.generic_line}
-                      </div>
-                      <p className="text-muted-foreground text-xs leading-snug">
-                        It claims nothing about them, which is the point &mdash; for the
-                        companies where there is no honest specific line to find. The rest of
-                        the letter is untouched.
-                      </p>
-                    </div>
-                  </HoverCardContent>
-                </HoverCard>
               )}
             </CardFooter>
           </Card>

@@ -784,10 +784,27 @@ it('a failed rewrite call leaves the checks exactly where they were', async () =
 // for this specifically line". The realistic alternative to a generic
 // line is not a better specific one - it is a fabricated one.
 
+// 2026-09-23: these used to press a button under the letter. It was
+// removed at the operator's request - the paragraph's own hover card is
+// the one home for both replacements now, which is also the only place
+// that can say "this letter is already using it".
+
+const WITH_PARAGRAPH = {
+  wire_text: ['Hi Akash,', '', 'You built a voice layer.', '', 'Suryansh'].join('\n'),
+  body: 'You built a voice layer.',
+  insight_text: 'You built a voice layer.',
+}
+
+async function openGenericTab() {
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('tab', { name: /generic/i }))
+}
+
 it('offers a way to swap in a generic company line', async () => {
-  mockQueue([item({})])
+  mockQueue([item(WITH_PARAGRAPH)])
   const generic = mockGenericLine({ notes: [] })
   render(<ReviewQueue />)
+  await openGenericTab()
   await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
   await waitFor(() => expect(generic).toHaveBeenCalledWith(1))
 })
@@ -795,43 +812,45 @@ it('offers a way to swap in a generic company line', async () => {
 it('shows what the checks made of the generic line', async () => {
   // It is an edit, so its result is the checks' verdict on the new text
   // - shown exactly where a save's would be.
-  mockQueue([item({})])
+  mockQueue([item(WITH_PARAGRAPH)])
   mockGenericLine({ notes: ['hook shares no distinctive term with the cited source'] })
   render(<ReviewQueue />)
+  await openGenericTab()
   await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
   expect(
     await screen.findByText('hook shares no distinctive term with the cited source'),
   ).toBeInTheDocument()
 })
 
-it('says so when a letter has no company paragraph to swap', async () => {
-  mockQueue([item({})])
+it('says so when the swap is refused', async () => {
+  mockQueue([item(WITH_PARAGRAPH)])
   mockGenericLineFailure('this letter does not have the assembled shape - edit it by hand')
   render(<ReviewQueue />)
+  await openGenericTab()
   await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
   expect(await screen.findByText(/edit it by hand/i)).toBeInTheDocument()
 })
 
-it('shows the generic line on hover, before it is swapped in', async () => {
+it('shows the generic line before it is swapped in', async () => {
   // "also give the hover effect for generic line also" - the same read-
   // before-you-commit the amber highlights give.
-  mockQueue([item({})])
+  mockQueue([item(WITH_PARAGRAPH)])
   const generic = mockGenericLine({ notes: [] })
   render(<ReviewQueue />)
-  await userEvent.hover(await screen.findByRole('button', { name: /use a generic line/i }))
-  expect(await screen.findByText(/replaces the paragraph about them with/i)).toBeInTheDocument()
+  await openGenericTab()
   expect(screen.getByText(/yours is one I kept reading about/)).toBeInTheDocument()
-  // Hovering is a read: nothing is written until the button is pressed.
+  // Reading is a read: nothing is written until the button is pressed.
   expect(generic).not.toHaveBeenCalled()
 })
 
-it('offers no generic line for a letter that has no company paragraph', async () => {
+it('offers nothing to swap for a letter that has no company paragraph', async () => {
   // The backend refuses the swap for a letter without the assembled
-  // shape, and says so by sending no line. The button must not promise
-  // what the backend will decline.
-  mockQueue([item({ generic_line: null })])
+  // shape, and says so by sending no line - so there is no mark to hover
+  // and nothing promising what the backend would decline.
+  mockQueue([item({ generic_line: null, insight_text: null })])
   render(<ReviewQueue />)
   await screen.findByText('Review queue')
+  expect(screen.queryByLabelText(/paragraph about them/i)).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /use a generic line/i })).not.toBeInTheDocument()
 })
 

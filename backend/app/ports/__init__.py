@@ -47,6 +47,67 @@ class VerifierError(Exception):
         super().__init__(" ".join(parts))
 
 
+class GmailError(Exception):
+    """Any Gmail/OAuth failure (Task 15/Task 7's `GmailSender` /
+    `GmailReader`). Fix round 1 (ruling T8-1): moved here from
+    `app.adapters.gmail`, alongside `QuotaExhausted`/`VerifierError` above,
+    for the identical reason — `app.application.poll_replies.PollReplies`
+    needs to catch it without importing a concrete adapter (D8), and this
+    module is the shared contract application code is allowed to depend on.
+    `app.adapters.gmail` and `app.adapters.gmail_reader` import this class
+    and re-export it under their own names, so every existing
+    `from app.adapters.gmail import GmailError` call site keeps working
+    unchanged — this is the one and only definition; the adapter modules no
+    longer define their own.
+
+    Message is built from `status` and `reason` only — never from a
+    response body or an underlying exception's text — so it is always safe
+    to log, print, or surface via a CLI traceback."""
+
+    def __init__(self, stage: str, status: int | None = None, reason: str | None = None):
+        self.stage = stage
+        self.status = status
+        self.reason = reason
+        parts = [f"gmail {stage} failed"]
+        if status is not None:
+            parts.append(f"(HTTP {status})")
+        if reason:
+            parts.append(f"- {reason}")
+        super().__init__(" ".join(parts))
+
+
+class GmailAuthRequired(GmailError):
+    """Final fix wave (F2, spec §9 "Gmail 401 during polling -> the job
+    fails with 're-run gmail-auth'"): the subset of `GmailError` that no
+    retry can cure — Gmail answered 401 to an API call, or the OAuth token
+    endpoint refused the stored refresh token (`invalid_grant`: revoked or
+    expired) or the client identity (`invalid_client`). Raised by
+    `app.adapters.gmail.exchange_refresh_token` and
+    `app.adapters.gmail_reader.GmailReader`; `PollReplies.run` re-raises
+    it (while still swallowing every other, transient `GmailError`) so the
+    poll-replies job is recorded `failed / GmailAuthRequired` and the
+    Pipeline screen shows a "re-run gmail-auth" banner instead of a
+    silent zero-result poll.
+
+    Same constructor and message discipline as `GmailError`: built from a
+    stage label, an HTTP status and a short OAuth error code only — never
+    a token, the response body, or the account address."""
+
+
+class GmailHistoryExpired(Exception):
+    """Raised by `app.adapters.gmail_reader.GmailReader.history_since` when
+    Gmail answers 404 to `users.history.list`: `startHistoryId` is older
+    than what the mailbox retains. Not a `GmailError` — this is an
+    expected, recoverable condition (the caller falls back to
+    `recent_message_ids` + `current_history_id()`), not an adapter failure.
+
+    Fix round 1 (ruling T8-1): moved here from `app.adapters.gmail_reader`
+    for the same reason as `GmailError` above — `PollReplies` catches this
+    by type, not by class-name string matching (which a rename would
+    silently break, invisibly to `test_architecture.py`, since nothing
+    would be importing the renamed class at all)."""
+
+
 @runtime_checkable
 class YCDirectory(Protocol):
     def fetch_companies(self) -> list[dict]: ...
@@ -87,6 +148,26 @@ class Drafter(Protocol):
 
 
 @runtime_checkable
+class Critic(Protocol):
+    """Task 13 (D22): the second, judgment-based pass `DraftOutreach` runs
+    after the deterministic validator (`Drafter` above) already passed a
+    draft — advisory only. `critique(draft)` takes the validated draft dict
+    (`{subject, body, research_source_type, research_source_id}`, the same
+    shape `Drafter.draft` returns) and answers
+    `{verdict: "PASS"|"NEEDS_REVISION", concerns: [{span, issue}], overall_note}`.
+
+    The critic can never block a send and can never approve one — it only
+    ever adds information for the human reviewer (D5 stays the sole gate).
+    `DraftOutreach` persists whatever it returns on the `messages` row
+    regardless of the verdict, and a `critique` call that raises must not
+    stop a draft either (see `app.application.critique_draft.run_critic`).
+    Backed by a Sarvam/Gemini adapter (configuration, not part of this
+    interface), same shape as `Drafter`/`ReplyClassifier` above."""
+
+    def critique(self, draft: dict) -> dict: ...  # {verdict, concerns, overall_note}
+
+
+@runtime_checkable
 class ResumeParser(Protocol):
     def parse(self, raw_text: str) -> list[dict]: ...  # [{kind, text, source_span}]
 
@@ -96,6 +177,17 @@ class MailSender(Protocol):
     def send(
         self, to: str, subject: str, body: str, attachment_path: str | None
     ) -> tuple[str, str]: ...  # (message_id, thread_id)
+
+
+@runtime_checkable
+class ReplyClassifier(Protocol):
+    """Task 9 (spec §5): labels one inbound reply, given enough context to
+    judge intent rather than just the bare reply text (`context` carries at
+    least `our_message` — the outbound the founder is replying to — and
+    `reply_body`). Backed by a Sarvam/Gemini adapter (configuration, not
+    part of this interface), same shape as `Drafter` above."""
+
+    def classify(self, context: dict) -> dict: ...  # {label, confidence, rationale}
 
 
 @runtime_checkable

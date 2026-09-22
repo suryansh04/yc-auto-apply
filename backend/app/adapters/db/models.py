@@ -1,9 +1,12 @@
 """SQLAlchemy 2.0 ORM models for the persistence schema (spec §7).
 
-Scope note: this is Phase 1. The `outcomes` table and the
-`messages.critic_verdict` / `critic_concerns` / `critic_overall_note`
-columns belong to Phase 2 (the voice critic, D22) and are deliberately
-NOT modelled here.
+Scope note: Phase 2 (migration 0003) added the `jobs` table, the voice
+critic columns on `Message` (`critic_verdict` / `critic_concerns` /
+`critic_overall_note`, D22), the reply classification columns on
+`Message` (`label` / `confidence` / `rationale` / `classified_at`,
+spec §5), and `GmailCredential.last_history_id` (the Gmail history-API
+cursor for reply polling). The `outcomes` table is still not modelled
+here.
 
 Two constraints on `Message` are load-bearing (spec §13, D5) and are the
 actual point of this module:
@@ -27,6 +30,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    JSON,
     MetaData,
     String,
     Text,
@@ -235,6 +239,8 @@ class Message(Base):
             "direction IN ('outbound', 'inbound')",
             name="direction",
         ),
+        # Re-polling the same Gmail window must be free (spec §5).
+        Index("uq_messages_gmail_message_id", "gmail_message_id", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -252,6 +258,19 @@ class Message(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     edited_by_user: Mapped[bool] = mapped_column(default=False)
+    # D22 voice critic — advisory only, never a gate.
+    critic_verdict: Mapped[str | None] = mapped_column(String(20))
+    critic_concerns: Mapped[dict | None] = mapped_column(JSON)
+    critic_overall_note: Mapped[str | None] = mapped_column(String(200))
+    # Reply classification (inbound rows only, spec §5).
+    label: Mapped[str | None] = mapped_column(String(20))
+    confidence: Mapped[float | None]
+    rationale: Mapped[str | None] = mapped_column(String(300))
+    classified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Task 10: True only once an operator has hand-corrected this row's
+    # label via POST /api/messages/{id}/label - never set by the automatic
+    # classifier (ClassifyReply._classify_one never passes corrected=True).
+    corrected: Mapped[bool] = mapped_column(default=False)
 
     outreach: Mapped["Outreach"] = relationship(back_populates="messages")
 
@@ -282,6 +301,9 @@ class GmailCredential(Base):
     refresh_token: Mapped[str] = mapped_column(Text)
     token_uri: Mapped[str] = mapped_column(String(500), default="https://oauth2.googleapis.com/token")
     scopes: Mapped[list | None] = mapped_column(JSONB)
+    # Phase 2 (spec §5): the Gmail history-API cursor reply polling resumes
+    # from, so a poll only ever asks Gmail for what changed since last time.
+    last_history_id: Mapped[str | None] = mapped_column(String(40))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -290,6 +312,38 @@ class GmailCredential(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class Job(Base):
+    """A pipeline stage running in the background (spec §4). The partial
+    unique index — not application logic — is what makes a double-clicked
+    button harmless."""
+
+    __tablename__ = "jobs"
+    __table_args__ = (
+        Index(
+            "uq_jobs_kind_active",
+            "kind",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="status",
+        ),
+        CheckConstraint("created_by IN ('ui', 'schedule', 'cli')", name="created_by"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    created_by: Mapped[str] = mapped_column(String(10), default="ui")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    done: Mapped[int] = mapped_column(default=0)
+    total: Mapped[int | None]
+    summary: Mapped[str | None] = mapped_column(String(500))
+    error: Mapped[str | None] = mapped_column(String(200))
 
 
 class AppSettings(Base):

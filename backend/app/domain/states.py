@@ -32,7 +32,15 @@ _LEGAL: dict[OutreachState, set[OutreachState]] = {
     S.PENDING_APPROVAL: {S.APPROVED, S.DISCARDED, S.READY_TO_DRAFT},
     S.APPROVED: {S.SENT},
     S.SENT: {S.REPLIED, S.READY_TO_DRAFT, S.CLOSED, S.BOUNCED},
-    S.REPLIED: {S.CLOSED},
+    # Task 10 (T9-1): REPLIED -> SENT is legal ONLY via the label-correction
+    # path (`ClassifyReply.apply_label`'s `_restore_sent`, reached from
+    # `POST /api/messages/{id}/label`) - an operator correcting a human
+    # label (which had cancelled the sequence) back to a machine one. This
+    # state machine has no caller-scoped permissions, so the restriction is
+    # enforced by which code actually calls `assert_transition(REPLIED,
+    # SENT)`, not by this edge itself; `_classify_one`'s automatic path
+    # never attempts it.
+    S.REPLIED: {S.CLOSED, S.SENT},
 }
 
 

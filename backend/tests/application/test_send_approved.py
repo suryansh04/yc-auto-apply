@@ -150,18 +150,59 @@ def test_unapproved_row_with_approved_outreach_is_an_error_and_never_reaches_res
     assert any("approved_at" in r.getMessage() for r in caplog.records)
 
 
-def test_follow_up_steps_are_refused_before_reserving(repos, one_approved):
-    """Ruling R-C: Phase 1 sends step 0 only; a step-1 APPROVED row must
-    fail loudly, not be sent and mis-scheduled."""
-    repos.outreach.get(one_approved.id).sequence_step = 1
-    repos.message.upsert(outreach_id=one_approved.id, sequence_step=1, direction="outbound",
-                         subject="s", body="follow-up", approved_at=datetime(2026, 9, 3, tzinfo=timezone.utc))
-    s = FakeSender()
-    with pytest.raises(NotImplementedError, match="Phase 2"):
-        SendApproved(s, FrozenClock(), repos).run(cap=10)
-    assert s.sent == []
-    assert repos.message.get_outbound(one_approved.id, 1).sent_at is None
-    assert repos.session.commit_calls == 0
+def test_a_follow_up_step_can_now_be_sent(repos, approved_follow_up, fake_sender, clock):
+    """Task 11 (spec §6): ruling R-C's `NotImplementedError` guard is
+    lifted — a step-1 `APPROVED` row is sent through the exact same path
+    as the initial email, this test's real replacement for
+    `test_follow_up_steps_are_refused_before_reserving`."""
+    SendApproved(fake_sender, clock, repos, signature="S").run(cap=10)
+    assert len(fake_sender.sent) == 1
+    row = repos.message.get_outbound(approved_follow_up.outreach.id, 1)
+    assert row.sent_at is not None
+
+
+def test_reserve_before_send_still_holds_per_step(repos, approved_follow_up, fake_sender, clock):
+    # The step-1 row reserves independently of the step-0 row.
+    assert repos.message.reserve_for_send(approved_follow_up.message.id, clock.now()) == 1
+    assert repos.message.reserve_for_send(approved_follow_up.message.id, clock.now()) == 0
+
+
+def test_a_step_two_follow_up_can_also_be_sent(repos, one_approved, fake_sender, clock):
+    """Not just step 1 — the guard is lifted for every step, not
+    special-cased to exactly one."""
+    outreach = repos.outreach.get(one_approved.id)
+    step_0 = repos.message.get_outbound(one_approved.id, 0)
+    step_0.sent_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    step_0.gmail_message_id, step_0.gmail_thread_id = "sent-0", "thread-0"
+    outreach.sequence_step = 2
+    repos.message.upsert(outreach_id=one_approved.id, sequence_step=2, direction="outbound",
+                         subject="s", body="second follow-up",
+                         approved_at=datetime(2026, 9, 10, tzinfo=timezone.utc))
+    SendApproved(fake_sender, clock, repos).run(cap=10)
+    assert len(fake_sender.sent) == 1
+    assert repos.message.get_outbound(one_approved.id, 2).sent_at is not None
+
+
+def test_next_action_at_after_step_zero_uses_followup_day_1(repos, one_approved):
+    at = datetime(2026, 9, 11, 10, 30, tzinfo=timezone.utc)
+    SendApproved(FakeSender(), FrozenClock(at), repos, followup_day_1=5, followup_day_2=12).run(cap=10)
+    assert repos.outreach.get(one_approved.id).next_action_at == at + timedelta(days=5)
+
+
+def test_next_action_at_after_step_one_uses_followup_day_2(repos, approved_follow_up, fake_sender):
+    at = datetime(2026, 9, 11, 10, 30, tzinfo=timezone.utc)
+    SendApproved(fake_sender, FrozenClock(at), repos, followup_day_1=5, followup_day_2=12).run(cap=10)
+    assert repos.outreach.get(approved_follow_up.outreach.id).next_action_at == at + timedelta(days=12)
+
+
+def test_the_send_interval_comes_from_settings_not_constants(repos, one_approved):
+    """Mirrors the schedule_follow_ups test of the same name: passing a
+    settings row must actually change what gets stored, proving the value
+    is read, not hardcoded."""
+    at = datetime(2026, 9, 11, 10, 30, tzinfo=timezone.utc)
+    repos.settings.set(followup_day_1=30)
+    SendApproved(FakeSender(), FrozenClock(at), repos).run(cap=10)
+    assert repos.outreach.get(one_approved.id).next_action_at == at + timedelta(days=30)
 
 
 def test_fake_reserve_models_the_conditional_update(repos, one_approved):

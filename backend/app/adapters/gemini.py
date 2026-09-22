@@ -36,6 +36,8 @@ from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.domain.names import company_display_name
+from app.domain.replies import LABELS, MACHINE_LABELS
+from app.domain.validation import FOLLOW_UP_WORD_TARGETS
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +208,30 @@ hesitate".
 
 Name the company once in the body (not only in the subject).
 
+FOLLOW-UPS: when the prompt below includes a THREAD SO FAR section, you are
+writing a follow-up, not a first email - the founder already saw an earlier
+note from you. Do not repeat what that note already said; assume they read
+it and refer back to it in half a sentence at most ("following up on ...",
+never a restatement of the whole hook). Never call that earlier note an
+"email" or "message" you sent - the same rule that bans naming a news
+article as a source applies to naming your own earlier note as a channel:
+never write "my last email", "my previous email", "as I mentioned", "in
+case you missed" or anything else that names the earlier note as a thing
+you sent, rather than a thing you're continuing. Hit the word target given
+for this step - it is lower than a first email's, on purpose, because a
+follow-up earns less of the founder's attention than the first message
+did, not more. The follow-up must end up shorter than the message before
+it, every time.
+
+THREAD SO FAR marks each entry "you sent" or "they replied" - or, for an
+inbound row that is an automated reply (marked "automated reply, NOT the
+founder", with its label - AUTO_REPLY or OUT_OF_OFFICE), that entry is a
+bot, not the founder. Only acknowledge an entry marked "they replied" as
+something the founder said. Never thank a founder for replying, and never
+write as if they personally responded, when the only inbound entry is
+marked as an automated reply - you may use it for timing only (for
+example, they mentioned being away until a date).
+
 OUTPUT: JSON with "subject" (three to six words, no emoji, no all-caps
 words, naming the company), "body" (plain text, no markdown, no HTML, NO
 greeting line and NO sign-off - those are added at send time), and
@@ -230,6 +256,27 @@ def _format_claims(claims: list[dict]) -> str:
     return "\n".join(lines) if lines else "- (none)"
 
 
+def _format_thread_history(history: list[dict]) -> str:
+    # Fix round 1 (ruling T12-2): an inbound row's `label` distinguishes a
+    # real human reply from a bot. Only a machine label gets the
+    # "automated reply" wording — a human label can never actually reach
+    # here (the state machine moves the outreach to REPLIED first), and an
+    # unclassified row (label=None) is treated as "they replied" rather
+    # than silently hidden, since hiding it would be worse if it does turn
+    # out to be human content.
+    lines = []
+    for m in history:
+        body = str(m.get("body", "")).replace("\n", " ").strip()
+        if m.get("direction") == "outbound":
+            who = "you sent"
+        elif m.get("label") in MACHINE_LABELS:
+            who = f"automated reply, NOT the founder ({m.get('label')})"
+        else:
+            who = "they replied"
+        lines.append(f"- [{who}, step {m.get('sequence_step')}]: {body}")
+    return "\n".join(lines) if lines else "- (none)"
+
+
 def build_draft_prompt(context: dict) -> str:
     company = context.get("company") or {}
     founder = context.get("founder") or {}
@@ -250,6 +297,23 @@ def build_draft_prompt(context: dict) -> str:
         "RESUME CLAIMS (the only things you may say about the sender)",
         _format_claims(context.get("claims") or []),
     ]
+    # Task 12: a follow-up (sequence_step > 0) gets its own section naming
+    # the word target for this step and showing the thread so far — a
+    # first email (step 0, or a context with no `sequence_step` at all)
+    # gets neither, so `build_draft_prompt` renders identically to before
+    # this task for step-0 calls.
+    step = int(context.get("sequence_step") or 0)
+    if step > 0:
+        target = FOLLOW_UP_WORD_TARGETS.get(step, min(FOLLOW_UP_WORD_TARGETS.values()))
+        parts += [
+            "",
+            f"THIS IS A FOLLOW-UP (step {step}). Do not repeat the earlier note - refer",
+            "to it briefly instead. Target about "
+            f"{target} words this time; it must end up shorter than the message before it.",
+            "",
+            "THREAD SO FAR",
+            _format_thread_history(context.get("thread_history") or []),
+        ]
     errors = context.get("validation_errors")
     if errors:
         previous = context.get("previous_draft") or {}
@@ -305,4 +369,212 @@ class GeminiDrafter:
             "body": str(data["body"]),
             "research_source_type": str(data["research_source_type"]),
             "research_source_id": source_id,
+        }
+
+
+# --- Task 9: GeminiReplyClassifier ---------------------------------------------
+
+CLASSIFY_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "label": {"type": "STRING", "enum": list(LABELS)},
+        "confidence": {"type": "NUMBER"},
+        "rationale": {"type": "STRING"},
+    },
+    "required": ["label", "confidence", "rationale"],
+}
+
+_CLASSIFIER_SYSTEM = """You are classifying a founder's reply to a cold internship enquiry a
+student sent them. Judge the founder's INTENT in the reply, never facts -
+your job is to say what kind of reply this is, not whether anything in it
+is true.
+
+Label the reply with EXACTLY ONE of:
+- INTERESTED: the founder wants to continue the conversation - asks a
+  question, wants to talk, asks for a resume, proposes a time.
+- REJECTED: the founder says no, is not hiring interns, or is not
+  interested.
+- REFERRAL: the founder points the student to someone else, a form, or a
+  different channel to apply through, rather than answering directly.
+- AUTO_REPLY: an automated acknowledgement - a bot confirming the message
+  was received, a "we will get back to you" auto-responder, or anything
+  else a human did not personally write in response to THIS message.
+- OUT_OF_OFFICE: an automated out-of-office / vacation responder.
+- UNCLEAR: anything that does not clearly fit one of the above - including
+  a reply too short, too ambiguous, or too generic to judge with
+  confidence on its own.
+
+AUTO_REPLY and OUT_OF_OFFICE are for machine-generated replies ONLY. An
+autoresponder must never be mistaken for a human decision: if you are not
+reasonably sure a human personally wrote the reply, do not guess
+INTERESTED or REJECTED - use UNCLEAR instead.
+
+You will be shown the message the student originally sent and the
+founder's reply to it - use the original message to understand what the
+reply is actually responding to; a short reply like "Sure, Friday works"
+is only classifiable in that context.
+
+Return a JSON object with "label" (one of the six above, exactly as
+spelled), "confidence" (a number from 0 to 1), and "rationale" (at most
+25 words, explaining the label).
+"""
+
+
+def build_classify_prompt(context: dict) -> str:
+    our_message = context.get("our_message") or ""
+    reply_body = context.get("reply_body") or ""
+    return (
+        "OUR MESSAGE (what the student originally sent)\n"
+        f"{our_message}\n\n"
+        "THEIR REPLY (what you are classifying)\n"
+        f"{reply_body}\n"
+    )
+
+
+class GeminiReplyClassifier:
+    """Real `ReplyClassifier` port (spec §5). `classify(context)` returns
+    `{label, confidence, rationale}`; `app.application.classify_reply`
+    normalises `label` before trusting it (never this adapter's job — the
+    adapter only guarantees the shape the schema promised, same division
+    of responsibility as `GeminiDrafter`/`GeminiResumeParser` above)."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def classify(self, context: dict) -> dict:
+        response = _generate_with_retry(
+            self._client, self._sleep, "reply classifier",
+            model=self._model,
+            contents=build_classify_prompt(context),
+            config=types.GenerateContentConfig(
+                system_instruction=_CLASSIFIER_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=CLASSIFY_SCHEMA,
+                temperature=0,
+            ),
+        )
+        data = _decode_json(response.text, "reply classifier")
+        if not isinstance(data, dict):
+            raise ValueError("reply classifier: expected a JSON object")
+        missing = [k for k in ("label", "confidence", "rationale") if k not in data]
+        if missing:
+            raise ValueError(f"reply classifier: response missing {', '.join(missing)}")
+        try:
+            confidence = float(data["confidence"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("reply classifier: confidence is not a number") from exc
+        return {
+            "label": str(data["label"]),
+            "confidence": confidence,
+            "rationale": str(data["rationale"]),
+        }
+
+
+# --- Task 13: GeminiCritic (D22 voice critic) -----------------------------------
+
+CRITIC_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "verdict": {"type": "STRING", "enum": ["PASS", "NEEDS_REVISION"]},
+        "concerns": {
+            "type": "ARRAY",
+            # spec: "0-3 items". NOT enforced here via `maxItems` (fix
+            # round 2, ruling T13-3): Gemini's `response_schema` field is
+            # documented to reject `maxItems` on ARRAY types in its legacy
+            # OpenAPI subset, which would break structured-output
+            # acceptance on every real call — untestable offline since
+            # every adapter test here is mocked. The 0-3 bound is enforced
+            # provider-independently in `run_critic`
+            # (`app.application.critique_draft`) instead, by truncation.
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "span": {"type": "STRING"},
+                    "issue": {"type": "STRING"},
+                },
+                "required": ["span", "issue"],
+            },
+        },
+        "overall_note": {"type": "STRING"},
+    },
+    "required": ["verdict", "concerns", "overall_note"],
+}
+
+_CRITIC_SYSTEM = """You are a second opinion on a cold internship email a student is about to
+send a startup founder. Another process already checked it mechanically -
+word counts, banned phrases, and that every specific claim is grounded in
+real material. Do not re-check any of that. Your only job is naturalness,
+specificity and concision: does this read like one specific person wrote
+it to one specific founder, or does it read generic, stiff, or like a
+template with the blanks filled in?
+
+The single most useful question: is any sentence here doing no work? A
+draft can pass every mechanical rule and still contain a sentence that
+adds nothing, restates something already said, or could be sent to any
+company with the names swapped. That is what you are here to catch.
+
+Never judge or comment on whether a fact is true, whether a claim is
+grounded, or word/sentence counts - those are already handled and are not
+your concern.
+
+Return a JSON object with:
+- "verdict": "PASS" if the email reads specific and natural, "NEEDS_REVISION"
+  if it does not.
+- "concerns": 0 to 3 objects, each with "span" (the exact phrase you are
+  flagging, quoted verbatim from the email) and "issue" (one short,
+  specific reason, e.g. "this opener could be sent to any company", "no
+  person actually writes 'the innovative work you're doing'"). Empty list
+  when there is nothing to flag.
+- "overall_note": at most 20 words, summarising your take for a human
+  reviewer who will see it next to the draft.
+"""
+
+
+def build_critic_prompt(draft: dict) -> str:
+    return (
+        "SUBJECT\n"
+        f"{draft.get('subject')}\n\n"
+        "BODY\n"
+        f"{draft.get('body')}\n"
+    )
+
+
+class GeminiCritic:
+    """Real `Critic` port (spec "The voice critic (D22)"). `critique(draft)`
+    returns `{verdict, concerns, overall_note}`; `DraftOutreach` (via
+    `app.application.critique_draft.run_critic`) is the only caller and the
+    only place that decides what the verdict means for the draft - this
+    adapter only guarantees the shape the schema promised, the same
+    division of responsibility as `GeminiDrafter`/`GeminiReplyClassifier`
+    above. Advisory only (D22): nothing here can block or approve a send."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def critique(self, draft: dict) -> dict:
+        response = _generate_with_retry(
+            self._client, self._sleep, "voice critic",
+            model=self._model,
+            contents=build_critic_prompt(draft),
+            config=types.GenerateContentConfig(
+                system_instruction=_CRITIC_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=CRITIC_SCHEMA,
+                temperature=0,
+            ),
+        )
+        data = _decode_json(response.text, "voice critic")
+        if not isinstance(data, dict):
+            raise ValueError("voice critic: expected a JSON object")
+        missing = [k for k in ("verdict", "concerns", "overall_note") if k not in data]
+        if missing:
+            raise ValueError(f"voice critic: response missing {', '.join(missing)}")
+        return {
+            "verdict": str(data["verdict"]),
+            "concerns": data["concerns"],
+            "overall_note": str(data["overall_note"]),
         }

@@ -29,12 +29,21 @@ raw SQL.
 - **`give_up(outreach_id)`** moves `NEEDS_MANUAL_EMAIL -> UNRESOLVED`
   (terminal) for a founder whose address cannot be found, so the row stops
   appearing in `list-manual`.
+
+Refusals are TYPED (Phase 2 final fix wave, F3, mirroring ruling T4-1 for
+`ReviewOutreach`): a missing row raises `OutreachNotFound` (the same class
+`ReviewOutreach` raises, so `app.api.routers.manual` maps it to 404 by
+type, exactly as `queue.py`/`thread.py` do), a malformed address raises
+`InvalidAddress` (a 422 - client input, not a state-machine refusal), and
+every other refusal is a plain `ValueError` (a 409). All three are
+`ValueError`s, so `app.cli`'s `except ValueError` echo loop is untouched.
 """
 
 import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from app.application.review_outreach import OutreachNotFound
 from app.domain.states import OutreachState, assert_transition
 
 _ADDRESS = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -77,13 +86,21 @@ class ManualItem:
     published_hint: str | None = None                # a launch address not attributable to this founder
 
 
+class InvalidAddress(ValueError):
+    """Raised only by `normalise_address` for input that is not an email
+    address at all - a client input error (HTTP 422 in
+    `app.api.routers.manual`), as opposed to a refusal of a real row in
+    the wrong state (409). A `ValueError` subclass so every existing
+    `except ValueError` caller (`app.cli set-email`) keeps working."""
+
+
 def normalise_address(address: str) -> str:
-    """The address as it will be stored and sent to, or a `ValueError`
-    naming why it cannot be: one `@`, something on both sides, a dot in
-    the domain part, no whitespace."""
+    """The address as it will be stored and sent to, or an
+    `InvalidAddress` naming why it cannot be: one `@`, something on both
+    sides, a dot in the domain part, no whitespace."""
     cleaned = (address or "").strip().lower()
     if not _ADDRESS.match(cleaned):
-        raise ValueError(f"{address!r} does not look like an email address (expected local@domain.tld)")
+        raise InvalidAddress(f"{address!r} does not look like an email address (expected local@domain.tld)")
     return cleaned
 
 
@@ -128,7 +145,7 @@ class ResolveManualEmail:
     def _manual_outreach(self, outreach_id: int):
         outreach = self._repos.outreach.get(outreach_id)
         if outreach is None:
-            raise ValueError(f"no outreach with id {outreach_id}")
+            raise OutreachNotFound(f"no outreach with id {outreach_id}")
         if OutreachState(outreach.state) is not OutreachState.NEEDS_MANUAL_EMAIL:
             raise ValueError(
                 f"outreach {outreach_id} is {outreach.state}, not needs_manual_email - "

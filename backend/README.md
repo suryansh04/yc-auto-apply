@@ -1,15 +1,23 @@
-# YC Auto Apply — Phase 1 operator guide
+# YC Auto Apply — Phase 1 + Phase 2 operator guide
 
-Phase 1 is a single-process command-line pipeline: sync the target YC
-companies, scrape their founders and research material, resolve founder
-email addresses, draft one grounded internship enquiry per founder, review
-every draft by hand in the terminal, send the approved ones through Gmail.
-Everything runs from this `backend/` directory against a Postgres database.
-There is no dashboard, no worker loop and no follow-up sending in Phase 1
-(see *Phase 2 debt* at the end).
+The pipeline: sync the target YC companies, scrape their founders and
+research material, resolve founder email addresses, draft one grounded
+internship enquiry per founder, review every draft by hand, send the
+approved ones through Gmail. Phase 1 (§1–10 below) built this as a
+command-line tool. Phase 2 (§11) adds a browser UI over the same use
+cases, reply polling, and a two-step follow-up sequence — no new pipeline
+concept, no second way to do anything the CLI already does.
 
-Design spec: `../docs/superpowers/specs/2026-09-03-yc-auto-apply-design.md`
-(section numbers below refer to it).
+Everything in this file runs from this `backend/` directory against a
+Postgres database, except the frontend (`../frontend`) and the scheduler
+script (`../scripts/schedule-tasks.ps1`), covered in §11 and the root
+`../README.md`.
+
+Design specs: `../docs/superpowers/specs/2026-09-03-yc-auto-apply-design.md`
+(Phase 1, §1–10 below) and
+`../docs/superpowers/specs/2026-09-13-yc-auto-apply-phase-2-design.md`
+(Phase 2, §11 below). Section numbers in §1–10 refer to the Phase 1 spec;
+section numbers in §11 refer to the Phase 2 spec.
 
 ## 1. Prerequisites
 
@@ -28,7 +36,20 @@ Design spec: `../docs/superpowers/specs/2026-09-03-yc-auto-apply-design.md`
 ```bash
 cd backend
 python -m venv .venv
-.venv/Scripts/activate          # Windows; `source .venv/bin/activate` elsewhere
+```
+
+Activate it, then install — pick the line for your shell (do not chain
+these with `&&`; it is a parse error in Windows PowerShell 5.1):
+
+```powershell
+.venv\Scripts\Activate.ps1      # PowerShell
+```
+
+```bash
+source .venv/Scripts/activate   # Git Bash
+```
+
+```bash
 pip install -e ".[dev]"
 ```
 
@@ -79,14 +100,17 @@ reserve-before-send guard (§13, ruling R1).
 
 ```bash
 pytest                      # offline: no env vars, no network, no DB
-pytest -m integration       # 9 DB tests; skipped when DATABASE_URL is not set
+pytest -m integration       # 13 DB tests; skipped unless DATABASE_URL is in the environment (not just .env)
 ```
 
 The offline suite runs against in-memory fakes and covers the domain rules,
 every use case, the CLI wiring and an end-to-end run of the whole chain.
-The integration suite exercises the real repositories and constraints
-against your Postgres (run `alembic upgrade head` first); it has not yet
-been run against a live database on this branch.
+The integration suite exercises the real repositories, constraints and the
+job runner's own-session commits against your Postgres (run `alembic
+upgrade head` first). The test suite ignores `backend/.env` on purpose, so
+opt in with the variable set for that one command, e.g.
+`DATABASE_URL=postgresql+psycopg://yc:yc@localhost:5433/ycautoapply pytest -m integration`
+(PowerShell: `$env:DATABASE_URL = "..."; pytest -m integration`).
 
 ## 6. The chain, in order
 
@@ -155,30 +179,186 @@ It is composed at send time under the signature and shown in `review`.
 **Sign off on (or change) this wording before the first real `send`**
 (ruling R-B / FR-6).
 
-## 10. Phase 2 debt
+## 10. Phase 1 status (superseded by §12)
 
-Recorded here rather than removed (ruling FR-4). None of it affects a
-Phase 1 run.
+This section originally listed Phase 1 debt deferred to Phase 2 (ruling
+FR-4). Phase 2 is now implemented; §12 replaces the list below with the
+current done/open split for the whole project. Kept for history: none of
+it affected a Phase 1 run, and the two schema items it named
+(`companies.last_synced_at`, `founders.scraped_at`) were populated by the
+Phase 1 final fix wave before Phase 2 began.
 
-- Unused §7 columns, present in the schema but never written:
-  `companies.regions`, `companies.all_locations`, `companies.stage`,
-  `job_postings.role_specific_type`, `salary_range`, `skills`, `raw`,
+## 11. Phase 2
+
+Phase 2 adds a FastAPI app (`app/api/`) and a Vite/React frontend
+(`../frontend`) over the same domain and application layers the CLI uses
+— no logic is duplicated between them (spec §3, D20). Everything below
+runs alongside the CLI; nothing in §1–10 changed behaviour.
+
+### Jobs API
+
+Every long-running stage — `sync`, `scrape`, `resolve`, `draft`,
+`poll-replies`, `classify-replies`, `schedule-follow-ups`, `send` — runs
+as a background job on its own thread and its own DB session, tracked in
+the `jobs` table (`queued|running|succeeded|failed`). `POST
+/api/jobs/{kind}` starts one and returns its id; a second `POST` for a
+kind already running returns **409** with the running job's id, backed by
+a partial unique index (`uq_jobs_kind_active`), not a disabled button.
+`GET /api/jobs` is what the Pipeline screen polls (every 2s, only while a
+job is running) to show live progress. A job that fails records the
+**exception type name only** — never the message, which can carry a
+secret — and a job left `running` when the API restarts is marked
+`failed: interrupted` on the next boot, freeing its kind immediately.
+
+`created_by` on each job row is `"ui"` (the default, a bare `POST` with
+no body), `"schedule"` (§ below), or `"cli"` (reserved). See §7 of the
+Phase 2 spec for the full route table.
+
+On `GEMINI_TIER=free`, the `draft` and `classify-replies` jobs refuse to
+start — the UI has no `--allow-free-tier` equivalent (unlike the CLI's
+`draft` command, see §3), so both jobs fail immediately and the job row
+shows `failed: RuntimeError` with no further detail (the exception
+message, not shown, names which job refused). Set `GEMINI_TIER=paid` or
+`LLM_PROVIDER=sarvam` before using either job from the UI.
+
+### Reply loop
+
+`poll-replies` uses Gmail's History API to fetch everything since the
+last poll in one call (`gmail_credentials.last_history_id`), matches
+inbound messages to our own threads by `gmail_thread_id`, and marks a
+message from `mailer-daemon@`/`postmaster@` as a bounce (outreach state
+`BOUNCED`, no classification, no follow-up). `classify-replies` sends
+each remaining inbound message through the LLM configured by
+`LLM_PROVIDER` for a structured label:
+
+```
+INTERESTED | REJECTED | REFERRAL | AUTO_REPLY | OUT_OF_OFFICE | UNCLEAR
+```
+
+`INTERESTED`/`REJECTED`/`REFERRAL`/`UNCLEAR` move the outreach to
+`REPLIED` and cancel any pending follow-up. `AUTO_REPLY`/`OUT_OF_OFFICE`
+are recorded and change nothing — an autoresponder can never end an
+outreach on its own. Every label is shown with its one-line rationale and
+is correctable in the UI in one click (`POST /api/messages/{id}/label`);
+correcting a machine label back to a human one (or vice versa) re-applies
+the same transition rules, including restoring a cancelled follow-up.
+Replying itself is out of scope — the Thread screen links to the Gmail
+thread and you answer there.
+
+### Follow-ups
+
+`schedule-follow-ups` finds `SENT` outreach rows whose `next_action_at`
+has passed and `sequence_step < 2`, advances the step, and returns them
+to `READY_TO_DRAFT` for the same drafter and the same approval queue used
+for the first email. Step 1 fires 5 days after the previous send, step 2
+after 12 (read from the `settings` table, live — changing the interval
+affects pending rows immediately, not just future ones). After step 2
+with no reply, the row closes (`CLOSED`). A follow-up draft carries the
+full thread history, must be shorter than the message before it
+(~60 words at step 1, ~40 at step 2), and is rejected by the validator if
+it restates the earlier email instead of continuing it. Nothing
+auto-sends at any step — the human approval gate is unchanged.
+
+### Critic
+
+A second LLM call (`app/application/critique_draft.py`) reviews every draft
+after it passes the deterministic validator and returns a verdict
+(`PASS` / `NEEDS_REVISION`) plus up to three one-line concerns, shown in
+the Review Queue as a small dismissible note. It is advisory only — it
+can never block a send (D22) — and a crashed or misconfigured critic
+records `critic_verdict = "ERROR"` (never a fabricated `PASS`, never a
+silent `NULL`) and drafting proceeds without it.
+
+### Scheduled trigger (spec A1)
+
+Reply polling and follow-up scheduling must happen with the browser
+closed. `../scripts/schedule-tasks.ps1` registers two Windows Scheduled
+Tasks, under your own user account, that `curl.exe`-POST the exact same
+`/api/jobs/poll-replies` and `/api/jobs/schedule-follow-ups` endpoints the
+UI's buttons call, with `created_by: "schedule"` — one code path per
+stage regardless of who or what started it. See the script's own header
+comment and the root `../README.md` quickstart for setup and what happens
+if the API isn't running when a trigger fires (nothing — it fails
+silently and the next trigger tries again).
+
+### Frontend — the five screens
+
+`../frontend`, Vite + React + TanStack Query, dense hand-written CSS
+(spec §8: "a tool for reading 270 emails, not a marketing dashboard").
+
+| Screen | Route | Purpose |
+|---|---|---|
+| Pipeline | `/` | Funnel counts by state, job buttons with live progress, quota banners |
+| Review Queue | `/queue` | The primary workspace — approve/edit/redraft/reject/skip a draft against its cited source, keyboard-first (`a e d r s`, `j/k`) with visible buttons alongside |
+| Contacts | `/contacts` | All companies/founders, filterable; the hiring filter is a view control, never a pipeline gate |
+| Thread | `/thread/:id` | Per-outreach timeline — every outbound message, every reply with its label and rationale, a correction control, a Gmail deep link |
+| Manual email | `/manual` | `NEEDS_MANUAL_EMAIL` founders — candidates tried, verdicts, set an address or give up |
+
+### Gmail scope (spec A2)
+
+`gmail-auth` now requests both `gmail.send` and `gmail.readonly` (Phase 2
+needs the read scope to poll replies). It does not check what scopes an
+existing token has — it always runs Google's consent flow and replaces
+the stored token. If your stored token predates Phase 2, re-run it once,
+same command as before: `python -m app.cli gmail-auth`.
+
+### Auth (spec A3)
+
+The API has no login and binds to `127.0.0.1` only. This is deliberate,
+not a gap — see the root `../README.md` for why, and do not put it behind
+a tunnel or reverse proxy.
+
+## 12. Status: done vs still open
+
+**Done** (Phase 1 + Phase 2, both implemented and offline-tested):
+
+- The full CLI pipeline (§1–9): sync, scrape, resolve, draft, review,
+  send, plus `gmail-auth` requesting both scopes.
+- The Jobs API, all seven stage kinds, crash recovery, the 409
+  double-start guard, `created_by` tracking (§11).
+- Reply polling (History API + `newer_than:14d` fallback), bounce
+  detection, reply classification, one-click label correction with
+  transition rules, follow-up scheduling through `CLOSED` (§11).
+- The voice critic, advisory-only, with the `ERROR` verdict for a
+  crashed/misconfigured provider (§11).
+- All five frontend screens, keyboard-driven review queue with parity
+  buttons, optimistic updates (§11).
+- The scheduled trigger (`scripts/schedule-tasks.ps1`) for unattended
+  polling and follow-ups (§11, spec A1).
+- `companies.last_synced_at` and `founders.scraped_at` are populated.
+
+**Deliberately out of scope** (spec §11 — not bugs, not planned):
+
+- Replying to founders from inside the app — the Thread screen links to
+  Gmail; you answer there.
+- Job cancellation — jobs are minutes long and commit incrementally, so
+  killing the API loses nothing already paid for.
+- Multi-user, authentication, or hosting beyond `127.0.0.1`.
+- The seven-worker-process architecture Phase 1 originally specified
+  (D20) — one laptop, one process, is enough.
+- Bounce *parsing* beyond sender detection (soft vs. hard).
+
+**Still genuinely unused** (present in the schema, no caller — carried
+forward from Phase 1, unaffected by Phase 2):
+
+- `companies.regions`, `companies.all_locations`, `companies.stage`,
+  `job_postings.role_specific_type`/`salary_range`/`skills`/`raw`,
   `company_news.raw`, `outreach.attempts`, `outreach.locked_at`.
-  (`companies.last_synced_at` and `founders.scraped_at` are populated since
-  the final fix wave.)
-- The `settings` table (`send_window_*`, `followup_day_*`) is never read:
-  there is no send window, and `followup_day_1` is a constant in
-  `send_approved.py`.
-- `OutreachRepo.list_by_state` / `MessageRepo.list_by_state` have no Phase 1
-  caller; `EmailVerifier.remaining_quota` is never called.
-- Follow-ups (steps 1–2), reply detection, bounce handling (`BOUNCED`),
-  the transient-retry `attempts > 5 → FAILED` path and the stale
-  `locked_at` reclaim (§13) are not implemented.
-- The voice critic (D22), style references from previously edited messages
-  (§8-6), the ETag cache and the persisted parse-failure retry flag in
-  `scrape` (§8-2) are not implemented.
-- The dashboard (§16) and worker loops (§17) do not exist; the CLI is the
-  only interface.
+- `OutreachRepo.list_by_state` / `MessageRepo.list_by_state`;
+  `EmailVerifier.remaining_quota`.
+- The transient-retry `attempts > 5 → FAILED` path and the stale
+  `locked_at` reclaim (§13 of the Phase 1 spec) — Phase 2's job model
+  (own session, per-unit commits, startup recovery) covers the same
+  crash-safety need for jobs; these two Phase 1-specific mechanisms were
+  never built.
+- Style references from previously edited messages (Phase 1 spec §8-6)
+  and the ETag cache / persisted parse-failure retry flag in `scrape`
+  (Phase 1 spec §8-2).
 - Validator gaps accepted in review: sentence splitting on abbreviations,
   an emoji range that is not exhaustive, and the subject all-caps rule
   firing only from two capitalised words.
+
+**Not yet done**: Task 20 (end-to-end verification and the final
+whole-suite gate) is the remaining item in the Phase 2 plan — this README
+describes what is implemented and tested offline, not a post-Task-20
+sign-off.

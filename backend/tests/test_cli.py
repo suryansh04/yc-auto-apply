@@ -28,11 +28,18 @@ def env(monkeypatch, tmp_path):
     get_settings.cache_clear()
     calls = []
 
-    def fake_client():
+    def fake_client(*args, **kwargs):
         calls.append(True)
         raise _ClientBuilt()
 
-    monkeypatch.setattr(cli, "_gemini_client", fake_client)
+    # Fix round 2 (ruling T6-6): `_drafter` now delegates to
+    # `app.api.deps.build_drafter`, which builds its own `genai.Client`
+    # rather than going through `cli._gemini_client` - so the interception
+    # point moves to the actual class both `cli._gemini_client` (still
+    # used by `_resume_parser`) and `build_drafter` construct. Patching
+    # `google.genai.Client` itself catches either caller, same as
+    # patching `cli._gemini_client` did before the extraction.
+    monkeypatch.setattr("google.genai.Client", fake_client)
     yield calls
     get_settings.cache_clear()
 
@@ -224,6 +231,34 @@ def test_gmail_auth_does_not_need_the_resume_or_signature(monkeypatch, tmp_path,
     result = runner.invoke(cli.app, ["gmail-auth"])
     assert "refusing" not in result.output
     assert isinstance(result.exception, _FlowStarted)
+
+
+def test_gmail_auth_requests_both_send_and_readonly_scopes(monkeypatch, tmp_path, send_env):
+    """Task 7 (spec §5) fix round 1: `gmail-auth` must widen its scope so
+    `GmailReader` can poll replies - a send-only token cannot read mail
+    (Google enforces scopes on the token itself). Pins the exact scope
+    list `cli.gmail_auth` passes to `InstalledAppFlow`, so a future edit
+    that silently drops `gmail.readonly` fails loudly here instead of only
+    as a confusing permission error against a live account."""
+    import google_auth_oauthlib.flow as flow_module
+
+    _complete_send_config(monkeypatch, tmp_path)
+    get_settings.cache_clear()
+
+    requested_scopes = []
+
+    class _Flow:
+        @staticmethod
+        def from_client_secrets_file(path, scopes):
+            requested_scopes.extend(scopes)
+            raise _FlowStarted()
+
+    monkeypatch.setattr(flow_module, "InstalledAppFlow", _Flow)
+    runner.invoke(cli.app, ["gmail-auth"])
+
+    assert requested_scopes == cli.GMAIL_SCOPES
+    assert "https://www.googleapis.com/auth/gmail.send" in requested_scopes
+    assert "https://www.googleapis.com/auth/gmail.readonly" in requested_scopes
 
 
 # --- Fix round 1 (F1): `--to-self` routing. The reviewer's mutant "route

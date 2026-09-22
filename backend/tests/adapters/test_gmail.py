@@ -275,3 +275,60 @@ def test_no_secret_reaches_any_log_record(resume, caplog):
 def test_secrets_are_not_in_repr():
     s = make_sender()
     assert REFRESH_TOKEN not in repr(s) and CLIENT_SECRET not in repr(s)
+
+
+# --- Final fix wave (F2): a dead credential is the `GmailAuthRequired` subtype
+
+
+def test_an_invalid_grant_on_refresh_is_gmail_auth_required(resume):
+    """`invalid_grant` (refresh token revoked/expired) is not something a
+    retry can cure - the operator must re-run `gmail-auth`. The shared
+    exchange raises the `GmailAuthRequired` SUBTYPE so a caller that
+    wants to tell that apart from a transient failure (`PollReplies`,
+    then the job runner, then the Pipeline banner) can - while every
+    existing `except GmailError` still catches it. Message discipline is
+    unchanged: code and status only, never a secret or the body."""
+    from app.ports import GmailAuthRequired
+
+    with respx.mock(assert_all_called=False) as router:
+        router.post(TOKEN_URL).mock(return_value=httpx.Response(
+            400, json={"error": "invalid_grant", "error_description": "Token has been expired or revoked."}))
+        router.post(SEND_URL).mock(return_value=send_ok())
+        with pytest.raises(GmailAuthRequired) as exc:
+            make_sender().send("a@b.com", "s", BODY, str(resume))
+    text = str(exc.value)
+    assert isinstance(exc.value, GmailError)
+    assert exc.value.status == 400 and exc.value.reason == "invalid_grant"
+    assert REFRESH_TOKEN not in text and CLIENT_SECRET not in text
+    assert "Token has been expired" not in text
+
+
+@pytest.mark.parametrize("status, body", [
+    (401, {"error": "unauthorized_client"}),
+    (400, {"error": "invalid_client"}),
+])
+def test_a_401_or_invalid_client_on_refresh_is_gmail_auth_required(resume, status, body):
+    from app.ports import GmailAuthRequired
+
+    with respx.mock(assert_all_called=False) as router:
+        router.post(TOKEN_URL).mock(return_value=httpx.Response(status, json=body))
+        router.post(SEND_URL).mock(return_value=send_ok())
+        with pytest.raises(GmailAuthRequired):
+            make_sender().send("a@b.com", "s", BODY, str(resume))
+
+
+def test_a_transient_refresh_failure_is_a_plain_gmail_error_not_auth_required(resume):
+    """The boundary of F2: a 500 / `temporarily_unavailable` from the
+    token endpoint is exactly the kind of failure the next scheduled
+    poll SHOULD retry, so it must stay a plain `GmailError` - widening
+    `GmailAuthRequired` to every refresh failure would fail the poll job
+    on a Google blip and tell the operator to re-auth for nothing."""
+    from app.ports import GmailAuthRequired
+
+    with respx.mock(assert_all_called=False) as router:
+        router.post(TOKEN_URL).mock(return_value=httpx.Response(
+            503, json={"error": "temporarily_unavailable"}))
+        router.post(SEND_URL).mock(return_value=send_ok())
+        with pytest.raises(GmailError) as exc:
+            make_sender().send("a@b.com", "s", BODY, str(resume))
+    assert not isinstance(exc.value, GmailAuthRequired)

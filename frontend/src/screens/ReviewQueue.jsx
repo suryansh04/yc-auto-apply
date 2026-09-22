@@ -36,7 +36,7 @@ import {
   useReject,
 } from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
-import { RefreshCw } from 'lucide-react'
+import { Lightbulb, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -370,6 +370,7 @@ export default function ReviewQueue() {
   const progress = Math.round((position / visibleItems.length) * 100)
   const needsYourParagraph = (current.wire_text ?? '').includes(USER_FIT_MARKER)
   const critic = criticCheck(current.critic_verdict)
+  const showCriticNote = Boolean(current.critic_note) && !dismissedIds.has(current.outreach_id)
   // A fresh re-check wins over the note stored at draft time, but only
   // for the draft it was run on - otherwise moving to the next letter
   // would show it the previous one's verdict.
@@ -377,7 +378,11 @@ export default function ReviewQueue() {
     checkedId === current.outreach_id
       ? checkNotes
       : (current.last_error ? [current.last_error] : [])
-  const showCriticNote = Boolean(current.critic_note) && !dismissedIds.has(current.outreach_id)
+  // The critic's note counts as a suggestion: it is one more thing the
+  // machine noticed, and the panel is tinted when there is anything at
+  // all to read.
+  const hasSuggestions = suggestions.length > 0 || showCriticNote
+  const suggestionCount = suggestions.length + (showCriticNote ? 1 : 0)
 
   return (
     <>
@@ -470,6 +475,96 @@ export default function ReviewQueue() {
             className="grid gap-4 lg:sticky lg:top-4"
             aria-label="Company, source and checks"
           >
+            {/* Operator decision (2026-09-22): these are SUGGESTIONS, not
+                a gate. They used to shout "Needs a fix before approving"
+                in red, which read as a refusal - nothing actually stops
+                the approve, and it is his letter and his name.
+
+                But quiet is not the same as advisory: the first version
+                of this card was so recessive it went unread at the
+                bottom of the docket. It sits FIRST now, and when there
+                is something to say it is tinted amber and carries the
+                count. Amber, not red: red is for the failures elsewhere
+                in this app, and this is the one panel that is neither a
+                failure nor a refusal. With nothing flagged it fades back
+                to an ordinary card, so the colour means "there is
+                something here" rather than being permanent decoration. */}
+            <Card
+              className={
+                hasSuggestions
+                  ? 'border-amber-400/70 bg-amber-50/80 dark:border-amber-500/40 dark:bg-amber-950/25'
+                  : undefined
+              }
+            >
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Lightbulb
+                    className={hasSuggestions ? 'size-4 text-amber-600 dark:text-amber-400' : 'size-4'}
+                  />
+                  AI suggestions
+                  {hasSuggestions && (
+                    <Badge
+                      variant="secondary"
+                      className="bg-amber-200/70 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100"
+                    >
+                      {suggestionCount}
+                    </Badge>
+                  )}
+                </CardTitle>
+                <CardDescription>
+                  What the checks noticed. Advice only &mdash; you can approve anyway.
+                </CardDescription>
+                <CardAction>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={checkDraft.isPending}
+                    onClick={() => checkDraft.mutate({ id: current.outreach_id })}
+                  >
+                    {checkDraft.isPending ? <Spinner /> : <RefreshCw />}
+                    Re-check
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                <Badge variant={critic.variant} className="w-fit">
+                  {critic.label}
+                </Badge>
+
+                {suggestions.length > 0 ? (
+                  <ul className="grid list-disc gap-1.5 pl-4 text-sm font-medium">
+                    {suggestions.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-muted-foreground text-sm">
+                    {checkedId === current.outreach_id
+                      ? 'Nothing flagged on the last check.'
+                      : 'Nothing flagged.'}
+                  </p>
+                )}
+
+                {showCriticNote && (
+                  <div className="grid gap-2 border-l-2 border-amber-400/70 pl-3 dark:border-amber-500/40">
+                    {/* Not muted: this is the second opinion on the
+                        letter, and unreadable advice is the same as no
+                        advice. */}
+                    <p className="text-sm">{current.critic_note}</p>
+                    <Button variant="ghost" size="sm" className="w-fit" onClick={dismissCritic}>
+                      Dismiss
+                    </Button>
+                  </div>
+                )}
+
+                {checkDraft.isError && (
+                  <p className="text-destructive text-xs" role="alert">
+                    Could not re-check: {checkDraft.error.message}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>{current.company_name ?? 'Unknown company'}</CardTitle>
@@ -515,65 +610,6 @@ export default function ReviewQueue() {
               </CardContent>
             </Card>
 
-            {/* Operator decision (2026-09-22): these are SUGGESTIONS, not
-                a gate. They used to shout "Needs a fix before approving"
-                in red, which read as a refusal - but nothing actually
-                stops him approving, and it is his letter and his name.
-                One quiet card, everything the machine noticed in one
-                place, and a button to ask again. */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">AI suggestions</CardTitle>
-                <CardDescription>
-                  What the checks noticed. Advice only &mdash; you can approve anyway.
-                </CardDescription>
-                <CardAction>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={checkDraft.isPending}
-                    onClick={() => checkDraft.mutate({ id: current.outreach_id })}
-                  >
-                    {checkDraft.isPending ? <Spinner /> : <RefreshCw />}
-                    Re-check
-                  </Button>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="grid gap-3">
-                <Badge variant={critic.variant} className="w-fit">
-                  {critic.label}
-                </Badge>
-
-                {suggestions.length > 0 ? (
-                  <ul className="grid list-disc gap-1 pl-4 text-sm">
-                    {suggestions.map((note) => (
-                      <li key={note}>{note}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-muted-foreground text-sm">
-                    {checkedId === current.outreach_id
-                      ? 'Nothing flagged on the last check.'
-                      : 'Nothing flagged.'}
-                  </p>
-                )}
-
-                {showCriticNote && (
-                  <div className="grid gap-2 border-l-2 pl-3">
-                    <p className="text-muted-foreground text-sm">{current.critic_note}</p>
-                    <Button variant="ghost" size="sm" className="w-fit" onClick={dismissCritic}>
-                      Dismiss
-                    </Button>
-                  </div>
-                )}
-
-                {checkDraft.isError && (
-                  <p className="text-destructive text-xs" role="alert">
-                    Could not re-check: {checkDraft.error.message}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
           </aside>
         </div>
       )}

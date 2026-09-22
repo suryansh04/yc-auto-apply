@@ -131,17 +131,29 @@ function App() {
               <SidebarMenuItem>
                 <SidebarMenuButton size="lg" asChild>
                   <NavLink to="/">
-                    {/* The operator's own logo (public/logo.png), trimmed
-                        to the mark and squared off as logo-mark.png - the
-                        original is 1536x1024 with most of it black field,
-                        which in a 32px tile would have been a black
-                        square with a speck in it. */}
-                    <img
-                      src="/logo-mark.png"
-                      alt=""
-                      width={32}
-                      height={32}
-                      className="aspect-square size-8 shrink-0 rounded-lg bg-black object-cover"
+                    {/* The operator's logo (public/logo(2).png), with the
+                        black tile taken off: logo-mark.png is the glyph
+                        alone, as a transparent stencil.
+
+                        It is drawn as a MASK rather than an <img> so the
+                        glyph takes `--sidebar-foreground` - dark on the
+                        light sidebar, light in dark mode - from one file.
+                        A plain white PNG would have been invisible on
+                        the light sidebar, and shipping two tinted copies
+                        means two files to keep in step. */}
+                    <span
+                      aria-hidden="true"
+                      className="bg-sidebar-foreground size-8 shrink-0"
+                      style={{
+                        maskImage: 'url(/logo-mark.png)',
+                        WebkitMaskImage: 'url(/logo-mark.png)',
+                        maskSize: 'contain',
+                        WebkitMaskSize: 'contain',
+                        maskRepeat: 'no-repeat',
+                        WebkitMaskRepeat: 'no-repeat',
+                        maskPosition: 'center',
+                        WebkitMaskPosition: 'center',
+                      }}
                     />
                     <div className="grid flex-1 text-left text-sm leading-tight">
                       <span className="truncate font-medium">Outreach desk</span>

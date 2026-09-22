@@ -3,7 +3,7 @@
 // undecided drafts, so an approved letter fell out of every screen that
 // shows whole letters, which are exactly the ones about to reach a
 // founder.
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -12,12 +12,18 @@ import {
   mockApproved,
   mockEdit,
   mockEditFailure,
+  mockReplaceResume,
+  mockResumeStatus,
   mockSend,
   mockUnapprove,
 } from '../test/mocks'
 import Approved from './Approved'
 
 const render = () => renderWithQuery(<MemoryRouter><Approved /></MemoryRouter>)
+
+// Every test on this screen renders the resume card, so every test needs
+// the endpoint answered (setup.js fails an unhandled request loudly).
+beforeEach(() => mockResumeStatus())
 
 const letter = (over = {}) => ({
   outreach_id: 1,
@@ -182,4 +188,60 @@ it('offers back-to-review even for a letter that cannot be sent', async () => {
   render()
   expect(await screen.findByRole('button', { name: /back to review/i })).toBeEnabled()
   expect(screen.getByRole('button', { name: /^send$/i })).toBeDisabled()
+})
+
+
+// --- the attached resume (operator request 2026-09-22) --------------------
+
+it('names the attached resume and links to it', async () => {
+  mockApproved([letter()])
+  mockResumeStatus({ filename: 'My_Resume.pdf', size_bytes: 164089 })
+  render()
+  expect(await screen.findByText(/My_Resume\.pdf/)).toBeInTheDocument()
+  // A new tab, not a download: the point is to look at it before sending.
+  const view = screen.getByRole('link', { name: /view/i })
+  expect(view).toHaveAttribute('href', '/api/resume')
+  expect(view).toHaveAttribute('target', '_blank')
+})
+
+it('says so when no resume is configured', async () => {
+  mockApproved([letter()])
+  mockResumeStatus({ configured: false, filename: null, size_bytes: null })
+  render()
+  expect(await screen.findByText(/no resume file is configured/i)).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /view/i })).not.toBeInTheDocument()
+})
+
+it('replaces the resume and warns that the claims are still the old ones', async () => {
+  // The consequence nobody would guess: replacing the PDF does not
+  // reparse it, so what the drafter may say is unchanged.
+  mockApproved([letter()])
+  const replace = mockReplaceResume()
+  render()
+  await screen.findByText(/resume\.pdf/i)
+  const input = screen.getByLabelText(/replace the resume/i)
+  await userEvent.upload(input, new File(['%PDF-1.4 x'], 'new.pdf', { type: 'application/pdf' }))
+  await waitFor(() => expect(replace).toHaveBeenCalled())
+  // What is asserted here is that choosing a file posts to the endpoint.
+  // That the BYTES arrive intact is the backend's contract and is pinned
+  // there (test_replacing_the_resume_writes_the_new_bytes) against a real
+  // HTTP client - under jsdom, undici does not serialise a jsdom File
+  // into a readable multipart body, so asserting it here would be
+  // asserting the harness.
+  expect(await screen.findByText(/resume replaced/i)).toBeInTheDocument()
+  expect(screen.getByText(/parse-resume/)).toBeInTheDocument()
+})
+
+it('shows why a rejected upload was rejected', async () => {
+  mockApproved([letter()])
+  mockReplaceResume({ status: 400, detail: 'that is not a PDF' })
+  render()
+  await screen.findByText(/resume\.pdf/i)
+  // Named .pdf so the input's own `accept` filter lets it through -
+  // userEvent honours that, and the point here is the SERVER's refusal.
+  await userEvent.upload(
+    screen.getByLabelText(/replace the resume/i),
+    new File(['PK zip pretending'], 'cv.pdf', { type: 'application/pdf' }),
+  )
+  expect(await screen.findByText(/that is not a PDF/i)).toBeInTheDocument()
 })

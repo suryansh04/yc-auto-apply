@@ -174,6 +174,43 @@ export function useEdit() {
  * review queue. Neither sending it nor discarding it: it leaves the
  * Approved screen and reappears in Review with its text untouched.
  */
+// The resume PDF `send` attaches to every letter. `useResumeStatus` also
+// carries the parsed-claim count, because replacing the file does NOT
+// reparse it and the two can silently disagree.
+export function useResumeStatus() {
+  return useQuery({
+    queryKey: ['resume-status'],
+    queryFn: () => apiGet('/resume/status'),
+    ...QUERY_DEFAULTS,
+  })
+}
+
+/**
+ * POST /api/resume - replace the attached PDF. Multipart, so it does not
+ * go through `apiPost` (which sends JSON); the error shape is the same
+ * `{detail}` FastAPI raises everywhere else.
+ */
+export function useReplaceResume() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (file) => {
+      const form = new FormData()
+      form.append('file', file)
+      const response = await fetch('/api/resume', { method: 'POST', body: form })
+      const data = await response.json().catch(() => ({}))
+      // Same (status, body) shape every other failure in this app has.
+      if (!response.ok) throw new ApiError(response.status, data)
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resume-status'] })
+      // Every preview footer names the attachment.
+      queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
+    },
+  })
+}
+
 export function useUnapprove() {
   const queryClient = useQueryClient()
   return useMutation({

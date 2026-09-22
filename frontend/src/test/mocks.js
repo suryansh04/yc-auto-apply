@@ -467,3 +467,36 @@ export function mockUnapprove() {
   )
   return spy
 }
+
+
+/** GET /api/resume/status - the attached PDF, and how many parsed claims
+ *  the drafter is held to (the two can disagree). */
+export function mockResumeStatus(over = {}) {
+  server.use(
+    http.get('/api/resume/status', () =>
+      HttpResponse.json({
+        configured: true, filename: 'resume.pdf', size_bytes: 164089,
+        modified_at: '2026-09-13T02:23:00Z', claims: 12, ...over,
+      }),
+    ),
+  )
+}
+
+/** POST /api/resume - replace the attached PDF. */
+export function mockReplaceResume({ status = 200, detail = null, ...over } = {}) {
+  const spy = vi.fn()
+  server.use(
+    // The raw multipart body, not `request.formData()`: undici's parser
+    // asserts on jsdom's File objects and throws inside the handler.
+    // The filename and the bytes are both in the raw text anyway.
+    http.post('/api/resume', async ({ request }) => {
+      spy(await request.text())
+      if (status !== 200) return HttpResponse.json({ detail }, { status })
+      return HttpResponse.json({
+        configured: true, filename: 'resume.pdf', size_bytes: 1024,
+        modified_at: '2026-09-22T00:00:00Z', claims: 12, ...over,
+      })
+    }),
+  )
+  return spy
+}

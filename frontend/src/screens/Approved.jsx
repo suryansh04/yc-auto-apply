@@ -12,10 +12,17 @@
 // the review queue to fix one word is busywork; an edit re-stamps the
 // approval onto the new text, because the old one approved words that no
 // longer exist.
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, Pencil, Send, Undo2 } from 'lucide-react'
-import { useApproved, useEdit, useSend, useUnapprove } from '../api/hooks'
+import { ChevronDown, FileText, Pencil, Send, Undo2, Upload } from 'lucide-react'
+import {
+  useApproved,
+  useEdit,
+  useReplaceResume,
+  useResumeStatus,
+  useSend,
+  useUnapprove,
+} from '../api/hooks'
 import { describeSendResult } from './Pipeline'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -106,6 +113,98 @@ function EditLetter({ item, saving, errors, onSave, onCancel }) {
         </Button>
       </CardFooter>
     </>
+  )
+}
+
+// The PDF attached to every letter. It is the one part of an outgoing
+// email nothing in the UI could show - the letter was reviewable down to
+// the byte while the attachment beside it was a filename in a footer.
+//
+// One card, not a control per letter: there is one file and it goes to
+// everybody.
+function ResumeCard() {
+  const status = useResumeStatus()
+  const replace = useReplaceResume()
+  const fileInput = useRef(null)
+  const data = status.data
+
+  function choose(event) {
+    const file = event.target.files?.[0]
+    // Let the same file be picked twice in a row (after a failure, say).
+    event.target.value = ''
+    if (file) replace.mutate(file)
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <FileText className="size-4" />
+          Resume
+        </CardTitle>
+        <CardDescription>
+          {data?.configured
+            ? `${data.filename} · ${Math.round((data.size_bytes ?? 0) / 1024)} KB · attached to every letter below`
+            : 'No resume file is configured, so nothing can be sent.'}
+        </CardDescription>
+        <CardAction className="flex items-center gap-1">
+          {data?.configured && (
+            <Button asChild variant="ghost" size="sm">
+              {/* A new tab, not a download: the point is to look at it. */}
+              <a href="/api/resume" target="_blank" rel="noreferrer">
+                View
+              </a>
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={replace.isPending}
+            onClick={() => fileInput.current?.click()}
+          >
+            {replace.isPending ? <Spinner /> : <Upload />}
+            Replace
+          </Button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/pdf,.pdf"
+            aria-label="Replace the resume"
+            // sr-only rather than hidden: display:none takes it out of
+            // the accessibility tree and out of reach of the keyboard,
+            // leaving the Replace button as the only way in.
+            className="sr-only"
+            onChange={choose}
+          />
+        </CardAction>
+      </CardHeader>
+      {(replace.isError || replace.isSuccess) && (
+        <CardContent>
+          {replace.isError ? (
+            <Alert variant="destructive" role="alert">
+              <AlertTitle>Could not replace the resume</AlertTitle>
+              <AlertDescription>{replace.error.message}</AlertDescription>
+            </Alert>
+          ) : (
+            <Alert>
+              <AlertTitle>Resume replaced</AlertTitle>
+              <AlertDescription>
+                {/* The consequence nobody would guess: the claims the
+                    drafter is held to come from `parse-resume`, not from
+                    this file. Letting them drift apart silently would be
+                    worse than either. */}
+                Every letter from now on carries the new file. The {data?.claims ?? 0} claims the
+                drafter is held to still come from the old one &mdash; run{' '}
+                <code className="bg-muted rounded px-1 py-0.5 font-mono text-xs">
+                  python -m app.cli parse-resume
+                </code>{' '}
+                to re-read it.
+              </AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      )}
+    </Card>
   )
 }
 
@@ -333,6 +432,10 @@ export default function Approved() {
           <AlertDescription>{sendAll.error.message}</AlertDescription>
         </Alert>
       )}
+
+      <div className="max-w-3xl">
+        <ResumeCard />
+      </div>
 
       {blockedCount > 0 && (
         <Badge variant="outline" className="w-fit">

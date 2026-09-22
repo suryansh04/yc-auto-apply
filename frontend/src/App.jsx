@@ -4,6 +4,7 @@ import {
   Inbox,
   LayoutDashboard,
   MailQuestion,
+  FileUser,
   SendHorizontal,
   Users,
 } from 'lucide-react'
@@ -13,6 +14,7 @@ import Contacts from './screens/Contacts'
 import Thread from './screens/Thread'
 import ManualEmail from './screens/ManualEmail'
 import Approved from './screens/Approved'
+import Resume from './screens/Resume'
 import ConnectGmail from './screens/ConnectGmail'
 import { useGmailStatus } from './api/hooks'
 import {
@@ -61,6 +63,7 @@ const NAV = [
   { to: '/approved', label: 'Approved', icon: SendHorizontal },
   { to: '/contacts', label: 'Founders', icon: Users },
   { to: '/manual', label: 'Missing addresses', icon: MailQuestion },
+  { to: '/resume', label: 'My resume', icon: FileUser },
 ]
 
 // The heading shown in the bar beside the sidebar trigger. Derived from
@@ -72,6 +75,7 @@ const TITLES = {
   '/approved': 'Approved',
   '/contacts': 'Founders',
   '/manual': 'Missing addresses',
+  '/resume': 'My resume',
 }
 
 function currentTitle(pathname) {
@@ -241,6 +245,7 @@ function GatedRoutes({ gmail, outcome }) {
       <Route path="/contacts" element={<Contacts />} />
       <Route path="/thread/:id" element={<Thread />} />
       <Route path="/manual" element={<ManualEmail />} />
+      <Route path="/resume" element={<Resume />} />
     </Routes>
   )
 }

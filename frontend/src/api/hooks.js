@@ -162,6 +162,9 @@ export function useEdit() {
     onSuccess: (_data, { id }) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] })
       queryClient.invalidateQueries({ queryKey: ['queue', id] })
+      // An approved letter is editable too (2026-09-22), so the Approved
+      // screen's copy of the text is stale after a save.
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
     },
   })
 }
@@ -218,7 +221,16 @@ export function useSetEmail() {
 export function useSend() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (limit) => apiPost('/send', limit != null ? { limit } : undefined),
+    // `mutate()` sends everything approved; `mutate({ outreachId })` sends
+    // exactly one. `limit` caps a batch run, as the CLI's --limit does.
+    mutationFn: (vars) => {
+      if (vars == null) return apiPost('/send', undefined)
+      if (typeof vars === 'number') return apiPost('/send', { limit: vars })
+      const body = {}
+      if (vars.limit != null) body.limit = vars.limit
+      if (vars.outreachId != null) body.outreach_id = vars.outreachId
+      return apiPost('/send', Object.keys(body).length ? body : undefined)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stats'] })
       queryClient.invalidateQueries({ queryKey: ['queue'] })

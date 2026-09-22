@@ -266,10 +266,43 @@ def test_edit_without_a_source_still_applies_style_and_claims_rules(repos, no_ma
     assert repos.message.get_outbound(no_material_pending.id, 0) is None
 
 
-def test_edit_is_refused_outside_pending_approval(repos, one_approved):
-    with pytest.raises(ValueError, match="PENDING_APPROVAL"):
+def test_edit_is_refused_in_a_state_that_has_no_draft_to_change(repos, one_approved):
+    repos.outreach.get(one_approved.id).state = S.SENT
+    with pytest.raises(ValueError, match="PENDING_APPROVAL or APPROVED"):
+        ReviewOutreach(repos).edit(one_approved.id, PENDING_SUBJECT, PENDING_BODY, now=NOW)
+
+
+def test_an_approved_letter_can_be_edited_and_keeps_its_approval(repos, one_approved):
+    """Operator request (2026-09-22): waiting to send is exactly when a
+    typo gets noticed, and bouncing the letter back through the review
+    queue to fix one word is busywork. The edit IS the approval of the new
+    text, so the stamp moves to it."""
+    new_body = PENDING_BODY.replace("Would you take an intern?", "Could you use an intern?")
+    assert ReviewOutreach(repos).edit(one_approved.id, PENDING_SUBJECT, new_body, now=NOW) == []
+    row = repos.message.get_outbound(one_approved.id, 0)
+    assert (row.body, row.edited_by_user) == (new_body, True)
+    # Still approved, and approved AT THE EDIT - the old stamp approved
+    # words that no longer exist.
+    assert repos.outreach.get(one_approved.id).state == S.APPROVED
+    assert row.approved_at == NOW
+
+
+def test_editing_an_approved_letter_without_a_clock_is_refused(repos, one_approved):
+    """There is no sensible third behaviour: keeping the old stamp would
+    send text nobody approved, and clearing it would strand the row in
+    APPROVED with nothing `reserve_for_send` can act on."""
+    with pytest.raises(ValueError, match="clock"):
         ReviewOutreach(repos).edit(one_approved.id, PENDING_SUBJECT, PENDING_BODY)
     assert repos.message.get_outbound(one_approved.id, 0).edited_by_user is False
+
+
+def test_an_edit_that_fails_validation_leaves_an_approved_letter_untouched(repos, one_approved):
+    before = repos.message.get_outbound(one_approved.id, 0)
+    approved_at, body = before.approved_at, before.body
+    assert ReviewOutreach(repos).edit(one_approved.id, PENDING_SUBJECT, SENIORITY_BODY, now=NOW)
+    row = repos.message.get_outbound(one_approved.id, 0)
+    assert (row.body, row.approved_at) == (body, approved_at)
+    assert repos.outreach.get(one_approved.id).state == S.APPROVED
 
 
 def test_edit_refuses_without_resume_claims(repos, one_pending):

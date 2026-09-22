@@ -463,3 +463,37 @@ def test_the_same_draft_sends_once_the_paragraph_is_filled_in(repos, one_approve
     result = SendApproved(s, FrozenClock(), repos).run(cap=10)
     assert len(s.sent) == 1
     assert result.errors == 0
+
+
+def test_only_outreach_id_sends_exactly_that_letter(repos, one_approved):
+    """Operator request (2026-09-22): a Send button per letter on the
+    Approved screen. It is a filter - every other rule still applies."""
+    s = FakeSender()
+    result = SendApproved(s, FrozenClock(), repos).run(cap=10, only_outreach_id=one_approved.id)
+    assert result.sent == 1
+    assert len(s.sent) == 1
+    assert _outbound(repos, one_approved).sent_at is not None
+
+
+def test_only_outreach_id_leaves_the_other_approved_letters_alone(repos, five_approved):
+    target = five_approved[2]
+    s = FakeSender()
+    result = SendApproved(s, FrozenClock(), repos).run(cap=10, only_outreach_id=target.id)
+    assert result.sent == 1 and len(s.sent) == 1
+    for other in five_approved:
+        if other.id == target.id:
+            continue
+        assert _outbound(repos, other).sent_at is None
+        assert repos.outreach.get(other.id).state == "approved"
+
+
+def test_only_outreach_id_still_obeys_the_placeholder_guard(repos, one_approved):
+    """Targeting one letter is not a way round the rules: a body with the
+    fill-in-yourself paragraph still does not go."""
+    from app.domain.letter import USER_FIT_STUB
+
+    row = _outbound(repos, one_approved)
+    row.body = f"{row.body}\n\n{USER_FIT_STUB}"
+    s = FakeSender()
+    result = SendApproved(s, FrozenClock(), repos).run(cap=10, only_outreach_id=one_approved.id)
+    assert s.sent == [] and result.errors == 1

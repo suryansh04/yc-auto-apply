@@ -236,10 +236,37 @@ class ReviewOutreach:
                               self._previous_body(outreach, step),
                               all_publications=sources.publications)
 
-    def edit(self, outreach_id: int, subject: str, body: str) -> list[str]:
+    _EDITABLE = (OutreachState.PENDING_APPROVAL, OutreachState.APPROVED)
+
+    def edit(self, outreach_id: int, subject: str, body: str,
+             now: datetime | None = None) -> list[str]:
+        """Replace a draft's text.
+
+        Operator request (2026-09-22): an APPROVED letter is editable too,
+        from the Approved screen. Waiting to send is exactly when a typo
+        gets noticed, and bouncing it back through the review queue to fix
+        one word is busywork.
+
+        An edit is still never an approval. For a PENDING_APPROVAL row
+        `approved_at` is cleared, as before. For an APPROVED one it is
+        re-stamped with `now`: the operator is looking at the letter on
+        the send screen and changing it deliberately, so that edit IS the
+        approval of the new text - but the stamp must move, because the
+        old one approved words that no longer exist. Editing an APPROVED
+        row therefore REQUIRES a clock: there is no sensible third
+        behaviour (leaving the old stamp would send text nobody approved,
+        and clearing it would leave the row APPROVED with nothing
+        `reserve_for_send` can act on - and the state machine has no edge
+        back to PENDING_APPROVAL).
+        """
         outreach = self._outreach(outreach_id)
-        if OutreachState(outreach.state) is not OutreachState.PENDING_APPROVAL:
-            raise ValueError(f"only a PENDING_APPROVAL draft can be edited (this one is {outreach.state})")
+        state = OutreachState(outreach.state)
+        if state not in self._EDITABLE:
+            raise ValueError(
+                f"only a PENDING_APPROVAL or APPROVED draft can be edited (this one is {outreach.state})"
+            )
+        if state is OutreachState.APPROVED and now is None:
+            raise ValueError("editing an approved letter needs a clock: the approval is re-stamped")
         founder = self._repos.founder.get(outreach.founder_id)
         company = self._repos.company.get(founder.company_id) if founder is not None else None
         if founder is None or company is None:
@@ -266,9 +293,10 @@ class ReviewOutreach:
         if errors:
             return errors
 
+        approved_at = now if state is OutreachState.APPROVED else None
         fields = dict(
             outreach_id=outreach.id, sequence_step=step, direction="outbound",
-            subject=subject, body=body, edited_by_user=True, approved_at=None,
+            subject=subject, body=body, edited_by_user=True, approved_at=approved_at,
         )
         if row is not None:
             fields["id"] = row.id

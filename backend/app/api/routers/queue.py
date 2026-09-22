@@ -193,7 +193,10 @@ def redraft(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
 @router.post("/outreach/{outreach_id}/edit")
 def edit(outreach_id: int, payload: EditIn, repos: Repos = Depends(get_repos)):
     try:
-        errors = _use_case(repos).edit(outreach_id, payload.subject, payload.body)
+        # The clock matters only for an APPROVED letter, whose approval
+        # is re-stamped onto the text the operator just wrote.
+        errors = _use_case(repos).edit(outreach_id, payload.subject, payload.body,
+                                       now=_UTCClock().now())
     except OutreachNotFound:
         raise HTTPException(404, "no such outreach")
     except (ValueError, IllegalTransition) as exc:

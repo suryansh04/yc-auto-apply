@@ -43,7 +43,9 @@ const cases = [
     hook: useEdit,
     mock: () => http.post('/api/outreach/1/edit', () => HttpResponse.json({ ok: true })),
     variables: { id: 1, subject: 's', body: 'b' },
-    expectedKeys: [['queue'], ['queue', 1]],
+    // ['approved'] since 2026-09-22: an APPROVED letter is editable
+    // from the Approved screen, so that list holds stale text after a save.
+    expectedKeys: [['queue'], ['queue', 1], ['approved']],
   },
   {
     name: 'useReject',

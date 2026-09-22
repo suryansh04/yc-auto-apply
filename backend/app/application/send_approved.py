@@ -170,7 +170,17 @@ class SendApproved:
         configured = getattr(settings_row, "followup_day_2", None)
         return configured if configured is not None else self._followup_day_2
 
-    def run(self, cap: int, limit: int | None = None) -> SendResult:
+    def run(self, cap: int, limit: int | None = None,
+            only_outreach_id: int | None = None) -> SendResult:
+        """Send the approved letters, newest rules first.
+
+        `only_outreach_id` narrows the run to one letter (operator
+        request, 2026-09-22: a Send button per letter on the Approved
+        screen). It is a filter and nothing else - the cap, the
+        reservation, the approved_at check and the placeholder guard all
+        still apply, so sending one letter cannot do anything sending the
+        batch could not.
+        """
         result = SendResult()
         now = self._clock.now()
         # Ruling R-A (fix round 1): a ROLLING 24-hour window, not a calendar
@@ -183,6 +193,8 @@ class SendApproved:
         for founder in self._repos.founder.list_by_state(state=OutreachState.APPROVED):
             outreach = self._repos.outreach.get_by_founder_id(founder.id)
             if outreach is None:
+                continue
+            if only_outreach_id is not None and outreach.id != only_outreach_id:
                 continue
             # Sending from anything but APPROVED is impossible: checked
             # before the cap, before the reservation, before the sender.

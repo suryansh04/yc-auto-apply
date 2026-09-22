@@ -107,7 +107,8 @@ def send(payload: SendIn, repos: Repos = Depends(get_repos)) -> SendResultOut:
     use_case = SendApproved(sender, _UTCClock(), _send_repos(repos),
                             signature=signature, attachment_path=attachment_path)
     try:
-        result = use_case.run(cap=cap, limit=payload.limit)
+        result = use_case.run(cap=cap, limit=payload.limit,
+                              only_outreach_id=payload.outreach_id)
     finally:
         if owns_sender:
             sender.close()

@@ -161,9 +161,14 @@ class ManualEmailIn(BaseModel):
 
 class SendIn(BaseModel):
     """Body of `POST /api/send`: `limit` caps this one run on top of the
-    rolling 24h `daily_send_cap`, same as the CLI's `--limit`."""
+    rolling 24h `daily_send_cap`, same as the CLI's `--limit`.
+
+    `outreach_id` narrows the run to one letter (the per-letter Send on
+    the Approved screen). Every other rule still applies - it is a
+    filter, not a bypass."""
 
     limit: int | None = None
+    outreach_id: int | None = None
 
 
 class SendResultOut(BaseModel):

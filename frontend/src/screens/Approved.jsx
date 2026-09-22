@@ -7,14 +7,15 @@
 // This is the last place anything can be caught, so it shows the composed
 // wire text (ruling R2: byte-for-byte what is sent), not a summary row.
 //
-// Sending is deliberately one button for the whole batch, not one per
-// letter: `POST /api/send` sends what is approved, up to the daily cap,
-// and inventing a per-letter send here would mean a second way to send
-// that the backend does not actually have.
+// Each letter can be edited here and sent on its own. Waiting to send is
+// exactly when a typo gets noticed, and bouncing the letter back through
+// the review queue to fix one word is busywork; an edit re-stamps the
+// approval onto the new text, because the old one approved words that no
+// longer exist.
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, Send } from 'lucide-react'
-import { useApproved, useSend } from '../api/hooks'
+import { ChevronDown, Pencil, Send } from 'lucide-react'
+import { useApproved, useEdit, useSend } from '../api/hooks'
 import { describeSendResult } from './Pipeline'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -24,6 +25,7 @@ import {
   CardAction,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
@@ -33,56 +35,205 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
+import { Textarea } from '@/components/ui/textarea'
 
 // app/domain/letter.py's USER_FIT_MARKER. A letter still carrying it
 // cannot be sent (`send_approved` refuses), so saying so here is the
 // difference between "nothing happened" and "this one needs a minute".
 const USER_FIT_MARKER = '>>> YOUR TURN'
 
+function blocked(item) {
+  return (item.wire_text ?? '').includes(USER_FIT_MARKER)
+}
+
+// The editor, seeded once from the stored draft. `errors` changing never
+// resets it: a 422 from the validator must not wipe out what was typed.
+function EditLetter({ item, saving, errors, onSave, onCancel }) {
+  const [subject, setSubject] = useState(item.subject ?? '')
+  const [body, setBody] = useState(item.body ?? '')
+
+  return (
+    <>
+      <Separator />
+      <CardContent className="grid gap-4 pt-6">
+        {errors.length > 0 && (
+          <Alert variant="destructive" role="alert">
+            <AlertTitle>This edit was not saved</AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc pl-4">
+                {errors.map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+        <div className="grid gap-2">
+          <Label htmlFor={`subject-${item.outreach_id}`}>Subject</Label>
+          <Input
+            id={`subject-${item.outreach_id}`}
+            aria-label="Subject"
+            value={subject}
+            onChange={(event) => setSubject(event.target.value)}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`body-${item.outreach_id}`}>Body</Label>
+          {/* The body, not the wire text: the greeting, signature and
+              opt-out line are added at send time and are not editable
+              here - editing them would change every letter. */}
+          <Textarea
+            id={`body-${item.outreach_id}`}
+            aria-label="Body"
+            rows={16}
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+          />
+        </div>
+      </CardContent>
+      <CardFooter className="gap-2">
+        <Button disabled={saving} onClick={() => onSave(subject, body)}>
+          {saving ? <Spinner /> : null}
+          Save
+        </Button>
+        <Button variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </CardFooter>
+    </>
+  )
+}
+
 function ApprovedLetter({ item, defaultOpen }) {
-  const needsYourParagraph = (item.wire_text ?? '').includes(USER_FIT_MARKER)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editErrors, setEditErrors] = useState([])
+  const [sent, setSent] = useState(null)
+  const edit = useEdit()
+  const send = useSend()
+  const needsYourParagraph = blocked(item)
+
+  function save(subject, body) {
+    edit.mutate(
+      { id: item.outreach_id, subject, body },
+      {
+        onSuccess: () => {
+          setIsEditing(false)
+          setEditErrors([])
+        },
+        // 422 carries the validator's own messages, verbatim. Nothing was
+        // persisted and the editor keeps what was typed.
+        onError: (err) => setEditErrors(err.errors ?? [err.message]),
+      },
+    )
+  }
+
+  function sendThisOne() {
+    const ok = window.confirm(
+      `Send this letter to ${item.to}? This cannot be undone.`,
+    )
+    if (!ok) return
+    send.mutate(
+      { outreachId: item.outreach_id },
+      { onSuccess: (data) => setSent(data) },
+    )
+  }
+
   return (
     <Card>
-      <Collapsible defaultOpen={defaultOpen}>
+      <Collapsible defaultOpen={defaultOpen} open={isEditing ? true : undefined}>
         <CardHeader>
           <CardDescription>
             {item.company_name ?? 'Unknown company'} &middot; {item.to ?? 'no address'}
           </CardDescription>
           <CardTitle className="text-base">{item.subject ?? '(no subject)'}</CardTitle>
-          <CardAction>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm">
-                Read <ChevronDown />
-              </Button>
-            </CollapsibleTrigger>
+          <CardAction className="flex items-center gap-1">
+            {!isEditing && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEditErrors([])
+                    setIsEditing(true)
+                  }}
+                >
+                  <Pencil /> Edit
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={needsYourParagraph || send.isPending || Boolean(sent)}
+                  onClick={sendThisOne}
+                >
+                  {send.isPending ? <Spinner /> : <Send />}
+                  Send
+                </Button>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm">
+                    Read <ChevronDown />
+                  </Button>
+                </CollapsibleTrigger>
+              </>
+            )}
           </CardAction>
         </CardHeader>
-        {needsYourParagraph && (
+
+        {sent && (
           <CardContent>
             <Alert>
-              <AlertTitle>This one will not send yet</AlertTitle>
+              <AlertTitle>{sent.sent === 1 ? 'Sent' : 'Not sent'}</AlertTitle>
               <AlertDescription>
-                It still has the{' '}
-                <span className="font-mono">{USER_FIT_MARKER}</span> paragraph. Send it back with{' '}
-                <Link className="underline underline-offset-4" to="/queue">
-                  Review
-                </Link>{' '}
-                to fill it in or delete it.
+                {sent.sent === 1 ? 'It is in their inbox.' : describeSendResult(sent)}
               </AlertDescription>
             </Alert>
           </CardContent>
         )}
-        <CollapsibleContent>
-          <Separator />
-          <CardContent className="pt-6">
-            <pre className="font-sans text-[15px] leading-relaxed whitespace-pre-wrap">
-              {item.wire_text}
-            </pre>
+        {send.isError && (
+          <CardContent>
+            <Alert variant="destructive" role="alert">
+              <AlertTitle>Could not send</AlertTitle>
+              <AlertDescription>{send.error.message}</AlertDescription>
+            </Alert>
           </CardContent>
-        </CollapsibleContent>
+        )}
+
+        {needsYourParagraph && !isEditing && (
+          <CardContent>
+            <Alert>
+              <AlertTitle>This one will not send yet</AlertTitle>
+              <AlertDescription>
+                It still has the <span className="font-mono">{USER_FIT_MARKER}</span> paragraph.
+                Press Edit to write it, or delete that paragraph.
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        )}
+
+        {isEditing ? (
+          <EditLetter
+            item={item}
+            saving={edit.isPending}
+            errors={editErrors}
+            onSave={save}
+            onCancel={() => {
+              setIsEditing(false)
+              setEditErrors([])
+            }}
+          />
+        ) : (
+          <CollapsibleContent>
+            <Separator />
+            <CardContent className="pt-6">
+              <pre className="font-sans text-[15px] leading-relaxed whitespace-pre-wrap">
+                {item.wire_text}
+              </pre>
+            </CardContent>
+          </CollapsibleContent>
+        )}
       </Collapsible>
     </Card>
   )
@@ -90,21 +241,21 @@ function ApprovedLetter({ item, defaultOpen }) {
 
 export default function Approved() {
   const approvedQuery = useApproved()
-  const send = useSend()
+  const sendAll = useSend()
   const [sentResult, setSentResult] = useState(null)
 
   const items = approvedQuery.data ?? []
-  const blocked = items.filter((it) => (it.wire_text ?? '').includes(USER_FIT_MARKER)).length
-  const ready = items.length - blocked
+  const blockedCount = items.filter(blocked).length
+  const ready = items.length - blockedCount
 
-  function handleSend() {
+  function handleSendAll() {
     // The one irreversible thing this app does. It says how many are
     // about to leave, and never counts the ones that cannot.
     const ok = window.confirm(
       `Send ${ready} ${ready === 1 ? 'letter' : 'letters'} now? This cannot be undone.`,
     )
     if (!ok) return
-    send.mutate(undefined, { onSuccess: (data) => setSentResult(data) })
+    sendAll.mutate(undefined, { onSuccess: (data) => setSentResult(data) })
   }
 
   if (approvedQuery.isLoading) {
@@ -132,14 +283,14 @@ export default function Approved() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Approved</h1>
           <p className="text-muted-foreground text-sm">
-            Letters you have approved, waiting to be sent. Read one more time if you like &mdash;
-            after this they are in someone&rsquo;s inbox.
+            Letters you have approved, waiting to be sent. Edit or send them one at a time, or
+            send the lot &mdash; after this they are in someone&rsquo;s inbox.
           </p>
         </div>
         {items.length > 0 && (
-          <Button disabled={ready === 0 || send.isPending} onClick={handleSend}>
-            {send.isPending ? <Spinner /> : <Send />}
-            Send {ready} now
+          <Button disabled={ready === 0 || sendAll.isPending} onClick={handleSendAll}>
+            {sendAll.isPending ? <Spinner /> : <Send />}
+            Send all {ready}
           </Button>
         )}
       </div>
@@ -152,16 +303,17 @@ export default function Approved() {
           <AlertDescription>{describeSendResult(sentResult)}</AlertDescription>
         </Alert>
       )}
-      {send.isError && (
+      {sendAll.isError && (
         <Alert variant="destructive">
           <AlertTitle>Could not send</AlertTitle>
-          <AlertDescription>{send.error.message}</AlertDescription>
+          <AlertDescription>{sendAll.error.message}</AlertDescription>
         </Alert>
       )}
 
-      {blocked > 0 && (
+      {blockedCount > 0 && (
         <Badge variant="outline" className="w-fit">
-          {blocked} {blocked === 1 ? 'letter needs' : 'letters need'} your paragraph before sending
+          {blockedCount} {blockedCount === 1 ? 'letter needs' : 'letters need'} your paragraph
+          before sending
         </Badge>
       )}
 

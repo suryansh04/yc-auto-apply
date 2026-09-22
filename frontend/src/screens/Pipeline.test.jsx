@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithQuery } from '../test/render'
 import { mockJobs, mockStartJob, mockStats } from '../test/mocks'
-import Pipeline from './Pipeline'
+import Pipeline, { funnelDomainMax } from './Pipeline'
 
 // The screen links the two counts that need a decision through to the
 // screens where that decision gets made, so it needs a router.
@@ -267,16 +267,17 @@ it('does not show the gmail-auth banner for a poll-replies job that is still run
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
 
-it('draws both funnel groups on one scale', async () => {
+it('draws both funnel groups on one scale', () => {
   // Scaling each group to its own largest bar made a count of 1 in the
   // exceptions group as wide as 162 in the main one: two charts under
   // one heading are read as one picture, so a bar's length has to mean
-  // the same thing in both.
-  mockStats({ counts: { new: 100, discarded: 1 } })
-  mockJobs([])
-  render(<Pipeline />)
-  const biggest = await screen.findByTitle('Not started: 100')
-  const smallest = screen.getByTitle('Discarded: 1')
-  expect(biggest.firstChild.style.width).toBe('100%')
-  expect(smallest.firstChild.style.width).toBe('1%')
+  // the same thing in both. Asserted on the scale itself rather than on
+  // bar widths - jsdom has no layout, so the chart draws nothing and the
+  // DOM cannot answer this.
+  expect(funnelDomainMax({ new: 100, discarded: 1 })).toBe(100)
+  // The largest bar sets the scale wherever it lives, including in the
+  // exceptions group.
+  expect(funnelDomainMax({ new: 2, discarded: 57 })).toBe(57)
+  // Never zero: an all-empty pipeline must not divide by it.
+  expect(funnelDomainMax({})).toBe(1)
 })

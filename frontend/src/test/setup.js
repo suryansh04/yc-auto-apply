@@ -25,3 +25,47 @@ afterAll(() => server.close())
 // the component under test. Task 15's Pipeline.test.jsx is the first file
 // with multiple full renders per file, which is what surfaced this.
 afterEach(() => cleanup())
+
+// ---- jsdom gaps the shadcn/Radix components rely on -------------------
+//
+// These are browser APIs jsdom does not implement at all. They are not
+// mocks of our own behaviour: every one of them is a real API the
+// component would use in a browser, stubbed to the "no support" answer
+// jsdom should already be giving.
+//
+// `matchMedia` - shadcn's sidebar asks it whether the viewport is mobile
+// (src/hooks/use-mobile.js). Without it every render that mounts the app
+// shell throws.
+if (!window.matchMedia) {
+  window.matchMedia = (query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })
+}
+
+// Pointer capture + scrollIntoView - Radix's Select uses both while
+// opening its listbox. jsdom implements neither.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false
+  Element.prototype.setPointerCapture = () => {}
+  Element.prototype.releasePointerCapture = () => {}
+}
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {}
+}
+
+// ResizeObserver - recharts' responsive container (the shadcn chart) and
+// Radix's scroll area both construct one on mount.
+if (!globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}

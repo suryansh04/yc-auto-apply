@@ -25,9 +25,13 @@ it('collapses tried candidates behind a count until the reviewer expands them', 
   ])
   render(<ManualEmail />)
   const summary = await screen.findByText('2 tried')
-  expect(screen.getByText(/akash@vahan\.co/)).not.toBeVisible()
+  // A collapsed shadcn/Radix collapsible does not render its content at
+  // all, so "hidden" is "absent" here rather than "present but not
+  // visible" - the point is the same: seven rejected candidates must not
+  // be sitting open in every row.
+  expect(screen.queryByText(/akash@vahan\.co/)).not.toBeInTheDocument()
   await userEvent.click(summary)
-  expect(screen.getByText(/akash@vahan\.co/)).toBeVisible()
+  expect(await screen.findByText(/akash@vahan\.co/)).toBeVisible()
   expect(screen.getByText(/risky/)).toBeVisible()
 })
 
@@ -60,8 +64,8 @@ it('renders no published-hint markup when resolve found nothing', async () => {
   const { container } = render(<ManualEmail />)
   await screen.findByText('Akash Gupta')
   // the absent-hint branch (an em-dash placeholder), not the hint branch
-  expect(container.querySelector('.published-hint')).not.toBeInTheDocument()
-  expect(container.querySelector('.no-hint')).toBeInTheDocument()
+  expect(screen.queryByText(/@/)).not.toBeInTheDocument()
+  expect(container.textContent).toContain('—')
 })
 
 it('marks a founder unresolved on give up', async () => {

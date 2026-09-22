@@ -11,10 +11,33 @@
 // than a screen that goes quiet.
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
+import { Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from 'recharts'
 import { useJobs, useStartJob, useStats } from '../api/hooks'
-import JobButton from '../components/JobButton'
-import Banner from '../components/Banner'
-import FunnelChart from '../components/FunnelChart'
+import { outreachStateLabel } from '../labels'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from '@/components/ui/chart'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 // Display order follows the pipeline's normal flow. The four states that
 // are exits/exceptions rather than forward progress (unresolved,
@@ -113,6 +136,19 @@ export function gmailAuthExpired(latest) {
   return Boolean(job && job.status === 'failed' && job.error === GMAIL_AUTH_REQUIRED)
 }
 
+// The one scale both funnel charts are drawn on. Scaling each group to
+// its own largest bar made "Discarded 1" as wide as "Not started 162" -
+// the two are read as one picture of the pipeline, so a bar's length has
+// to mean the same thing in both. Exported because the charts render
+// nothing without a layout engine, so this is where the property is
+// pinned.
+export function funnelDomainMax(counts) {
+  return Math.max(
+    ...[...FUNNEL_STATES, ...EXCEPTION_STATES].map((state) => counts?.[state] ?? 0),
+    1,
+  )
+}
+
 function latestJobByKind(jobs) {
   const latest = {}
   for (const job of jobs ?? []) {
@@ -122,76 +158,172 @@ function latestJobByKind(jobs) {
   return latest
 }
 
+// One series, one hue: the bar's LENGTH is the value, so colour carries
+// nothing and never needs a legend. `chart-3` rather than the primary,
+// because the primary is what buttons wear.
+const FUNNEL_CONFIG = {
+  value: { label: 'Founders', color: 'var(--chart-3)' },
+}
+
 function JobStatusCell({ job }) {
-  if (!job) return <span className="job-status job-status-none">never run</span>
+  if (!job) return <Badge variant="outline">never run</Badge>
 
   if (ACTIVE_STATUSES.has(job.status)) {
     const progress = job.total != null ? `${job.done} / ${job.total}` : `${job.done}`
     return (
-      <span className="job-status job-status-running">
+      <Badge variant="secondary">
         {job.status} &mdash; {progress}
-      </span>
+      </Badge>
     )
   }
 
   if (job.status === 'failed') {
-    return (
-      <span className="job-status job-status-failed">
-        failed: {job.error ?? 'unknown error'}
-      </span>
-    )
+    return <Badge variant="destructive">failed: {job.error ?? 'unknown error'}</Badge>
   }
 
   if (job.status === 'succeeded') {
-    return (
-      <span className="job-status job-status-succeeded">{job.summary ?? 'succeeded'}</span>
-    )
+    return <span className="text-muted-foreground text-sm">{job.summary ?? 'succeeded'}</span>
   }
 
-  return <span className="job-status">{job.status}</span>
+  return <Badge variant="outline">{job.status}</Badge>
+}
+
+// Rows stay in pipeline order rather than sorted by size - the order is
+// the story - and every bar keeps its exact count, because that is what
+// the table this replaced was read for. A stage with nobody in it keeps
+// its row: "Sent 0" is a fact about the pipeline.
+function funnelRows(counts, states) {
+  return states.map((state) => ({
+    state,
+    label: outreachStateLabel(state),
+    value: counts[state] ?? 0,
+  }))
 }
 
 function StageTable({ heading, stages, latest, startJob, onStart }) {
   return (
-    <div className="stage-group">
-      <h3>{heading}</h3>
-      <div className="table-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Stage</th>
-            <th scope="col">What it does</th>
-            <th scope="col">Action</th>
-            <th scope="col">Last run</th>
-          </tr>
-        </thead>
-        <tbody>
-          {stages.map(({ kind, label, description }) => {
-            const job = latest[kind]
-            const kindRunning = job && ACTIVE_STATUSES.has(job.status)
-            const startingThisKind = startJob.isPending && startJob.variables?.kind === kind
-            return (
-              <tr key={kind}>
-                <td>{label}</td>
-                <td className="stage-description">{description}</td>
-                <td>
-                  <JobButton
-                    kind={kind}
-                    label={label}
-                    disabled={Boolean(kindRunning || startingThisKind)}
-                    onClick={() => onStart(kind)}
-                  />
-                </td>
-                <td>
-                  <JobStatusCell job={job} />
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-      </div>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>{heading}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-36">Stage</TableHead>
+              <TableHead>What it does</TableHead>
+              <TableHead className="w-40">Action</TableHead>
+              <TableHead className="w-64">Last run</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {stages.map(({ kind, label, description }) => {
+              const job = latest[kind]
+              const kindRunning = job && ACTIVE_STATUSES.has(job.status)
+              const startingThisKind = startJob.isPending && startJob.variables?.kind === kind
+              return (
+                <TableRow key={kind}>
+                  <TableCell className="font-medium">{label}</TableCell>
+                  <TableCell className="text-muted-foreground">{description}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={Boolean(kindRunning || startingThisKind)}
+                      onClick={() => onStart(kind)}
+                    >
+                      {label}
+                    </Button>
+                  </TableCell>
+                  <TableCell>
+                    <JobStatusCell job={job} />
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}
+
+function FunnelCard({ title, description, counts, states, domainMax, action }) {
+  const rows = funnelRows(counts, states)
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+        {action && <CardAction>{action}</CardAction>}
+      </CardHeader>
+      <CardContent>
+        <ChartContainer
+          config={FUNNEL_CONFIG}
+          className="aspect-auto w-full"
+          style={{ height: `${Math.max(rows.length * 36, 140)}px` }}
+        >
+          {/* A partial `margin` replaces recharts' defaults rather than
+              merging with them, so all four sides are given. */}
+          <BarChart
+            accessibilityLayer
+            data={rows}
+            layout="vertical"
+            margin={{ top: 4, right: 44, bottom: 4, left: 4 }}
+          >
+            <CartesianGrid horizontal={false} />
+            <YAxis
+              dataKey="label"
+              type="category"
+              tickLine={false}
+              axisLine={false}
+              width={132}
+              tickMargin={6}
+            />
+            {/* Both charts share one domain: they are read as one picture
+                of the pipeline, so a bar's length has to mean the same
+                thing in both. Scaling each to its own largest bar made
+                "Discarded 1" as wide as "Not started 162". */}
+            <XAxis type="number" hide domain={[0, domainMax]} />
+            <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+            {/* No entry animation: bars sliding out on every poll of
+                /api/stats is motion that answers nothing. */}
+            <Bar
+              dataKey="value"
+              fill="var(--color-value)"
+              radius={[0, 4, 4, 0]}
+              barSize={16}
+              isAnimationActive={false}
+              /* A zero-value bar draws no rectangle, and with no
+                 rectangle recharts has nothing to hang the count on -
+                 so an empty stage lost its "0", which is a fact about
+                 the pipeline worth keeping. A 2px floor gives every row
+                 something to label. */
+              minPointSize={2}
+            >
+              <LabelList
+                dataKey="value"
+                position="right"
+                offset={8}
+                className="fill-foreground"
+                fontSize={12}
+              />
+            </Bar>
+          </BarChart>
+        </ChartContainer>
+
+        {/* The chart is a picture. This is the same data as text, so
+            every count is reachable without reading a bar length - by a
+            screen reader, and by anything else that cannot do layout. */}
+        <ul className="sr-only">
+          {rows.map(({ state, label, value }) => (
+            <li key={state}>
+              <span>{label}</span> <span>{value}</span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -222,65 +354,92 @@ export default function Pipeline() {
   // running" case) is shown, not swallowed.
   const showStartError = startJob.isError && startJob.error?.status !== 409
 
-  // One scale for both charts below: they sit under one heading and are
-  // read as one picture of the pipeline.
-  const funnelScale = Math.max(
-    ...[...FUNNEL_STATES, ...EXCEPTION_STATES].map((state) => counts[state] ?? 0),
-    1,
-  )
+  const domainMax = funnelDomainMax(counts)
   const waiting = counts.pending_approval ?? 0
   const missingAddresses = counts.needs_manual_email ?? 0
 
   return (
-    <div className="pipeline">
-      <h1>Pipeline</h1>
-      <p className="screen-note">
-        Where every founder stands, and the stages you can run by hand.
-      </p>
+    <>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Pipeline</h1>
+        <p className="text-muted-foreground text-sm">
+          Where every founder stands, and the stages you can run by hand.
+        </p>
+      </div>
 
       {statsQuery.isError && (
-        <Banner kind="error">Could not load stats: {statsQuery.error.message}</Banner>
+        <Alert variant="destructive">
+          <AlertTitle>Could not load stats</AlertTitle>
+          <AlertDescription>{statsQuery.error.message}</AlertDescription>
+        </Alert>
       )}
       {showStartError && (
-        <Banner kind="error">Could not start job: {startJob.error.message}</Banner>
+        <Alert variant="destructive">
+          <AlertTitle>Could not start job</AlertTitle>
+          <AlertDescription>{startJob.error.message}</AlertDescription>
+        </Alert>
       )}
       {gmailAuthExpired(latest) && (
-        <Banner kind="error">
-          Gmail authorisation expired &mdash; re-run <code>python -m app.cli gmail-auth</code>,
-          then start Poll replies again.
-        </Banner>
+        <Alert variant="destructive">
+          <AlertTitle>Gmail authorisation expired</AlertTitle>
+          <AlertDescription>
+            Re-run{' '}
+            <code className="bg-muted rounded px-1 py-0.5 font-mono text-xs">
+              python -m app.cli gmail-auth
+            </code>
+            , then start Poll replies again.
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* The one thing this screen exists to tell you: how much is
           waiting on a decision only you can make. */}
-      <div className="standing sheet">
-        <Link className="standing-lead" to="/queue">
-          <strong>{waiting}</strong>
-          <span>{waiting === 1 ? 'letter waiting for you' : 'letters waiting for you'}</span>
-        </Link>
-        <Link className="standing-second" to="/manual">
-          <strong>{missingAddresses}</strong>
-          <span>founders still need an address</span>
-        </Link>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardDescription>
+              {waiting === 1 ? 'Letter waiting for you' : 'Letters waiting for you'}
+            </CardDescription>
+            <CardTitle className="text-4xl tabular-nums">{waiting}</CardTitle>
+            <CardAction>
+              <Button asChild size="sm">
+                <Link to="/queue">Start reviewing</Link>
+              </Button>
+            </CardAction>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Founders still need an address</CardDescription>
+            <CardTitle className="text-4xl tabular-nums">{missingAddresses}</CardTitle>
+            <CardAction>
+              <Button asChild size="sm" variant="outline">
+                <Link to="/manual">Add addresses</Link>
+              </Button>
+            </CardAction>
+          </CardHeader>
+        </Card>
       </div>
 
-      <section className="funnel">
-        <h2>Everyone else</h2>
-        <FunnelChart
+      <div className="grid gap-4 xl:grid-cols-2">
+        <FunnelCard
+          title="Everyone else"
+          description="Founders at each stage of the pipeline, in order."
           counts={counts}
           states={FUNNEL_STATES}
-          max={funnelScale}
-          linkFor={(state) =>
-            ({ needs_manual_email: '/manual', pending_approval: '/queue' })[state]
-          }
+          domainMax={domainMax}
         />
+        <FunnelCard
+          title="Stuck or finished"
+          description="Exits and exceptions, on the same scale as the funnel."
+          counts={counts}
+          states={EXCEPTION_STATES}
+          domainMax={domainMax}
+        />
+      </div>
 
-        <h3>Stuck or finished</h3>
-        <FunnelChart counts={counts} states={EXCEPTION_STATES} max={funnelScale} />
-      </section>
-
-      <section className="stages">
-        <h2>Run a stage</h2>
+      <div className="grid gap-4">
+        <h2 className="text-lg font-semibold tracking-tight">Run a stage</h2>
         {STAGE_GROUPS.map(([groupKey, heading]) => (
           <StageTable
             key={groupKey}
@@ -291,7 +450,7 @@ export default function Pipeline() {
             onStart={handleStart}
           />
         ))}
-      </section>
-    </div>
+      </div>
+    </>
   )
 }

@@ -162,6 +162,6 @@ it('does not name an account before Gmail is connected', async () => {
   mockStatus(NOT_CONNECTED)
   render()
   await screen.findByRole('heading', { name: /connect gmail/i })
-  const header = document.querySelector('.app-nav')
-  expect(header.textContent).not.toMatch(/operator@example\.com/)
+  const sidebar = document.querySelector('[data-slot="sidebar"]')
+  expect(sidebar.textContent).not.toMatch(/operator@example\.com/)
 })

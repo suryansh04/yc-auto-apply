@@ -19,6 +19,14 @@ function render(ui) {
 
 // --- the brief's three ---------------------------------------------------
 
+// shadcn's Select is a Radix listbox (a button that opens a popup), not
+// a native <select>, so choosing a filter is "open it, click the option"
+// rather than selectOptions().
+async function choose(trigger, option) {
+  await userEvent.click(trigger)
+  await userEvent.click(await screen.findByRole('option', { name: option }))
+}
+
 it('lists every company and founder', async () => {
   mockContacts([
     contact({ outreach_id: 1, founder_name: 'Akash Gupta', company_name: 'Vahan' }),
@@ -41,7 +49,7 @@ it('filters by state without hiding non-hiring companies by default (D19)', asyn
   expect(await screen.findByText('Akash Gupta')).toBeInTheDocument()
   expect(screen.getByText('Priya Singh')).toBeInTheDocument()
 
-  await userEvent.selectOptions(screen.getByLabelText(/^where it stands$/i), 'sent')
+  await choose(screen.getByLabelText(/^where it stands$/i), 'Sent')
 
   // state narrows nothing here (both rows match), and critically the
   // non-hiring founder is STILL listed - the state filter never touched
@@ -76,7 +84,7 @@ it('narrows to hiring-only companies once the hiring filter is turned on', async
   await screen.findByText('Hiring Founder')
   expect(screen.getByText('Quiet Founder')).toBeInTheDocument()
 
-  await userEvent.selectOptions(screen.getByLabelText(/hiring/i), 'true')
+  await choose(screen.getByLabelText(/^hiring$/i), 'Hiring only')
 
   await waitFor(() => expect(screen.queryByText('Quiet Founder')).not.toBeInTheDocument())
   expect(screen.getByText('Hiring Founder')).toBeInTheDocument()

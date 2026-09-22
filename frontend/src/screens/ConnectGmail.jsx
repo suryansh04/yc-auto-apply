@@ -7,36 +7,53 @@
 // callback brings it back with `?gmail=<outcome>`, which is what the
 // messages below explain.
 import { useConnectGmail } from '../api/hooks'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Item, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item'
+import { Spinner } from '@/components/ui/spinner'
 
 // The outcomes `GET /api/gmail/callback` can redirect back with. Each
 // one says what happened and what to do next - an error that leaves the
 // operator guessing is worse than no error at all.
 const OUTCOMES = {
   cancelled: {
-    tone: 'warn',
-    text: 'You closed Google’s consent screen before finishing. Nothing changed.',
+    variant: 'default',
+    title: 'Nothing changed',
+    text: 'You closed Google’s consent screen before finishing.',
   },
   expired: {
-    tone: 'warn',
-    text: 'That consent link had expired. Start again and it will work.',
+    variant: 'default',
+    title: 'That consent link had expired',
+    text: 'Start again and it will work.',
   },
   'no-refresh-token': {
-    tone: 'danger',
+    variant: 'destructive',
+    title: 'Google did not issue a new token',
     text:
-      'Google did not issue a new token because this account has already granted ' +
-      'access. Remove “YC Auto Apply” at myaccount.google.com/permissions, then connect again.',
+      'This account has already granted access. Remove “YC Auto Apply” at ' +
+      'myaccount.google.com/permissions, then connect again.',
   },
   'missing-scope': {
-    tone: 'danger',
+    variant: 'destructive',
+    title: 'One permission was left unticked',
     text:
-      'One of the two permissions was left unticked on Google’s screen. Both are ' +
-      'needed: sending, and reading mail to find replies. Connect again and allow both.',
+      'Both are needed: sending, and reading mail to find replies. Connect again and allow ' +
+      'both.',
   },
   failed: {
-    tone: 'danger',
+    variant: 'destructive',
+    title: 'Google refused the connection',
     text:
-      'Google refused the connection. The reason is in the API’s terminal output; ' +
-      'check the client secrets file, then try again.',
+      'The reason is in the API’s terminal output; check the client secrets file, then try ' +
+      'again.',
   },
 }
 
@@ -47,63 +64,89 @@ export default function ConnectGmail({ status, outcome }) {
 
   if (!status?.configured) {
     return (
-      <div className="connect">
-        <h1>Gmail is not set up yet</h1>
-        <p className="screen-note">
-          These have to be in <code>backend/.env</code> before the app can send anything.
-          Add them, then restart the API.
-        </p>
-        <ul className="connect-missing">
-          {(status?.missing_config ?? []).map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
-      </div>
+      <Card className="max-w-xl">
+        <CardHeader>
+          <CardTitle>
+            <h1>Gmail is not set up yet</h1>
+          </CardTitle>
+          <CardDescription>
+            These have to be in{' '}
+            <code className="bg-muted rounded px-1 py-0.5 font-mono text-xs">backend/.env</code>{' '}
+            before the app can send anything. Add them, then restart the API.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul className="grid gap-1">
+            {(status?.missing_config ?? []).map((item) => (
+              <li key={item} className="font-mono text-sm">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
     )
   }
 
   return (
-    <div className="connect">
-      <h1>{reconnecting ? 'Reconnect Gmail' : 'Connect Gmail'}</h1>
-      <p className="screen-note">
-        {reconnecting
-          ? 'This account can send mail but cannot read replies, because it was ' +
-            'authorised before reply polling existed. Connecting again fixes it.'
-          : 'This app sends letters from your Gmail account and reads the replies. ' +
-            'Google will ask you to allow both before anything can be sent.'}
-      </p>
+    <Card className="max-w-xl">
+      <CardHeader>
+        <CardTitle>
+          <h1>{reconnecting ? 'Reconnect Gmail' : 'Connect Gmail'}</h1>
+        </CardTitle>
+        <CardDescription>
+          {reconnecting
+            ? 'This account can send mail but cannot read replies, because it was ' +
+              'authorised before reply polling existed. Connecting again fixes it.'
+            : 'This app sends letters from your Gmail account and reads the replies. ' +
+              'Google will ask you to allow both before anything can be sent.'}
+        </CardDescription>
+      </CardHeader>
 
-      {message && (
-        <p className={`mark mark-${message.tone}`} role="alert">
-          {message.text}
+      <CardContent className="grid gap-4">
+        {message && (
+          <Alert variant={message.variant} role="alert">
+            <AlertTitle>{message.title}</AlertTitle>
+            <AlertDescription>{message.text}</AlertDescription>
+          </Alert>
+        )}
+
+        <Item variant="outline">
+          <ItemContent>
+            <ItemDescription>Account</ItemDescription>
+            <ItemTitle>{status.account}</ItemTitle>
+          </ItemContent>
+        </Item>
+
+        <Item variant="outline">
+          <ItemContent>
+            <ItemDescription>Google will be asked for</ItemDescription>
+            <ItemTitle>Sending mail as you, and reading your mail to find replies</ItemTitle>
+          </ItemContent>
+        </Item>
+
+        {connect.isError && (
+          <Alert variant="destructive" role="alert">
+            <AlertTitle>Could not start</AlertTitle>
+            <AlertDescription>{connect.error.message}</AlertDescription>
+          </Alert>
+        )}
+      </CardContent>
+
+      <CardFooter className="flex-col items-start gap-3">
+        <Button disabled={connect.isPending} onClick={() => connect.mutate()}>
+          {connect.isPending ? (
+            <>
+              <Spinner /> Opening Google…
+            </>
+          ) : (
+            'Connect Gmail'
+          )}
+        </Button>
+        <p className="text-muted-foreground text-xs">
+          Nothing is sent without your approval, whatever Google allows here.
         </p>
-      )}
-
-      <dl className="connect-details">
-        <dt>Account</dt>
-        <dd>{status.account}</dd>
-        <dt>Google will be asked for</dt>
-        <dd>Sending mail as you, and reading your mail to find replies</dd>
-      </dl>
-
-      <button
-        type="button"
-        className="primary connect-button"
-        disabled={connect.isPending}
-        onClick={() => connect.mutate()}
-      >
-        {connect.isPending ? 'Opening Google…' : 'Connect Gmail'}
-      </button>
-
-      {connect.isError && (
-        <p className="field-error" role="alert">
-          Could not start: {connect.error.message}
-        </p>
-      )}
-
-      <p className="connect-footnote">
-        Nothing is sent without your approval, whatever Google allows here.
-      </p>
-    </div>
+      </CardFooter>
+    </Card>
   )
 }

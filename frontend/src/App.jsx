@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { NavLink, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import {
   ChevronsUpDown,
-  CircleDot,
   Inbox,
   LogOut,
   LayoutDashboard,
@@ -132,9 +131,18 @@ function App() {
               <SidebarMenuItem>
                 <SidebarMenuButton size="lg" asChild>
                   <NavLink to="/">
-                    <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                      <CircleDot className="size-4" />
-                    </div>
+                    {/* The operator's own logo (public/logo.png), trimmed
+                        to the mark and squared off as logo-mark.png - the
+                        original is 1536x1024 with most of it black field,
+                        which in a 32px tile would have been a black
+                        square with a speck in it. */}
+                    <img
+                      src="/logo-mark.png"
+                      alt=""
+                      width={32}
+                      height={32}
+                      className="aspect-square size-8 shrink-0 rounded-lg bg-black object-cover"
+                    />
                     <div className="grid flex-1 text-left text-sm leading-tight">
                       <span className="truncate font-medium">Outreach desk</span>
                       <span className="text-muted-foreground truncate text-xs">

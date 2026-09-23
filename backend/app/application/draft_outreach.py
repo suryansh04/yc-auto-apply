@@ -94,6 +94,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from app.application.critique_draft import CritiqueResult, run_critic
+from app.application.errors import OperatorError
 from app.domain.entities import Draft, ResumeClaim
 from app.domain.interns import is_intern_appropriate
 from app.domain.states import OutreachState, assert_transition
@@ -382,7 +383,10 @@ def load_resume_claims(resume_profile_repo, keep_unverified: bool = False) -> li
     profile = resume_profile_repo.get_current()
     raw_claims = list(getattr(profile, "claims", None) or []) if profile else []
     if not raw_claims:
-        raise ValueError("no resume profile with claims — run `parse-resume PATH` first")
+        raise OperatorError(
+            "no resume claims yet - the letters are grounded in your resume, so it has "
+            "to be read first. Open My resume and press Re-read my resume."
+        )
     claims = [
         ResumeClaim(
             kind=str(c.get("kind", "")), text=str(c.get("text", "")),
@@ -394,9 +398,10 @@ def load_resume_claims(resume_profile_repo, keep_unverified: bool = False) -> li
     if not keep_unverified:
         claims = [c for c in claims if c.span_verified]
     if not claims:
-        raise ValueError(
-            "every resume claim has an unverified source_span; read them with "
-            "`show-claims` and re-run with --keep-unverified to use them anyway"
+        raise OperatorError(
+            "every resume claim failed its source check, so there is nothing a letter "
+            "may assert about you. Read them with `show-claims` and re-run with "
+            "--keep-unverified to use them anyway."
         )
     return claims
 

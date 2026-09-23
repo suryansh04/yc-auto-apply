@@ -43,6 +43,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import Repos, get_repos, load_oauth_client, require_send_config
 from app.api.schemas import SendIn, SendResultOut
+from app.application.errors import OperatorError
 from app.application.send_approved import SendApproved, SendRepos
 from app.config import get_operator_settings, get_settings
 
@@ -109,6 +110,12 @@ def send(payload: SendIn, repos: Repos = Depends(get_repos)) -> SendResultOut:
     try:
         result = use_case.run(cap=cap, limit=payload.limit,
                               only_outreach_id=payload.outreach_id)
+    except OperatorError as exc:
+        # A refusal written for the operator - currently "the resume file
+        # cannot be read", raised before anything is reserved. 400, with
+        # the sentence, because the fix is his and the screen is where he
+        # is standing.
+        raise HTTPException(400, str(exc)) from None
     finally:
         if owns_sender:
             sender.close()

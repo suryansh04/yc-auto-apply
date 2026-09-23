@@ -28,6 +28,7 @@ from typing import Callable, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.application.errors import OperatorError
 from app.application.run_job import JobAlreadyRunning, RunJob
 
 log = logging.getLogger(__name__)
@@ -154,15 +155,24 @@ def _draft(session: Session, progress: ProgressFn) -> str:
         # job cleanly rather than silently sending founder data to a
         # free-tier key that may train on it, D12). Shared predicate:
         # `app.api.deps.on_gemini_free_tier` (fix round 1, ruling T6-3).
-        raise RuntimeError(
-            "refusing to draft on a free-tier Gemini key from the UI job runner"
+        raise OperatorError(
+            "refusing to draft on a free-tier Gemini key: founder names and bios "
+            "would go to an endpoint Google may train on. Set LLM_PROVIDER=sarvam "
+            "with a SARVAM_API_KEY, or move the Gemini key to a paid tier."
         )
 
     # Fix round 2 (ruling T6-6): the provider switch itself is shared too,
     # not just the free-tier predicate - `app.api.deps.build_drafter` is
     # also what `app.cli._drafter` calls, so a new provider or a changed
     # model default is written once.
-    drafter = build_drafter(settings)
+    try:
+        drafter = build_drafter(settings)
+    except RuntimeError as exc:
+        # `build_drafter` raises nothing but a missing-SETTING name
+        # ("SARVAM_API_KEY is not set"), never a value - which makes it
+        # exactly the kind of message the operator needs to see on the
+        # screen he pressed the button from.
+        raise OperatorError(str(exc)) from None
     # Task 13 (D22): the advisory voice critic, same provider switch as the
     # drafter above (`build_critic`, shared with `app.cli._critic`, T6-6's
     # extraction pattern). Advisory only — if it can't even be built (e.g.

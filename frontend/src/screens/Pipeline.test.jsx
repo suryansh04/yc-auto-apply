@@ -313,3 +313,27 @@ it('names every outcome of a send, not just the ones that went', () => {
                               skipped_not_reservable: 0, errors: 0 }))
     .toBe('Nothing else was waiting.')
 })
+
+it('shows a stage refusal as the sentence it is, not as a type name', async () => {
+  // 2026-09-23: a brand-new operator pressing Draft before the resume
+  // was read saw `failed: ValueError`, while the sentence telling him
+  // what to do sat in a terminal he had no reason to be watching.
+  mockStats()
+  mockJobs([{
+    id: 11, kind: 'draft', status: 'failed', done: 0, total: null,
+    error: 'no resume claims yet - open My resume and press Re-read my resume.',
+  }])
+  render(<Pipeline />)
+  expect(await screen.findByText(/open My resume and press Re-read my resume/i))
+    .toBeInTheDocument()
+})
+
+it('still shows a bare exception type compactly', async () => {
+  // The rule did not change for everything else: a message the app did
+  // not author is a type name, and a type name fits a badge.
+  mockStats()
+  mockJobs([{ id: 12, kind: 'scrape', status: 'failed', done: 0, total: null,
+              error: 'HTTPError' }])
+  render(<Pipeline />)
+  expect(await screen.findByText('failed: HTTPError')).toBeInTheDocument()
+})

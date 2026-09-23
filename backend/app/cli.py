@@ -256,18 +256,13 @@ def set_email(
 
 
 def _read_resume_text(path: str) -> str:
-    """PDF via `pypdf` (text extraction only — no OCR; a scanned-image resume
-    yields empty text and is rejected downstream), or a plain `.txt`/`.md`
-    read for anything else."""
-    from pathlib import Path
+    """Moved to `app.adapters.resume_text` (2026-09-23) so the API can do
+    the same extraction without importing this module - parsing stopped
+    being CLI-only. Kept as a name here for this module's own call sites
+    and tests."""
+    from app.adapters.resume_text import read_resume_text
 
-    p = Path(path)
-    if p.suffix.lower() == ".pdf":
-        from pypdf import PdfReader
-
-        reader = PdfReader(str(p))
-        return "\n".join((page.extract_text() or "") for page in reader.pages)
-    return p.read_text(encoding="utf-8")
+    return read_resume_text(path)
 
 
 _FREE_TIER_NOTICE = (

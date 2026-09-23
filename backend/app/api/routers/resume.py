@@ -10,11 +10,19 @@ request names a path, so there is nothing to traverse; `GET /api/resume`
 serves exactly the file `send_approved` will attach, and `POST` replaces
 it in place after keeping a timestamped copy of what was there.
 
-What this deliberately does NOT do is re-parse the resume. The claims the
-drafter is held to (`resume_profile`) come from `parse-resume`, not from
-this file, so replacing the PDF changes what a founder receives and not
-what the model may say. Saying so is `GET /api/resume/status`'s job -
-silently letting the two drift apart would be worse than either.
+Replacing the PDF deliberately does NOT re-parse it. The claims the
+drafter is held to (`resume_profile`) are a separate thing living in the
+database, so a new PDF changes what a founder receives and not what the
+model may say about you. Letting those two drift silently would be worse
+than either, so `GET /api/resume/status` reports the claim count and
+`POST /api/resume/parse` is how they are brought back into line.
+
+That fourth route exists as of 2026-09-23. Parsing used to be reachable
+only as `python -m app.cli parse-resume PATH`, which made a brand-new
+operator's first **Draft** a dead end: it fails until the resume has been
+read, and the UI had nowhere to read it from. It is the one route here
+that spends a model call, so it is never automatic - the operator asks
+for it.
 """
 
 from __future__ import annotations
@@ -27,8 +35,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app.api.deps import Repos, get_repos
-from app.config import get_operator_settings
+from app.adapters.resume_text import read_resume_text
+from app.api.deps import Repos, build_resume_parser, get_repos
+from app.application.parse_resume import ParseResume
+from app.config import get_operator_settings, get_settings
 
 router = APIRouter(tags=["resume"])
 
@@ -52,6 +62,22 @@ class ResumeStatusOut(BaseModel):
     size_bytes: int | None = None
     modified_at: str | None = None
     claims: int = 0
+
+
+class ParseResultOut(BaseModel):
+    """What a parse made of the resume.
+
+    `claims` is what a letter may now assert about the operator.
+    `unverified` are claims whose quoted span could not be found in the
+    resume text verbatim - kept, but the drafter skips them unless asked
+    otherwise. `dropped` never made it to the profile at all. Both counts
+    are here because "it worked" and "it worked and threw half of it
+    away" should not look the same on screen."""
+
+    status: ResumeStatusOut
+    claims: int
+    unverified: int = 0
+    dropped: int = 0
 
 
 def _resume_path() -> Path | None:
@@ -122,3 +148,55 @@ async def replace_resume(
         shutil.copy2(path, path.with_name(f"{path.stem}.{stamp}{path.suffix}"))
     path.write_bytes(data)
     return resume_status(repos)
+
+
+@router.post("/resume/parse", response_model=ParseResultOut)
+def parse_resume_route(repos: Repos = Depends(get_repos)) -> ParseResultOut:
+    """Read the resume and replace the claims a letter may assert.
+
+    The same work `python -m app.cli parse-resume` does, on the file
+    already configured - no path crosses this boundary, here either.
+
+    Only the operator's OWN resume is sent to the model, never a
+    founder's data, which is why this is allowed on a free-tier Gemini
+    key where `draft` refuses outright (ruling R4). Re-runnable: it
+    replaces the single `resume_profile` row, and `ParseResume` refuses
+    to replace it with nothing.
+    """
+    path = _resume_path()
+    if path is None:
+        raise HTTPException(400, "RESUME_PATH is not set in backend/.env")
+    if not path.is_file():
+        raise HTTPException(404, "there is no resume file at RESUME_PATH")
+
+    parser = getattr(repos, "parser", None)
+    if parser is None:
+        try:
+            parser = build_resume_parser(get_settings())
+        except RuntimeError as exc:
+            # A missing SETTING name, never its value.
+            raise HTTPException(400, str(exc)) from None
+
+    try:
+        text = read_resume_text(str(path))
+    except Exception as exc:  # noqa: BLE001 - a broken PDF is the operator's to fix
+        raise HTTPException(400, f"could not read that file ({type(exc).__name__})") from None
+
+    use_case = ParseResume(parser, repos.resume_profile)
+    try:
+        claims = use_case.run(text)
+    except ValueError as exc:
+        # `ParseResume`'s own refusals are written for a human: an empty
+        # resume, or a parse that produced nothing usable. The existing
+        # profile is left exactly as it was in both cases.
+        raise HTTPException(422, str(exc)) from None
+    except Exception as exc:  # noqa: BLE001 - a provider failure must not leak its body
+        raise HTTPException(502, f"the resume parser failed ({type(exc).__name__})") from None
+
+    repos.session.commit()
+    return ParseResultOut(
+        status=resume_status(repos),
+        claims=len(claims),
+        unverified=len(use_case.unverified),
+        dropped=len(use_case.dropped),
+    )

@@ -62,6 +62,10 @@ class Repos:
     # `sender` above, and it exists for the same reason: nothing in the
     # offline suite can ever reach a real provider.
     reviser: Any = None
+    # A pre-built `ResumeParser`, present only when a caller injected one.
+    # Same seam and same reason as `sender`/`reviser` above: nothing in
+    # the offline suite can reach a real provider.
+    parser: Any = None
 
 
 def _session() -> Session:
@@ -225,6 +229,33 @@ def build_critic(settings: Settings):
         raise RuntimeError("GEMINI_API_KEY is not set")
     client = genai.Client(api_key=settings.gemini_api_key)
     return GeminiCritic(client, model=settings.gemini_model)
+
+
+def build_resume_parser(settings: Settings):
+    """The same provider switch as `build_drafter` and friends, for a
+    `ResumeParser` - the adapter that turns the operator's own resume into
+    citable claims.
+
+    Extracted on 2026-09-23 from `app.cli._resume_parser`, when parsing
+    stopped being CLI-only: `app.api.routers.resume` needs the same
+    adapter, and `app/api/` may not import `app.cli`. Raises a plain
+    `RuntimeError` naming the missing SETTING, never its value, exactly
+    as the others do."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamResumeParser(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiResumeParser
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiResumeParser(client, model=settings.gemini_model)
 
 
 def build_reviser(settings: Settings):

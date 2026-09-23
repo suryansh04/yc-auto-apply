@@ -5,7 +5,12 @@ import { expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithQuery } from '../test/render'
-import { mockReplaceResume, mockResumeStatus } from '../test/mocks'
+import {
+  mockParseResume,
+  mockParseResumeFailure,
+  mockReplaceResume,
+  mockResumeStatus,
+} from '../test/mocks'
 import Resume from './Resume'
 
 const render = () => renderWithQuery(<Resume />)
@@ -55,11 +60,11 @@ it('replaces the resume and warns that the claims are still the old ones', async
   )
   await waitFor(() => expect(replace).toHaveBeenCalled())
   expect(await screen.findByText(/resume replaced/i)).toBeInTheDocument()
-  // The command is named in the banner and again in the sidebar card;
-  // the banner's copy is the one that has to appear on a replace.
+  // 2026-09-23: the banner used to name a CLI command. It names the
+  // button on this screen now, because there is one.
   expect(screen.getByText(/every letter from now on carries the new file/i))
     .toBeInTheDocument()
-  expect(screen.getAllByText(/parse-resume/).length).toBeGreaterThanOrEqual(1)
+  expect(screen.getAllByText(/re-read my resume/i).length).toBeGreaterThanOrEqual(1)
 })
 
 it('shows why a rejected upload was rejected', async () => {
@@ -82,4 +87,47 @@ it('says nothing can be sent when there is no resume', async () => {
   expect(await screen.findByText(/no resume yet/i)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /upload a resume/i })).toBeInTheDocument()
   expect(screen.queryByTitle('My resume')).not.toBeInTheDocument()
+})
+
+
+// --- reading the resume from here (operator request 2026-09-23) -----------
+//
+// Parsing used to be `python -m app.cli parse-resume PATH` and nothing
+// else, which made a brand-new operator's first Draft a dead end: it
+// fails until the resume has been read, and the UI had nowhere to read
+// it from.
+
+it('offers to re-read the resume, and says what it found', async () => {
+  mockResumeStatus({ claims: 3 })
+  const parse = mockParseResume({ claims: 7 })
+  render()
+  await userEvent.click(await screen.findByRole('button', { name: /re-read my resume/i }))
+  await waitFor(() => expect(parse).toHaveBeenCalled())
+  expect(await screen.findByText(/7 claims a letter may now make about you/i)).toBeInTheDocument()
+})
+
+it('does not let a partial parse look like a clean one', async () => {
+  // "it worked" and "it worked and threw half of it away" must not read
+  // the same.
+  mockResumeStatus({ claims: 3 })
+  mockParseResume({ claims: 2, dropped: 4, unverified: 1 })
+  render()
+  await userEvent.click(await screen.findByRole('button', { name: /re-read my resume/i }))
+  expect(await screen.findByText(/4 were thrown away/i)).toBeInTheDocument()
+  expect(screen.getByText(/1 could not be matched/i)).toBeInTheDocument()
+})
+
+it('says why a parse failed rather than leaving the count unchanged in silence', async () => {
+  mockResumeStatus({ claims: 3 })
+  mockParseResumeFailure(422, 'parser produced no usable claims; existing profile not replaced')
+  render()
+  await userEvent.click(await screen.findByRole('button', { name: /re-read my resume/i }))
+  expect(await screen.findByText(/no usable claims/i)).toBeInTheDocument()
+})
+
+it('offers nothing to re-read when there is no resume', async () => {
+  mockResumeStatus({ configured: false })
+  render()
+  await screen.findByText(/no resume yet/i)
+  expect(screen.queryByRole('button', { name: /re-read my resume/i })).not.toBeInTheDocument()
 })

@@ -317,8 +317,12 @@ def test_an_approved_letter_the_checks_dislike_is_still_saved_and_still_approved
 
 
 def test_edit_refuses_without_resume_claims(repos, one_pending):
+    # 2026-09-23: the message now names the button rather than the CLI
+    # command, and is an `OperatorError` so the UI may show it verbatim.
+    from app.application.errors import OperatorError
+
     repos.resume_profile.profile = None
-    with pytest.raises(ValueError, match="parse-resume"):
+    with pytest.raises(OperatorError, match="Re-read my resume"):
         ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, PENDING_BODY)
 
 

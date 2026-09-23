@@ -590,6 +590,30 @@ export function mockResumeStatus(over = {}) {
 }
 
 /** POST /api/resume - replace the attached PDF. */
+/** POST /api/resume/parse - read the resume into citable claims. */
+export function mockParseResume({ claims = 1, unverified = 0, dropped = 0, status = {} } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/resume/parse', () => {
+      spy()
+      return HttpResponse.json({
+        claims,
+        unverified,
+        dropped,
+        status: { configured: true, filename: 'resume.pdf', size_bytes: 1024,
+                  modified_at: '2026-09-23T00:00:00Z', claims, ...status },
+      })
+    }),
+  )
+  return spy
+}
+
+export function mockParseResumeFailure(status = 422, detail = 'resume text is empty') {
+  server.use(
+    http.post('/api/resume/parse', () => HttpResponse.json({ detail }, { status })),
+  )
+}
+
 export function mockReplaceResume({ status = 200, detail = null, ...over } = {}) {
   const spy = vi.fn()
   server.use(

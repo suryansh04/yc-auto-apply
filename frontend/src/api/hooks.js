@@ -218,6 +218,26 @@ export function useResumeStatus() {
  * go through `apiPost` (which sends JSON); the error shape is the same
  * `{detail}` FastAPI raises everywhere else.
  */
+/**
+ * POST /api/resume/parse - read the resume and replace the claims a
+ * letter may assert about the operator.
+ *
+ * The one call on this screen that spends a model call, so it is never
+ * automatic: the operator asks for it. Invalidating the status is what
+ * updates the claim count everywhere it is shown.
+ */
+export function useParseResume(options = {}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiPost('/resume/parse'),
+    ...options,
+    onSuccess: (data, vars, ctx) => {
+      queryClient.invalidateQueries({ queryKey: ['resume-status'] })
+      options.onSuccess?.(data, vars, ctx)
+    },
+  })
+}
+
 export function useReplaceResume() {
   const queryClient = useQueryClient()
   return useMutation({

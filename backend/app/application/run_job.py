@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Callable, Protocol
 
+from app.application.errors import OperatorError
+
 
 class JobAlreadyRunning(Exception):
     def __init__(self, kind: str, job_id: int):
@@ -65,9 +67,20 @@ class RunJob:
         self._commit()
 
     def fail(self, job_id: int, exc: BaseException) -> None:
-        # Type name only: an exception message can carry an API key.
-        self.repo.upsert(id=job_id, status="failed",
-                         finished_at=self._clock.now(), error=type(exc).__name__)
+        # Type name only, because an exception message can carry an API
+        # key - a provider's 401 body, a connection string, a traceback's
+        # locals.
+        #
+        # The one exception is `OperatorError` (2026-09-23), which a stage
+        # raises when its message was WRITTEN for the operator: a setting
+        # named but never valued, a step that has to be run first, a
+        # refusal made by policy. Showing the type name for those left the
+        # UI saying `failed: ValueError` while the sentence telling him
+        # what to do sat in a terminal he had no reason to be watching.
+        # See `app.application.errors` for why this is safe by
+        # construction rather than by judgement.
+        self.repo.upsert(id=job_id, status="failed", finished_at=self._clock.now(),
+                         error=str(exc) if isinstance(exc, OperatorError) else type(exc).__name__)
         self._commit()
 
     def recover_stale(self, max_age_seconds: int | None = 3600) -> int:

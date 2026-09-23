@@ -98,7 +98,7 @@ def _founder(repos, name):
     return next(f for f in repos.founder.rows.values() if f.full_name == name)
 
 
-def test_phase_1_pipeline_end_to_end_offline(repos):
+def test_phase_1_pipeline_end_to_end_offline(repos, tmp_path):
     # 1. sync ------------------------------------------------------------
     sync = SyncCompanies(FakeYCDirectory(DIRECTORY), repos.company).run()
     assert (sync.fetched, sync.matched, sync.upserted) == (4, 3, 3)
@@ -154,8 +154,14 @@ def test_phase_1_pipeline_end_to_end_offline(repos):
         assert repos.message.get_outbound(outreach.id, 0).approved_at == NOW.now()
 
     # 6. send ------------------------------------------------------------------
+    # A real file: since 2026-09-23 the run checks the attachment is
+    # readable before reserving anything, which is the whole point of the
+    # check - "resume.pdf" relative to the test's cwd was never one.
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4")
     sender = FakeSender()
-    sent = SendApproved(sender, NOW, repos, signature=SIGNATURE, attachment_path="resume.pdf").run(cap=10)
+    sent = SendApproved(sender, NOW, repos, signature=SIGNATURE,
+                        attachment_path=str(resume)).run(cap=10)
     assert (sent.sent, sent.errors, sent.skipped_cap, sent.needs_manual_check) == (2, 0, 0, 0)
     assert [m["to"] for m in sender.sent] == ["madhav@vahan.ai", "asha@acme.com"]
 

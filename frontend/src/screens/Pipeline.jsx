@@ -193,7 +193,21 @@ function JobStatusCell({ job }) {
   }
 
   if (job.status === 'failed') {
-    return <Badge variant="destructive">failed: {job.error ?? 'unknown error'}</Badge>
+    // 2026-09-23: `job.error` used to be an exception type name and
+    // nothing else, which fits a badge. A stage may now answer with a
+    // sentence written for the operator (`app.application.errors`), and
+    // a sentence in a badge is a sentence nobody can read - so anything
+    // longer than a type name gets room to wrap.
+    const reason = job.error ?? 'unknown error'
+    if (reason.length <= 32 && !reason.includes(' ')) {
+      return <Badge variant="destructive">failed: {reason}</Badge>
+    }
+    return (
+      <div className="flex max-w-prose flex-wrap items-start gap-2">
+        <Badge variant="destructive">failed</Badge>
+        <span className="text-destructive text-sm leading-snug">{reason}</span>
+      </div>
+    )
   }
 
   if (job.status === 'succeeded') {

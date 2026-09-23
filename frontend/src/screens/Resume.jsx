@@ -9,8 +9,8 @@
 // and a link that opens another tab is one more click before the thing
 // the page exists for.
 import { useRef } from 'react'
-import { ExternalLink, Upload } from 'lucide-react'
-import { useReplaceResume, useResumeStatus } from '../api/hooks'
+import { BookOpenCheck, ExternalLink, Upload } from 'lucide-react'
+import { useParseResume, useReplaceResume, useResumeStatus } from '../api/hooks'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,6 +39,7 @@ function when(iso) {
 export default function Resume() {
   const status = useResumeStatus()
   const replace = useReplaceResume()
+  const parse = useParseResume()
   const fileInput = useRef(null)
   const data = status.data
 
@@ -85,7 +86,24 @@ export default function Resume() {
               </a>
             </Button>
           )}
-          <Button disabled={replace.isPending} onClick={() => fileInput.current?.click()}>
+          {/* Operator request (2026-09-23): parsing used to be
+              `python -m app.cli parse-resume PATH` and nothing else,
+              which made a brand-new operator's first Draft a dead end -
+              it fails until the resume has been read, and the UI had
+              nowhere to read it from. It is the one button here that
+              spends a model call, so it is never automatic. */}
+          {data?.configured && (
+            <Button
+              variant="outline"
+              disabled={parse.isPending || replace.isPending}
+              onClick={() => parse.mutate()}
+            >
+              {parse.isPending ? <Spinner /> : <BookOpenCheck />}
+              Re-read my resume
+            </Button>
+          )}
+          <Button disabled={replace.isPending || parse.isPending}
+                  onClick={() => fileInput.current?.click()}>
             {replace.isPending ? <Spinner /> : <Upload />}
             {data?.configured ? 'Replace' : 'Upload a resume'}
           </Button>
@@ -118,11 +136,30 @@ export default function Resume() {
                 Letting the two drift apart silently would be worse than
                 either. */}
             Every letter from now on carries the new file. The {data?.claims ?? 0} claims the
-            drafter is held to still come from the old one &mdash; run{' '}
-            <code className="bg-muted rounded px-1 py-0.5 font-mono text-xs">
-              python -m app.cli parse-resume
-            </code>{' '}
-            to re-read it.
+            drafter is held to still come from the old one &mdash; press{' '}
+            <strong>Re-read my resume</strong> to bring them into line.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {parse.isError && (
+        <Alert variant="destructive" role="alert">
+          <AlertTitle>Could not read the resume</AlertTitle>
+          <AlertDescription>{parse.error.message}</AlertDescription>
+        </Alert>
+      )}
+      {parse.isSuccess && (
+        <Alert>
+          <AlertTitle>Resume read</AlertTitle>
+          <AlertDescription>
+            {/* Both counts, because "it worked" and "it worked and threw
+                half of it away" must not look the same. */}
+            {parse.data.claims} claim{parse.data.claims === 1 ? '' : 's'} a letter may now make
+            about you.
+            {parse.data.dropped > 0 &&
+              ` ${parse.data.dropped} were thrown away for quoting something that is not in the file.`}
+            {parse.data.unverified > 0 &&
+              ` ${parse.data.unverified} could not be matched to the resume word for word, so drafts will skip them.`}
           </AlertDescription>
         </Alert>
       )}
@@ -187,11 +224,9 @@ export default function Resume() {
                 <CardTitle className="text-sm">What the drafter knows</CardTitle>
                 <CardDescription>
                   {data.claims} claims parsed from a resume. These are the only things a draft
-                  may say about you &mdash; and they come from{' '}
-                  <code className="bg-muted rounded px-1 py-0.5 font-mono text-xs">
-                    parse-resume
-                  </code>
-                  , not from this file. Replacing the PDF does not re-read it.
+                  may say about you &mdash; and they are stored separately from this file, so
+                  replacing the PDF does not re-read it. <strong>Re-read my resume</strong> is
+                  what brings the two back into line.
                 </CardDescription>
               </CardHeader>
             </Card>

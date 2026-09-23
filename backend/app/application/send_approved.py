@@ -77,6 +77,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable, Protocol
 
+from pathlib import Path
+
+from app.application.errors import OperatorError
 from app.domain.compose import compose_wire_text, first_name
 from app.domain.letter import contains_stub
 from app.domain.states import OutreachState, assert_transition
@@ -170,6 +173,28 @@ class SendApproved:
         configured = getattr(settings_row, "followup_day_2", None)
         return configured if configured is not None else self._followup_day_2
 
+    def _require_attachment(self) -> None:
+        """Raise if the resume is not readable, BEFORE a row is reserved.
+
+        `OperatorError`, so the failure reads as a sentence on the screen
+        the operator pressed Send from rather than as `FileNotFoundError`
+        - it is a fact about his configuration, not a crash. The path
+        itself is not in the message: it is his own filesystem layout and
+        it is already on the Resume screen.
+        """
+        if not self._attachment_path:
+            return
+        path = Path(self._attachment_path)
+        try:
+            with path.open("rb") as fh:
+                fh.read(1)
+        except OSError as exc:
+            raise OperatorError(
+                "the resume file cannot be read, so nothing was sent "
+                f"({type(exc).__name__}). Check RESUME_PATH, and that the file is "
+                "on this machine rather than waiting to sync."
+            ) from None
+
     def run(self, cap: int, limit: int | None = None,
             only_outreach_id: int | None = None) -> SendResult:
         """Send the approved letters, newest rules first.
@@ -182,6 +207,15 @@ class SendApproved:
         batch could not.
         """
         result = SendResult()
+        # Before anything is reserved (2026-09-23). `build_mime` reads the
+        # attachment from disk at send time, and a read that fails THERE
+        # fails after the row has been reserved and committed: `sent_at`
+        # is set on a letter that never went out, and the reservation's
+        # own `sent_at IS NULL` condition means it can never be retried.
+        # The file is checked once here, where failing costs nothing but
+        # a stopped run. What is left is the microseconds between this and
+        # each send, rather than the whole run.
+        self._require_attachment()
         now = self._clock.now()
         # Ruling R-A (fix round 1): a ROLLING 24-hour window, not a calendar
         # day — a fixed midnight boundary would let 2x the cap out within a
@@ -248,6 +282,10 @@ class SendApproved:
                 self._pause()
 
             # -- 1. reserve, in its own committed transaction ----------------
+            # Re-checked per letter: a batch is minutes long with a pause
+            # between sends, and a file can be moved or un-synced inside
+            # that window.
+            self._require_attachment()
             now = self._clock.now()
             if self._repos.message.reserve_for_send(row.id, now) != 1:
                 result.skipped_not_reservable += 1

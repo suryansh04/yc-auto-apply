@@ -370,15 +370,62 @@ def test_wire_text_is_composed_and_the_stored_body_is_untouched(repos, one_appro
     assert _outbound(repos, one_approved).body == stored_body
 
 
-def test_attachment_path_is_passed_to_the_sender(repos, one_approved):
+def test_attachment_path_is_passed_to_the_sender(repos, one_approved, tmp_path):
     class RecordingSender(FakeSender):
         def send(self, to, subject, body, attachment_path):
             self.sent.append({"to": to, "subject": subject, "body": body, "attachment": attachment_path})
             return ("m", "t")
 
+    # A real file: since 2026-09-23 the run checks the attachment is
+    # readable before reserving anything, so a made-up path no longer
+    # gets as far as the sender - which is the point.
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4")
     s = RecordingSender()
-    SendApproved(s, FrozenClock(), repos, attachment_path="/tmp/resume.pdf").run(cap=10)
-    assert s.sent[0]["attachment"] == "/tmp/resume.pdf"
+    SendApproved(s, FrozenClock(), repos, attachment_path=str(resume)).run(cap=10)
+    assert s.sent[0]["attachment"] == str(resume)
+
+
+# --- the attachment is checked before anything is reserved ----------------
+#
+# `build_mime` reads the file at send time, and a read that fails THERE
+# fails after the row has been reserved and committed: `sent_at` set on a
+# letter that never went out, and the reservation's own `sent_at IS NULL`
+# condition means it can never be retried.
+
+
+def test_a_missing_attachment_stops_the_run_before_reserving(repos, one_approved):
+    from app.application.errors import OperatorError
+
+    s = FakeSender()
+    use_case = SendApproved(s, FrozenClock(), repos, attachment_path="/nope/resume.pdf")
+    with pytest.raises(OperatorError, match="cannot be read"):
+        use_case.run(cap=10)
+    assert s.sent == []
+    # Nothing reserved: the letter is still sendable once the file is back.
+    row = repos.message.get_outbound(one_approved.id, 0)
+    assert row.sent_at is None
+
+
+def test_the_failure_names_the_setting_not_the_path(repos, one_approved):
+    # The path is the operator's own filesystem layout and it is already
+    # on the Resume screen; what he needs told is which knob to turn.
+    from app.application.errors import OperatorError
+
+    use_case = SendApproved(FakeSender(), FrozenClock(), repos,
+                            attachment_path="/nope/secret-folder/resume.pdf")
+    with pytest.raises(OperatorError) as exc_info:
+        use_case.run(cap=10)
+    assert "RESUME_PATH" in str(exc_info.value)
+    assert "secret-folder" not in str(exc_info.value)
+
+
+def test_no_attachment_configured_is_not_an_error(repos, one_approved):
+    # `attachment_path=None` is the test/offline path and a legitimate
+    # configuration; there is simply nothing to check.
+    s = FakeSender()
+    SendApproved(s, FrozenClock(), repos, attachment_path=None).run(cap=10)
+    assert len(s.sent) == 1
 
 
 # --- only APPROVED can be sent ---------------------------------------------------

@@ -68,3 +68,38 @@ def fake_reviser(repos):
     reviser = FakeReviser()
     repos.reviser = reviser
     return reviser
+
+
+class _OfflineParser:
+    """Stands in for a real `ResumeParser` so no API test can reach a
+    provider, for the same reason `_OfflineReviser` exists above:
+    `POST /api/resume/parse` builds a real adapter when `Repos.parser` is
+    None, and `backend/.env` is read even under `env -i`."""
+
+    def parse(self, raw_text):
+        raise AssertionError("an offline test reached the resume-parser seam")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_parser(repos):
+    repos.parser = _OfflineParser()
+    return repos.parser
+
+
+@pytest.fixture
+def fake_parser(repos):
+    """A `ResumeParser` that answers with whatever the test sets on
+    `.claims`, and records the text it was handed."""
+
+    class FakeParser:
+        def __init__(self):
+            self.claims = []
+            self.text = None
+
+        def parse(self, raw_text):
+            self.text = raw_text
+            return self.claims
+
+    parser = FakeParser()
+    repos.parser = parser
+    return parser

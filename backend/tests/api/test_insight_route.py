@@ -120,3 +120,41 @@ def test_a_missing_key_names_the_setting_not_its_value(
 
 def test_an_unknown_outreach_is_404(client, repos):
     assert client.post("/api/outreach/9999/insight").status_code == 404
+
+
+def test_another_asks_for_something_other_than_what_is_on_screen(
+    client, repos, pending_draft, fake_insight_writer
+):
+    """Live finding (2026-09-23): "it is showing the same for orangewood
+    and zingbus". Without naming what has already been offered, "write me
+    another" and "write me one" are the same request."""
+    from app.domain import letter
+
+    row = repos.message.get_outbound(pending_draft.outreach.id, 0)
+    in_the_letter = "You built a voice layer for people who do not type."
+    repos.message.upsert(id=row.id, body=letter.assemble_body("Vahan", [in_the_letter]))
+    fake_insight_writer.answer = {"paragraph": GOOD, "why": ""}
+
+    client.post(f"/api/outreach/{pending_draft.outreach.id}/insight",
+                json={"avoid": ["An earlier attempt nobody liked."]})
+
+    avoid = fake_insight_writer.context["avoid"]
+    # Both: what the letter says now, and what the screen has shown since.
+    assert in_the_letter in avoid
+    assert "An earlier attempt nobody liked." in avoid
+
+
+def test_the_template_every_company_would_get_is_refused(
+    client, repos, pending_draft, fake_insight_writer
+):
+    fake_insight_writer.answer = {
+        "paragraph": (
+            "I like that you put drivers and riders on the same side. Most hiring runs "
+            "through agents who take a cut and lose the candidate, so the person who needs "
+            "the work waits longest. You made it a phone call, which is the kind of thing "
+            "I want to build."
+        ),
+        "why": "",
+    }
+    body = client.post(f"/api/outreach/{pending_draft.outreach.id}/insight").json()
+    assert body["paragraph"] is None

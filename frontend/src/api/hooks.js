@@ -352,7 +352,10 @@ export function useGenericLine(options = {}) {
  */
 export function useWriteInsight(options = {}) {
   return useMutation({
-    mutationFn: (id) => apiPost(`/outreach/${id}/insight`),
+    // `avoid` is what the screen has already shown for this company, so
+    // pressing Another asks a different question from pressing nothing.
+    // The paragraph in the letter is found server-side.
+    mutationFn: ({ id, avoid = [] }) => apiPost(`/outreach/${id}/insight`, { avoid }),
     ...options,
   })
 }

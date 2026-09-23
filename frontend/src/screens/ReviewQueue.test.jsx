@@ -941,7 +941,7 @@ it('writes the company paragraph from their YC page when the AI tab is opened', 
   const write = mockWriteInsight({ paragraph: WRITTEN, why: 'the choice inside the product' })
   render(<ReviewQueue />)
   await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
-  await waitFor(() => expect(write).toHaveBeenCalledWith(1))
+  await waitFor(() => expect(write).toHaveBeenCalledWith(1, { avoid: [] }))
   expect(await screen.findByText(WRITTEN)).toBeInTheDocument()
 })
 
@@ -964,4 +964,18 @@ it('says why there is nothing instead of looking broken', async () => {
   render(<ReviewQueue />)
   await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
   expect(await screen.findByText(/no description on its YC page/i)).toBeInTheDocument()
+})
+
+it('asks for a different angle when Another is pressed', async () => {
+  // Live finding (2026-09-23): "it is showing the same for orangewood and
+  // zingbus". Without naming what is already on screen, Another and the
+  // first ask are the same request.
+  mockQueue([item(INSIGHT_LETTER)])
+  const write = mockWriteInsight({ paragraph: WRITTEN })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  await screen.findByText(WRITTEN)
+  await userEvent.click(screen.getByRole('button', { name: /another/i }))
+  await waitFor(() => expect(write).toHaveBeenCalledTimes(2))
+  expect(write.mock.calls[1][1].avoid).toEqual([WRITTEN])
 })

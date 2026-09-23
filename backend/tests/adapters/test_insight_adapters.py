@@ -86,12 +86,27 @@ def test_the_prompt_forbids_reciting_their_metrics():
     assert "Y Combinator" in _INSIGHT_SYSTEM  # ...and never to mention where it came from
 
 
-def test_the_prompt_carries_the_operator_s_own_example():
-    """The paragraph he asked for, verbatim - it is the standard the
-    model is told to match, so it may not drift by accident."""
+def test_the_prompt_describes_the_standard_without_quoting_it():
+    """Live finding (2026-09-23): the operator's own Loop Health sentence
+    was in the prompt as the worked example, and Sarvam wrote it again
+    for a bus company and a robotics company - "it is showing the same
+    for orangewood and zingbus". An example is a phrase a model reaches
+    for, so the one phrase that must not repeat cannot be in there."""
     from app.adapters.gemini import _INSIGHT_SYSTEM
 
-    assert "puts doctors and insurers on the same side" in _INSIGHT_SYSTEM
+    assert "doctors and insurers" not in _INSIGHT_SYSTEM
+    # Described instead, and banned by name.
+    assert "health insurance company" in _INSIGHT_SYSTEM
+    assert '"on the same side"' in _INSIGHT_SYSTEM
+
+
+def test_what_has_already_been_offered_is_named_in_the_prompt():
+    """"Write me another" and "write me one" are the same request unless
+    the model is told what it already produced."""
+    prompt = build_insight_prompt({**CONTEXT, "avoid": ["An earlier attempt."]})
+    assert "ALREADY WRITTEN FOR THIS COMPANY" in prompt
+    assert "An earlier attempt." in prompt
+    assert "ALREADY WRITTEN" not in build_insight_prompt(CONTEXT)
 
 
 # --- SarvamInsightWriter -------------------------------------------------------

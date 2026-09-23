@@ -29,6 +29,7 @@ from app.api.schemas import (
     CheckOut,
     EditIn,
     HighlightOut,
+    InsightIn,
     InsightOut,
     OkOut,
     QueueItemOut,
@@ -280,7 +281,8 @@ def suggest(outreach_id: int, payload: CheckIn | None = None,
 
 
 @router.post("/outreach/{outreach_id}/insight", response_model=InsightOut)
-def write_insight(outreach_id: int, repos: Repos = Depends(get_repos)) -> InsightOut:
+def write_insight(outreach_id: int, payload: InsightIn | None = None,
+                  repos: Repos = Depends(get_repos)) -> InsightOut:
     """A company paragraph written from the company's own YC description.
 
     Operator request (2026-09-23): the **AI suggestion** tab on that
@@ -316,11 +318,18 @@ def write_insight(outreach_id: int, repos: Repos = Depends(get_repos)) -> Insigh
             # A setting NAME ("SARVAM_API_KEY is not set"), never a key.
             return InsightOut(unavailable=str(exc))
 
+    # What this company has already been given: the paragraph in the
+    # letter now, plus whatever the last press of "Another" produced.
+    # Without it, "write me another" and "write me one" are the same
+    # request and come back the same (live finding 2026-09-23).
+    body = getattr(item.message, "body", "") or ""
+    avoid = [a for a in ([letter.insight_region(body)] + list(payload.avoid if payload else [])) if a]
     answer = run_insight_writer(
         writer,
         company_name=getattr(company, "name", None) or "",
         one_liner=getattr(company, "one_liner", None) or "",
         description=description,
+        avoid=avoid,
     )
     if answer is None:
         return InsightOut(

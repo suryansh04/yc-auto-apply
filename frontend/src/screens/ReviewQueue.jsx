@@ -136,11 +136,14 @@ export default function ReviewQueue() {
   // the AI suggestion tab on that paragraph - it costs a model call, and
   // most letters are approved without anyone opening it.
   const writeInsight = useWriteInsight({
-    onSuccess: (data, id) => {
+    onSuccess: (data, { id }) => {
       setInsight(data)
       setInsightId(id)
+      // Remembered so the next Another is asked for something else
+      // again, rather than walking back to the first answer.
+      if (data?.paragraph) setInsightSeen((seen) => [...seen, data.paragraph])
     },
-    onError: (err, id) => {
+    onError: (err, { id }) => {
       setInsight({ paragraph: null, unavailable: err.message })
       setInsightId(id)
     },
@@ -158,6 +161,7 @@ export default function ReviewQueue() {
       setSuggestedId(null)
       setInsight(null)
       setInsightId(null)
+      setInsightSeen([])
     },
   })
   const checkDraft = useCheckDraft({
@@ -211,6 +215,7 @@ export default function ReviewQueue() {
   const [rewrites, setRewrites] = useState({})
   const [insight, setInsight] = useState(null)
   const [insightId, setInsightId] = useState(null)
+  const [insightSeen, setInsightSeen] = useState([])
   const [suggestedId, setSuggestedId] = useState(null)
 
   // Prune settled ids the backend has already confirmed (no longer in
@@ -494,7 +499,10 @@ export default function ReviewQueue() {
   // suggestion tab on that paragraph pays for one. Asking twice is how
   // the operator gets a second angle, so a repeat is never suppressed.
   function askForInsight() {
-    if (!writeInsight.isPending) writeInsight.mutate(current.outreach_id)
+    if (writeInsight.isPending) return
+    const seen = insightId === current.outreach_id ? insightSeen : []
+    if (seen.length === 0 && insightSeen.length > 0) setInsightSeen([])
+    writeInsight.mutate({ id: current.outreach_id, avoid: seen })
   }
   // Accept it: the paragraph the API wrote goes in where the current one
   // is, and `edit` re-runs the checks over the result.

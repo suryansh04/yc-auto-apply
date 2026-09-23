@@ -1129,46 +1129,74 @@ must not pretend to.
 THE SHAPE, in three sentences:
 
 1. What you noticed about the way they built it. Not what the product is -
-   the CHOICE inside it. Start from the structure: who they put on the same
-   side, what they refused to charge for, what they made unlimited, what
-   they moved from one party to another.
+   the CHOICE inside it. Look for the structure: what they refused to
+   charge for, what they made unlimited, which two parties they stopped
+   treating as opponents, what they moved from an expert to an ordinary
+   person, what they deliberately did NOT build.
 2. How that problem normally works, and why the ordinary version is bad for
    the actual person living with it. Plain language, the way you would
    explain it to a friend.
-3. What they did instead, and one short clause on why that is the kind of
-   thing you want to build.
+3. What they did instead, and what that means for the person on the other
+   end.
 
-THE STANDARD. This is the paragraph to match, for a health insurance
-company whose description says they combine primary care with insurance and
-give employees unlimited clinic visits:
+THE STANDARD, described rather than quoted. The paragraph this is modelled
+on was written by the sender himself, about a health insurance company
+that runs its own clinics. In three sentences it said: the company stopped
+treating the doctor and the insurer as opposite parties; cover in India
+normally pays out only at a hospital, so people buy it every year and
+never touch it; they turned it into something used on ordinary days. One
+structural observation, one sentence about the ordinary world, one about
+what they changed. No numbers. No praise. It reads like a person thinking
+out loud.
 
-  I like how Loop puts doctors and insurers on the same side. Most health
-  insurance in India only kicks in when you land in a hospital, so people
-  pay for it every year and barely use it. You turned it into something
-  people actually use day to day, and that's the kind of thing I want to
-  build.
+Its exact wording is deliberately NOT reproduced here, because a model
+given that sentence writes it again for every company it is asked about -
+a bus company, a robotics company, a bookkeeping app - and the founder who
+receives it can tell.
 
-Notice what it does: one structural observation, one sentence about the
-ordinary world, one about what they changed. It quotes no numbers. It
-praises nothing. It reads like a person thinking out loud.
+**Writing that same paragraph for every company is the single most common
+failure.** "I like that you put X on the same side as Y", then "most
+people...", then "which is the kind of thing I want to build" is a
+template, and a founder who has read one of these has read all of them.
+The observation is yours only if it could not be said about a different
+company. Every phrase below is BANNED, wherever it appears:
 
-TWO MORE, for companies that are not health insurance:
+  - "on the same side" / "puts X and Y on the same side"
+  - "which is the kind of thing I want to build"
+  - "which is the sort of problem I want to work on"
+  - "that is the kind of system/interface/problem I want to ..."
 
-  Company: Halt (invented), a tool that reviews infrastructure changes
-  before they are applied.
-  I like that Halt reads the change before it runs rather than paging
-  someone after it breaks. Most teams find out their config was wrong from
-  an outage in the middle of the night, which means the person who has to
-  fix it is the person least able to think. Catching it while someone is still awake and looking
-  at the diff is a much better place to put the work.
+Open a different way each time. Any of these is a better start than
+"I like that you ...": name the thing they refused to do ("You could have
+built X and you did not."), start from the person on the other end ("A
+shopkeeper who ..."), start from what is normally true ("Buying a used car
+usually means ..."), or start from the mechanism itself ("Charging the
+employer instead of the patient changes ...").
 
-  Company: Kirana Books (invented), bookkeeping for small shop owners over
-  WhatsApp.
-  I like that you let shop owners keep their books in the app they already
-  have open all day. Every other option asks a shopkeeper to learn
-  accounting software in a language that is not theirs, so the ledger ends
-  up back in a paper notebook. Meeting people inside the habit they already
-  have is the harder engineering problem and the right one.
+THREE MORE, deliberately different in shape, for invented companies:
+
+  Company: Halt, a tool that reviews infrastructure changes before they
+  are applied.
+  Halt reads the change before it runs instead of paging someone after it
+  breaks. Most teams find out their config was wrong from an outage in the
+  middle of the night, which means the person who has to fix it is the
+  person least able to think. Catching it while someone is awake and
+  looking at the diff is a much better place to put the work.
+
+  Company: Kirana Books, bookkeeping for small shop owners over WhatsApp.
+  A shopkeeper already has WhatsApp open all day, and you decided that is
+  where the books belong. Every other option asks them to learn accounting
+  software in a language that is not theirs, so the ledger ends up back in
+  a paper notebook. Building inside the habit someone already has is the
+  harder problem and the one worth solving.
+
+  Company: Tenner, salary advances paid by the employer rather than a
+  lender.
+  You could have lent people money at a rate that covered the risk, and
+  you did not. Short-term credit in India usually costs the most to the
+  people with the least room to pay it, and the lender is the only party
+  who gains from that. Moving the advance to money someone has already
+  earned takes the interest out of the problem entirely.
 
 HARD RULES:
 
@@ -1199,12 +1227,10 @@ HARD RULES:
 - Do not mention the internship, the student's skills, projects, resume or
   availability. Other paragraphs do that, and repeating it wastes the only
   paragraph that is about them.
-- The last clause names what YOU would want to work on, and it has to be
-  about THIS company. "which is the sort of problem I want to work on" and
-  "that's the kind of thing I want to build" are formulas that fit any
-  company, so they are worth nothing - end on the specific thing instead
-  (the interface, the routing, the fact that the boring half is now a
-  machine's job). Never copy the example's closing words.
+- End on the specific thing, not on yourself. A closing clause that fits
+  any company ("which is the kind of thing I want to build") is worth
+  nothing and is banned above. The last sentence lands on what their
+  choice does for the person on the other end.
 - Write like a smart twenty-year-old talking, not like a brochure. Short
   words. Contractions are fine.
 
@@ -1230,9 +1256,17 @@ def build_insight_prompt(context: dict) -> str:
         "",
         "WHAT THE FOUNDERS WROTE ABOUT IT",
         description or "(nothing given)",
-        "",
-        "Write the paragraph.",
     ]
+    # Paragraphs this company has already been given - the one in the
+    # letter now, and anything a previous attempt produced. Named rather
+    # than described, because "write something different" means nothing
+    # without the thing it has to differ from.
+    avoid = [str(a).strip() for a in (context.get("avoid") or []) if str(a).strip()]
+    if avoid:
+        lines += ["", "ALREADY WRITTEN FOR THIS COMPANY - take a different angle, and do "
+                      "not reuse these sentences or their shape:"]
+        lines += [f"  - {a}" for a in avoid]
+    lines += ["", "Write the paragraph."]
     return "\n".join(lines)
 
 

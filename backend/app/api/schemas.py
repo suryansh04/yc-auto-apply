@@ -193,6 +193,16 @@ class SuggestOut(BaseModel):
     unavailable: str | None = None
 
 
+class InsightIn(BaseModel):
+    """Paragraphs this company has already been offered.
+
+    The one in the letter is found server-side; this is what the screen
+    has shown since - so pressing **Another** asks a different question
+    from pressing nothing, instead of the same one twice."""
+
+    avoid: list[str] = []
+
+
 class InsightOut(BaseModel):
     """A company paragraph written from the company's own YC description.
 

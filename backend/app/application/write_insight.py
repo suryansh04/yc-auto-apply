@@ -36,7 +36,9 @@ What comes back is not trusted to be usable. A paragraph is dropped when:
   one back at a founder is the opposite of the paragraph's job. The
   prompt forbids it; this is the check that makes the ban real.
 - it is not plain text (markdown, an em dash, a smart quote), which the
-  letter is pinned to be (D10).
+  letter is pinned to be (D10);
+- it reaches for the worked example's template ("on the same side ...
+  which is the kind of thing I want to build"). See `_FORMULA_TELLS`.
 """
 
 from __future__ import annotations
@@ -76,6 +78,32 @@ _DISCOVERY_TELLS = (
     "y combinator", "your website says", "according to your",
 )
 
+# Live finding (2026-09-23): the operator read the paragraphs for
+# Orangewood Labs and zingbus and said "it is showing the same for
+# orangewood and zingbus". They were not the same sentence - they were
+# the same TEMPLATE, taken from the worked example in the prompt: "I like
+# that you put X on the same side as Y", then the ordinary world, then
+# "which is the kind of thing I want to build". A founder who has read
+# one of those has read all of them, which is precisely the thing this
+# paragraph exists to avoid.
+#
+# The prompt bans them and this is what makes the ban real. The operator's
+# own Loop Health line uses "on the same side" and is not affected: that
+# line is already written into his letter, and what is banned here is a
+# MODEL reaching for it again on a company it does not fit.
+_FORMULA_TELLS = (
+    "on the same side",
+    "kind of thing i want to build",
+    "kind of thing i want to work on",
+    "sort of problem i want to work on",
+    "sort of thing i want to build",
+    "kind of system i want to build",
+    "kind of interface i want to build",
+    "kind of problem i want to work on",
+    "which is the interface i want",
+    "is what i want to work on",
+)
+
 _TELLS = tuple(
     p.casefold()
     for p in (*BANNED_PHRASES, *SOURCE_REFERENCE_PHRASES, *TRIED_IT_PHRASES, *_DISCOVERY_TELLS)
@@ -107,11 +135,28 @@ def unusable_reason(paragraph: str) -> str | None:
             return f"uses a phrase the letter bans ({phrase!r})"
     if _NUMBER.search(text):
         return "quotes a number from their YC page"
+    for phrase in _FORMULA_TELLS:
+        if phrase in folded:
+            return f"reuses the template every other letter would get ({phrase!r})"
     return None
 
 
-def run_insight_writer(writer, company_name: str, one_liner: str, description: str) -> dict | None:
+def run_insight_writer(
+    writer, company_name: str, one_liner: str, description: str, avoid: list[str] | None = None,
+) -> dict | None:
     """Ask for a company paragraph, and return it only if it is usable.
+
+    `avoid` is what this company has already been given - the paragraph in
+    the letter now, and whatever a previous press of "Another" produced.
+    It is handed to the model, and an answer that comes back as one of
+    them anyway is refused here.
+
+    A paragraph rejected for reaching for the template is asked ONE more
+    time, with the rejected text added to `avoid`. Silence is a worse
+    answer than a second attempt, and a template answer is a failure the
+    model can actually correct when it is shown what it just wrote. Every
+    other rejection stands: a model that quoted a number or invented a
+    detail is not more trustworthy on the retry.
 
     `{paragraph, why}` or None. Never raises (see module docstring).
     """
@@ -119,20 +164,41 @@ def run_insight_writer(writer, company_name: str, one_liner: str, description: s
         log.info("insight: %s has no YC description to write from", company_name)
         return None
 
-    try:
-        answer = writer.write({
-            "company_name": company_name,
-            "one_liner": one_liner or "",
-            "description": description,
-        })
-    except Exception as exc:  # noqa: BLE001 - a provider failure is advice that did not arrive
-        # Type name only: a provider's message can carry a key.
-        log.warning("insight: writer failed (%s)", type(exc).__name__)
-        return None
+    seen = [a.strip() for a in (avoid or []) if a and a.strip()]
+    for attempt in (1, 2):
+        try:
+            answer = writer.write({
+                "company_name": company_name,
+                "one_liner": one_liner or "",
+                "description": description,
+                "avoid": list(seen),
+            })
+        except Exception as exc:  # noqa: BLE001 - a provider failure is advice that did not arrive
+            # Type name only: a provider's message can carry a key.
+            log.warning("insight: writer failed (%s)", type(exc).__name__)
+            return None
 
-    paragraph = str((answer or {}).get("paragraph") or "").strip()
+        paragraph = str((answer or {}).get("paragraph") or "").strip()
+        reason = _rejection(paragraph, seen)
+        if reason is None:
+            return {"paragraph": paragraph, "why": str((answer or {}).get("why") or "").strip()}
+        log.info("insight: dropped an answer for %s - %s", company_name, reason)
+        if attempt == 2 or not _worth_retrying(reason) or not paragraph:
+            return None
+        seen.append(paragraph)
+    return None
+
+
+def _rejection(paragraph: str, seen: list[str]) -> str | None:
+    """`unusable_reason`, plus "we have already offered this one"."""
     reason = unusable_reason(paragraph)
     if reason is not None:
-        log.info("insight: dropped an answer for %s - %s", company_name, reason)
-        return None
-    return {"paragraph": paragraph, "why": str((answer or {}).get("why") or "").strip()}
+        return reason
+    folded = paragraph.strip().casefold()
+    if any(folded == a.strip().casefold() for a in seen):
+        return "the same paragraph the letter already has"
+    return None
+
+
+def _worth_retrying(reason: str) -> bool:
+    return reason.startswith("reuses the template") or reason.startswith("the same paragraph")

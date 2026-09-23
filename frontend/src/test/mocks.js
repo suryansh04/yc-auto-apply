@@ -282,8 +282,8 @@ export function mockGenericLine({ notes = [], highlights = null } = {}) {
 export function mockWriteInsight({ paragraph = null, why = '', unavailable = null } = {}) {
   const spy = vi.fn()
   server.use(
-    http.post('/api/outreach/:id/insight', ({ params }) => {
-      spy(Number(params.id))
+    http.post('/api/outreach/:id/insight', async ({ params, request }) => {
+      spy(Number(params.id), await request.json().catch(() => ({})))
       return HttpResponse.json({ paragraph, why, unavailable })
     }),
   )

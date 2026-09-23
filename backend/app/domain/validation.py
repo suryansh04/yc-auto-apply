@@ -241,10 +241,19 @@ def validate_style(
             f"fewer than {MIN_PARAGRAPHS} paragraphs - the hook, what you built and "
             "the ask must not run together in one block (separate them with a blank line)"
         )
+    # A list item is not prose. Live finding (2026-09-23): the operator's
+    # new numbered list of what he built - three items, five sentences
+    # between them - tripped this rule as though it were one run-on
+    # paragraph. The rule is about a wall of prose, so each item of a list
+    # (a line opening "1. ", "• " or "- ") is counted on its own.
     for p in paragraphs:
-        if len(_sentences(p)) > MAX_SENTENCES_PER_PARAGRAPH:
-            errs.append(f"a paragraph exceeds {MAX_SENTENCES_PER_PARAGRAPH} sentences")
-            break
+        for piece in re.split(r"\n(?=\s*(?:\d+\.|•|-)\s)", p):
+            if len(_sentences(piece)) > MAX_SENTENCES_PER_PARAGRAPH:
+                errs.append(f"a paragraph exceeds {MAX_SENTENCES_PER_PARAGRAPH} sentences")
+                break
+        else:
+            continue
+        break
 
     if ";" in body:
         errs.append("contains a semicolon")

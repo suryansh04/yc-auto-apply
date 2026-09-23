@@ -45,7 +45,13 @@ and the signature are added at send time (there is no opt-out line as of
 # Disarms the cold-email frame before the founder has decided to stop
 # reading. "45 seconds" is a promise the length has to keep, which is why
 # MAX_WORDS in validation.py is a real cap and not decoration.
-OPENER = (
+#
+# Operator request (2026-09-23): the "I promise it's not another
+# AI-generated cold mail" half is gone. The old wording is kept below
+# (`OLD_OPENER`) so letters drafted before today can be recognised and
+# moved onto this one (`scripts/rebuilt.py`).
+OPENER = "This'll take 45 seconds."
+OLD_OPENER = (
     "This'll take 45 seconds, and I promise it's not another AI-generated "
     "cold mail."
 )
@@ -69,7 +75,23 @@ BACKGROUND = (
 # string to strip, swap and count. Plain text throughout (D10): no bold
 # markers, no smart quotes, nothing that renders as punctuation debris in
 # a plain-text mail client.
+#
+# Operator request (2026-09-23): the list is now three numbered items, in
+# his words, led by the Better work. `OLD_BUILT` is the list it replaced,
+# kept because it is also the anchor that finds the company paragraph in
+# every letter drafted before today.
 BUILT = (
+    "A few things I've built:\n"
+    "\n"
+    "1. At Better: I shipped the GitHub integration for Operate, an AI agent "
+    "that debugs production incidents. I moved it to safer read-only access "
+    "and cut repeated token calls by 98% with caching.\n"
+    "2. Lerno.ai: An AI learning platform that turns topics into animated "
+    "lessons. Won CodeClash 2.0, competing against 1,000+ teams.\n"
+    "3. WaveWatch: A coastal risk monitoring platform that won Smart India "
+    "Hackathon 2025, competing against 68,000+ teams."
+)
+OLD_BUILT = (
     "A few things I've built:\n"
     "\n"
     "• WaveWatch: A coastal risk monitoring platform that won Smart India "
@@ -237,19 +259,27 @@ def insight_region(body: str) -> str | None:
     guessing at which paragraph is "the company one" in a letter that does
     not have this shape would put a rewrite in the wrong place.
 
-    `OLD_BRIDGE` is still accepted as the closing anchor (2026-09-23):
-    letters drafted before it was dropped still carry it, and they are
-    reviewable letters, not history.
+    `OLD_BRIDGE` and `OLD_BUILT` are still accepted as anchors
+    (2026-09-23): letters drafted before those blocks changed still carry
+    them, and they are reviewable letters, not history.
     """
     text = body or ""
-    tail = _tail_anchor(text)
-    if BUILT not in text or tail is None:
+    head, tail = _head_anchor(text), _tail_anchor(text)
+    if head is None or tail is None:
         return None
-    after = text.split(BUILT, 1)[1]
+    after = text.split(head, 1)[1]
     if tail not in after:
         return None
     middle = after.split(tail, 1)[0]
     return middle.strip() or None
+
+
+def _head_anchor(text: str) -> str | None:
+    """Whichever list of what he built opens the company region here."""
+    for block in (BUILT, OLD_BUILT):
+        if block in text:
+            return block
+    return None
 
 
 def _tail_anchor(text: str) -> str | None:
@@ -269,9 +299,9 @@ def with_insight(body: str, paragraphs: list[str]) -> str | None:
     text = body or ""
     if insight_region(text) is None:
         return None
-    anchor = _tail_anchor(text)
-    head = text.split(BUILT, 1)[0] + BUILT
-    tail = anchor + text.split(BUILT, 1)[1].split(anchor, 1)[1]
+    built, anchor = _head_anchor(text), _tail_anchor(text)
+    head = text.split(built, 1)[0] + built
+    tail = anchor + text.split(built, 1)[1].split(anchor, 1)[1]
     fresh = [p.strip() for p in paragraphs if p and p.strip()]
     return "\n\n".join([head.rstrip(), *fresh, tail.lstrip()])
 

@@ -30,7 +30,8 @@ def test_the_senders_own_facts_appear_verbatim():
     for block in (letter.OPENER, letter.INTRO, letter.BACKGROUND, letter.BUILT):
         assert block in body
     assert "Smart India Hackathon 2025, competing against 68,000+ teams" in body
-    assert "CodeClash 2.0 at the Google office, competing against 1,000+ teams" in body
+    assert "Won CodeClash 2.0, competing against 1,000+ teams" in body
+    assert "cut repeated token calls by 98% with caching" in body
 
 
 def test_the_company_paragraph_sits_between_what_he_built_and_the_ask():
@@ -214,3 +215,27 @@ def test_the_subject_fits_the_checks_that_judge_a_subject():
     for name in ("Zave", "Loop Health", "Orangewood Labs"):
         words = len(letter.subject(name).split())
         assert validation.MIN_SUBJECT_WORDS <= words <= validation.MAX_SUBJECT_WORDS
+
+
+
+# --- the 2026-09-23 opener and list ----------------------------------------
+
+
+def test_the_opener_no_longer_promises_it_is_not_ai():
+    # Operator request: "remove this whole line from the mail".
+    body = letter.assemble_body("Zave", INSIGHT)
+    assert body.startswith("This'll take 45 seconds.\n\n")
+    assert "AI-generated" not in body
+
+
+def test_what_he_built_is_the_three_numbered_items_led_by_better():
+    items = letter.BUILT.split("\n\n", 1)[1].split("\n")
+    assert [i.split(":", 1)[0] for i in items] == ["1. At Better", "2. Lerno.ai", "3. WaveWatch"]
+
+
+def test_a_letter_with_the_old_list_is_still_found():
+    # Drafted before the list changed; still reviewable, so the company
+    # paragraph must still be findable and swappable.
+    old = letter.assemble_body("Zave", INSIGHT).replace(letter.BUILT, letter.OLD_BUILT)
+    assert letter.insight_region(old) == INSIGHT[0]
+    assert letter.OLD_BUILT in letter.with_insight(old, ["Another line."])

@@ -32,9 +32,11 @@ def test_draft_stage_falls_back_to_no_critic_when_build_critic_fails(monkeypatch
     captured = {}
 
     class _RecordingDraftOutreach:
-        def __init__(self, drafter, repos, keep_unverified=False, critic=None):
+        def __init__(self, drafter, repos, keep_unverified=False, critic=None,
+                     subject_writer=None):
             captured["drafter"] = drafter
             captured["critic"] = critic
+            captured["subject_writer"] = subject_writer
 
         def run(self, limit=None):
             return SimpleNamespace(drafted=0, manual_write=0, retried=0, errors=0, aborted=False)
@@ -47,6 +49,7 @@ def test_draft_stage_falls_back_to_no_critic_when_build_critic_fails(monkeypatch
     monkeypatch.setattr(deps, "build_drafter", lambda settings: drafter_sentinel)
     monkeypatch.setattr(deps, "build_critic", _raising_build_critic)
     monkeypatch.setattr(deps, "on_gemini_free_tier", lambda settings: False)
+    monkeypatch.setattr(deps, "build_subject_writer", lambda settings: None)
 
     for repo_name in (
         "CompanyLaunchRepo", "CompanyNewsRepo", "CompanyRepo", "FounderRepo",
@@ -94,7 +97,8 @@ def test_draft_stage_passes_the_built_critic_through_on_success(monkeypatch):
     captured = {}
 
     class _RecordingDraftOutreach:
-        def __init__(self, drafter, repos, keep_unverified=False, critic=None):
+        def __init__(self, drafter, repos, keep_unverified=False, critic=None,
+                     subject_writer=None):
             captured["critic"] = critic
 
         def run(self, limit=None):
@@ -104,6 +108,7 @@ def test_draft_stage_passes_the_built_critic_through_on_success(monkeypatch):
     monkeypatch.setattr(deps, "build_drafter", lambda settings: object())
     monkeypatch.setattr(deps, "build_critic", lambda settings: critic_sentinel)
     monkeypatch.setattr(deps, "on_gemini_free_tier", lambda settings: False)
+    monkeypatch.setattr(deps, "build_subject_writer", lambda settings: None)
 
     for repo_name in (
         "CompanyLaunchRepo", "CompanyNewsRepo", "CompanyRepo", "FounderRepo",

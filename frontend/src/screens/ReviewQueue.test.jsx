@@ -22,6 +22,7 @@ import {
   mockEdit,
   mockEditFailure,
   mockWriteInsight,
+  mockSuggestSubjects,
   mockQueue,
   mockQueueSequence,
   mockRedraft,
@@ -1062,4 +1063,43 @@ it('saves the formatting from the editor', async () => {
   await userEvent.click(screen.getByRole('button', { name: /^save/i }))
   await waitFor(() => expect(edit).toHaveBeenCalled())
   expect(edit.mock.calls[0][1].body_html).toContain('<strong>')
+})
+
+
+// --- subject lines written per company (operator request 2026-09-23) ------
+//
+// "a agent specifically for writing random catchy punchy subject instead
+// of generic one which we are currently use".
+
+it('suggests subjects on request and saves the one picked', async () => {
+  mockQueue([item({})])
+  const ask = mockSuggestSubjects({
+    subjects: ['the voice layer Vahan built', 'an intern for Vahan'],
+  })
+  const edit = mockEdit()
+  render(<ReviewQueue />)
+  // Nothing is asked for until the button is pressed - it costs a call.
+  await userEvent.click(await screen.findByRole('button', { name: /suggest subjects/i }))
+  await waitFor(() => expect(ask).toHaveBeenCalledTimes(1))
+  await userEvent.click(await screen.findByRole('button', { name: /use subject: an intern for vahan/i }))
+  await waitFor(() => expect(edit).toHaveBeenCalled())
+  expect(edit.mock.calls[0][1].subject).toBe('an intern for Vahan')
+})
+
+it('asks for different subjects the second time', async () => {
+  mockQueue([item({})])
+  const ask = mockSuggestSubjects({ subjects: ['the voice layer Vahan built'] })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /suggest subjects/i }))
+  await userEvent.click(await screen.findByRole('button', { name: /more subjects/i }))
+  await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
+  expect(ask.mock.calls[1][1].avoid).toEqual(['the voice layer Vahan built'])
+})
+
+it('says why there are no subjects rather than showing nothing', async () => {
+  mockQueue([item({})])
+  mockSuggestSubjects({ unavailable: 'SARVAM_API_KEY is not set' })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /suggest subjects/i }))
+  expect(await screen.findByText(/SARVAM_API_KEY is not set/)).toBeInTheDocument()
 })

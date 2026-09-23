@@ -26,6 +26,21 @@ from app.config import Settings, get_operator_settings, get_settings
 
 
 @pytest.fixture(autouse=True)
+def _no_real_subject_writer(monkeypatch):
+    """The draft job and `cli draft` build a subject writer for every
+    first email (2026-09-23). A test that sets any provider key would get
+    a real one, and the first drafted letter would make a live, billed
+    call. Every test gets the "unavailable" path - the operator's fixed
+    subject - unless it injects a fake of its own."""
+    from app.api import deps
+
+    def _offline(settings):
+        raise RuntimeError("offline test: no subject writer")
+
+    monkeypatch.setattr(deps, "build_subject_writer", _offline)
+
+
+@pytest.fixture(autouse=True)
 def _ignore_operator_dotenv(monkeypatch):
     """The suite must behave identically whether or not the operator has a
     real `backend/.env` (live run, 2026-09-13: LLM_PROVIDER=sarvam in the

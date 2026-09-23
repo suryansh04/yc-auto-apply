@@ -364,6 +364,18 @@ export function useWriteInsight(options = {}) {
   })
 }
 
+/**
+ * POST /api/outreach/{id}/subjects - subject lines written for this
+ * company (2026-09-23). Advice: never writes; "nothing usable" is a 200
+ * with a reason. `avoid` is what the screen has already shown.
+ */
+export function useSuggestSubjects(options = {}) {
+  return useMutation({
+    mutationFn: ({ id, avoid = [] }) => apiPost(`/outreach/${id}/subjects`, { avoid }),
+    ...options,
+  })
+}
+
 export function useSuggestFixes(options = {}) {
   return useMutation({
     mutationFn: ({ id, subject, body }) =>

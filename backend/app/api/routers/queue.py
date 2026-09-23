@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.api.deps import Repos, build_insight_writer, build_reviser, get_repos
+from app.api.deps import Repos, build_insight_writer, build_reviser, build_subject_writer, get_repos
 from app.api.schemas import (
     CheckIn,
     CheckOut,
@@ -33,12 +33,15 @@ from app.api.schemas import (
     InsightOut,
     OkOut,
     QueueItemOut,
+    SubjectsIn,
+    SubjectsOut,
     SuggestOut,
     SuggestionOut,
 )
 from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
 from app.application.suggest_fixes import run_reviser
 from app.application.write_insight import run_insight_writer
+from app.application.write_subjects import run_subject_writer
 from app.domain import letter
 from app.domain.compose import compose_wire_html, compose_wire_text, first_name
 from app.domain.highlight import highlights_for
@@ -340,6 +343,48 @@ def write_insight(outreach_id: int, payload: InsightIn | None = None,
             unavailable="nothing specific enough to offer from what they wrote about themselves"
         )
     return InsightOut(paragraph=answer["paragraph"], why=answer["why"])
+
+
+@router.post("/outreach/{outreach_id}/subjects", response_model=SubjectsOut)
+def suggest_subjects(outreach_id: int, payload: SubjectsIn | None = None,
+                     repos: Repos = Depends(get_repos)) -> SubjectsOut:
+    """Three subject lines written for this company.
+
+    Operator request (2026-09-23): "a agent specifically for writing
+    random catchy punchy subject". Advice, like `/insight`: writes
+    nothing - the operator picks one and it is saved through `edit` - and
+    every way of having nothing to offer answers 200 with a reason.
+
+    The subject the letter has now is always in `avoid`, along with any
+    the screen has already shown, so asking again means something.
+    """
+    try:
+        item = _use_case(repos).load(outreach_id)
+    except (OutreachNotFound, ValueError):
+        raise HTTPException(404, "no such outreach")
+
+    writer = getattr(repos, "subject_writer", None)
+    if writer is None:
+        try:
+            writer = build_subject_writer(get_settings())
+        except RuntimeError as exc:
+            # A setting NAME ("SARVAM_API_KEY is not set"), never a key.
+            return SubjectsOut(unavailable=str(exc))
+
+    company = item.company
+    body = getattr(item.message, "body", "") or ""
+    current = getattr(item.message, "subject", None)
+    subjects = run_subject_writer(
+        writer,
+        company_name=getattr(company, "name", None) or "",
+        one_liner=getattr(company, "one_liner", None) or "",
+        description=getattr(company, "long_description", None) or "",
+        paragraph=letter.insight_region(body) or "",
+        avoid=[a for a in [current, *(payload.avoid if payload else [])] if a],
+    )
+    if not subjects:
+        return SubjectsOut(unavailable="nothing usable this time - try again, or keep the one it has")
+    return SubjectsOut(subjects=subjects)
 
 
 @router.post("/outreach/{outreach_id}/approve", response_model=OkOut)

@@ -122,6 +122,39 @@ def fake_insight_writer(repos):
     return writer
 
 
+class _OfflineSubjectWriter:
+    """Stands in for a real `SubjectWriter`, for the reason the other
+    `_Offline*` classes above exist."""
+
+    def write(self, context):
+        raise AssertionError("an offline test reached the subject-writer seam")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_subject_writer_seam(repos):
+    repos.subject_writer = _OfflineSubjectWriter()
+    return repos.subject_writer
+
+
+@pytest.fixture
+def fake_subject_writer(repos):
+    """A `SubjectWriter` answering with whatever the test sets on
+    `.answer`, recording the context it was handed."""
+
+    class FakeSubjectWriter:
+        def __init__(self):
+            self.answer = []
+            self.context = None
+
+        def write(self, context):
+            self.context = context
+            return self.answer
+
+    writer = FakeSubjectWriter()
+    repos.subject_writer = writer
+    return writer
+
+
 @pytest.fixture
 def fake_parser(repos):
     """A `ResumeParser` that answers with whatever the test sets on

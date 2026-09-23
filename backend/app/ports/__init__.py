@@ -220,6 +220,22 @@ class InsightWriter(Protocol):
 
 
 @runtime_checkable
+class SubjectWriter(Protocol):
+    """Operator request (2026-09-23): "a agent specifically for writing
+    random catchy punchy subject instead of generic one".
+
+    `write(context)` takes `{company_name, one_liner, description,
+    paragraph, avoid}` and answers a list of candidate subject lines -
+    three, in three different styles. Advisory: the operator picks one,
+    or at draft time the first usable one is taken, and anything unusable
+    or any failure falls back to the operator's own fixed subject
+    (`app.domain.letter.subject`) - see
+    `app.application.write_subjects.run_subject_writer`."""
+
+    def write(self, context: dict) -> list[str]: ...
+
+
+@runtime_checkable
 class ResumeParser(Protocol):
     def parse(self, raw_text: str) -> list[dict]: ...  # [{kind, text, source_span}]
 

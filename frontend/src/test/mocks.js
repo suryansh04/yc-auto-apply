@@ -277,6 +277,18 @@ export function mockGenericLine({ notes = [], highlights = null } = {}) {
   return spy
 }
 
+/** POST /api/outreach/:id/subjects - subject lines for one letter. */
+export function mockSuggestSubjects({ subjects = [], unavailable = null } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/subjects', async ({ params, request }) => {
+      spy(Number(params.id), await request.json().catch(() => ({})))
+      return HttpResponse.json({ subjects, unavailable })
+    }),
+  )
+  return spy
+}
+
 /** POST /api/outreach/:id/insight - the company paragraph written from
  *  the company's own YC description (operator request 2026-09-23). */
 export function mockWriteInsight({ paragraph = null, why = '', unavailable = null } = {}) {

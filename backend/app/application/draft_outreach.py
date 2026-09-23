@@ -89,18 +89,19 @@ about the sender.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Protocol
 
 from app.application.critique_draft import CritiqueResult, run_critic
+from app.application.write_subjects import run_subject_writer
 from app.application.errors import OperatorError
 from app.domain.entities import Draft, ResumeClaim
 from app.domain.interns import is_intern_appropriate
 from app.domain.states import OutreachState, assert_transition
 from app.domain.targeting import OUT_OF_BAND_STATUS
 from app.domain.layout import normalise_paragraphs
-from app.domain.letter import assemble_body
+from app.domain.letter import assemble_body, insight_region
 from app.domain.letter import subject as fixed_subject
 from app.domain.names import company_display_name
 from app.domain.validation import SourceRow, validate_draft
@@ -166,11 +167,15 @@ class _Sources:
 
 
 class DraftOutreach:
-    def __init__(self, drafter, repos: DraftRepos, keep_unverified: bool = False, critic=None):
+    def __init__(self, drafter, repos: DraftRepos, keep_unverified: bool = False, critic=None,
+                 subject_writer=None):
         self._drafter = drafter
         self._repos = repos
         self._keep_unverified = keep_unverified
         self._critic = critic  # Task 13 (D22): advisory only, may be None
+        # 2026-09-23: writes the subject for a first email. None keeps the
+        # operator's fixed subject, exactly as before.
+        self._subject_writer = subject_writer
 
     def run(self, limit: int | None = None) -> DraftResult:
         result = DraftResult()
@@ -284,6 +289,8 @@ class DraftOutreach:
                 continue  # leave READY_TO_DRAFT; resumable next run
 
             consecutive_errors = 0
+            if step == 0 and not errors:
+                draft = self._with_written_subject(draft, company)
             self._finish(outreach, step, draft=draft, errors=errors, critic_result=critic_result)
             if errors:
                 result.manual_write += 1
@@ -293,6 +300,27 @@ class DraftOutreach:
         return result
 
     # -- helpers ---------------------------------------------------------------
+
+    def _with_written_subject(self, draft: Draft, company) -> Draft:
+        """The draft with a subject written for this company, or unchanged.
+
+        Operator request (2026-09-23): "a agent specifically for writing
+        random catchy punchy subject instead of generic one". Only for a
+        first email that passed its checks, only when a writer was given,
+        and only when it produced something usable - otherwise the
+        letter keeps the operator's own fixed subject. One extra model
+        call per first email; `run_subject_writer` never raises.
+        """
+        if self._subject_writer is None or company is None:
+            return draft
+        subjects = run_subject_writer(
+            self._subject_writer,
+            company_name=company_display_name(getattr(company, "name", "") or ""),
+            one_liner=getattr(company, "one_liner", None) or "",
+            description=getattr(company, "long_description", None) or "",
+            paragraph=insight_region(draft.body) or "",
+        )
+        return replace(draft, subject=subjects[0]) if subjects else draft
 
     def _load_claims(self) -> list[ResumeClaim]:
         return load_resume_claims(self._repos.resume_profile, keep_unverified=self._keep_unverified)

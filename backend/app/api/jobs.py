@@ -144,7 +144,7 @@ def _draft(session: Session, progress: ProgressFn) -> str:
         OutreachRepo,
         ResumeProfileRepo,
     )
-    from app.api.deps import build_critic, build_drafter, on_gemini_free_tier
+    from app.api.deps import build_critic, build_drafter, build_subject_writer, on_gemini_free_tier
     from app.application.draft_outreach import DraftOutreach, DraftRepos
     from app.config import get_settings
 
@@ -194,7 +194,14 @@ def _draft(session: Session, progress: ProgressFn) -> str:
         message=MessageRepo(session),
         resume_profile=ResumeProfileRepo(session),
     )
-    result = DraftOutreach(drafter, repos, critic=critic).run()
+    # 2026-09-23: a subject written for each company. Advisory like the
+    # critic - without one, every letter keeps the operator's fixed subject.
+    try:
+        subject_writer = build_subject_writer(settings)
+    except RuntimeError as exc:
+        log.warning("subject writer unavailable, keeping the fixed subject: %s", exc)
+        subject_writer = None
+    result = DraftOutreach(drafter, repos, critic=critic, subject_writer=subject_writer).run()
     session.commit()  # once at the end, same as `cli.py draft`
 
     progress(result.drafted + result.manual_write + result.errors, None)

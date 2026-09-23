@@ -45,14 +45,17 @@ from app.adapters.gemini import (
     _INSIGHT_SYSTEM,
     _PARSER_PROMPT,
     _REVISER_SYSTEM,
+    _SUBJECT_SYSTEM,
     _decode_json,
     _insight,
     _revisions,
+    _subjects,
     build_classify_prompt,
     build_critic_prompt,
     build_draft_prompt,
     build_insight_prompt,
     build_revise_prompt,
+    build_subject_prompt,
     first_email_source,
 )
 from app.domain.replies import LABELS
@@ -190,6 +193,15 @@ REVISION_JSON_SCHEMA: dict[str, Any] = {
         },
     },
     "required": ["revisions"],
+    "additionalProperties": False,
+}
+
+SUBJECTS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "subjects": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["subjects"],
     "additionalProperties": False,
 }
 
@@ -482,3 +494,27 @@ class SarvamInsightWriter:
             temperature=0.7,
         )
         return _insight(_decode_json(content, "insight"), "insight")
+
+
+class SarvamSubjectWriter:
+    """Real `SubjectWriter` port over Sarvam - the provider that actually
+    runs. Same contract as `GeminiSubjectWriter`, sharing its prompt
+    (`_SUBJECT_SYSTEM`/`build_subject_prompt`, imported from
+    `app.adapters.gemini`) so both providers write subjects under exactly
+    the same rules. Advisory only: nothing here changes a draft."""
+
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, **chat_kwargs):
+        self._chat = _SarvamChat(api_key, model, **chat_kwargs)
+
+    def write(self, context: dict) -> list[str]:
+        content = self._chat.complete(
+            "subjects",
+            [
+                {"role": "system", "content": _SUBJECT_SYSTEM},
+                {"role": "user", "content": build_subject_prompt(context)},
+            ],
+            SUBJECTS_JSON_SCHEMA,
+            "subjects",
+            temperature=0.9,
+        )
+        return _subjects(_decode_json(content, "subjects"), "subjects")

@@ -43,6 +43,7 @@ import { markUp } from '@/lib/marks'
 import { LETTER_HTML_CLASSES, renderLetterHtml } from '@/lib/letterHtml'
 import { textToHtml } from '@/lib/richText'
 import RichEditor from '@/components/RichEditor'
+import SubjectSuggestions from '@/components/SubjectSuggestions'
 import { Lightbulb, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -661,6 +662,16 @@ export default function ReviewQueue() {
               </CardTitle>
               <CardDescription className="pt-2">Subject</CardDescription>
               <CardTitle className="text-base">{current.subject ?? '(no subject)'}</CardTitle>
+              {/* 2026-09-23: subjects written for this company. Keyed by
+                  letter so one letter's suggestions never show on the next. */}
+              {current.sequence_step === 0 && (
+                <SubjectSuggestions
+                  key={current.outreach_id}
+                  outreachId={current.outreach_id}
+                  disabled={busy}
+                  onUse={(subject) => saveEdit(subject, current.body ?? '')}
+                />
+              )}
               {current.sequence_step > 0 && (
                 <Badge variant="secondary" className="mt-2 w-fit">
                   Follow-up number {current.sequence_step}

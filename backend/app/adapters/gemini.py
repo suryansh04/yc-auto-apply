@@ -1150,7 +1150,8 @@ invented company that inspects used cars before they are listed:
         someone has actually looked at it. Most marketplaces are happy
         being a noticeboard, so the buyer ends up doing the inspecting on
         a Sunday afternoon with a friend who knows engines. Taking that
-        on yourselves is the slow, unglamorous half of the problem.
+        slow, unglamorous half on yourselves is what I find exciting, and
+        honestly the main reason I'm writing to you.
 
 Both say the same thing. The first reads like it was generated, because
 of the symmetry: a formal setup, "Usually ...", then "Instead you ...".
@@ -1163,10 +1164,21 @@ THE SHAPE, in two or three sentences:
    like is that you ...", "It's interesting that you ...", "The thing I
    keep thinking about is ...". Vary it; do not open every letter with
    the same four words.
-2. Why the ordinary version of this is worse for the person living with
-   it. Plain language, the way you would explain it to a friend.
-3. What their choice means for the person on the other end. Optional -
-   two good sentences beat three where the third is filler.
+2. Optional: one short sentence on why that choice matters to the person
+   on the other end - the ordinary version, and why it is worse. Plain
+   language, the way you would explain it to a friend.
+3. ALWAYS end on HIM: that this is what he finds exciting about them, and
+   that it is the real reason he is writing. Operator request
+   (2026-09-23): "show excitement about them and also why i am applying".
+   Said the way he would say it, for example:
+     "... and that's honestly what I find exciting, and the main reason
+      I'm writing to you."
+     "That's the part that got me excited, and it's why I'm applying."
+     "That's exactly the kind of problem that gets me excited, and it's
+      the reason this is the one email I really wanted to send."
+   Keep the excitement tied to the SPECIFIC thing you just named - never
+   generic ("I love what you're building"). Vary the wording between
+   letters; the observation carries the letter, this line lands it.
 
 THE STANDARD, described rather than quoted. The paragraph this is modelled
 on was written by the sender himself, about a health insurance company
@@ -1175,7 +1187,7 @@ treating the doctor and the insurer as opposite parties; cover in India
 normally pays out only at a hospital, so people buy it every year and
 never touch it; they turned it into something used on ordinary days. One
 structural observation, one sentence about the ordinary world, one about
-what they changed. No numbers. No praise. It reads like a person thinking
+what they changed. No numbers. No hype. It reads like a person thinking
 out loud.
 
 Its exact wording is deliberately NOT reproduced here, because a model
@@ -1208,24 +1220,25 @@ THREE MORE, in that voice, for invented companies:
   paging someone once it has already broken. Most teams find out their
   config was wrong from an outage in the middle of the night, so the
   person who has to fix it is the one least able to think. Catching it
-  while someone is awake and looking at the diff is just a better place
-  to put the work.
+  while someone is awake and looking at the diff is the part that got me
+  excited, and it's why I'm applying.
 
   Company: Kirana Books, bookkeeping for small shop owners over WhatsApp.
   What I like is that you didn't make shopkeepers learn a new app - the
   books live in the one thing they already have open all day. Every other
   option asks them to pick up accounting software in a language that
   isn't theirs, so the ledger quietly goes back to a paper notebook.
-  Building inside a habit someone already has is the harder half of the
-  problem.
+  That's honestly what I find exciting about Kirana Books, and the main
+  reason I'm writing.
 
   Company: Tenner, salary advances paid by the employer rather than a
   lender.
   It's interesting that you went to the employer instead of lending the
   money yourself. Short-term credit here usually costs the most to the
   people with the least room to pay it, and the lender is the only one
-  who gains from that. Paying out money someone has already earned takes
-  the interest out of it entirely.
+  who gains from that. Taking the interest out of it entirely is the
+  kind of fix that gets me excited, and it's why this is the one email
+  I really wanted to send.
 
 HARD RULES:
 
@@ -1247,15 +1260,20 @@ HARD RULES:
   read", "while looking".
 - Never claim to have used, signed up for, tested, bought or been a
   customer of the product.
-- No praise words and no hype: impressive, amazing, incredible, exciting,
-  excited, passionate, love what you are doing, game-changing,
+- Excitement, yes - about the specific thing you named, in the closing
+  line. Hype, no: impressive, amazing, incredible, passionate, "I'm
+  excited", "so excited", thrilled, love what you are doing, game-changing,
   revolutionary, disrupting, cutting edge, best-in-class, "the X space",
-  leverage, synergy, resonates, aligns, "truly".
+  leverage, synergy, resonates, aligns, "truly". ("I find exciting" and
+  "got me excited" are fine; "I'm excited" is a phrase the rest of the
+  letter's checks reject.)
+- Never "reaching out" or "reach out" - the letter's checks reject both.
+  Say "writing to you" or "applying".
 - No questions. No advice about what they should build next. No criticism
   of their product, and no telling them what their own market is.
-- Do not mention the internship, the student's skills, projects, resume or
-  availability. Other paragraphs do that, and repeating it wastes the only
-  paragraph that is about them.
+- Do not mention the internship itself, the student's skills, projects,
+  resume or availability - the next paragraph is the ask. The closing
+  line says only that THIS is why he is writing, and stops.
 - End on the specific thing, not on yourself. A closing clause that fits
   any company ("which is the kind of thing I want to build") is worth
   nothing and is banned above. The last sentence lands on what their
@@ -1340,3 +1358,146 @@ class GeminiInsightWriter:
             ),
         )
         return _insight(_decode_json(response.text, "insight"), "insight")
+
+
+# --- the subject line ---------------------------------------------------------
+#
+# Operator request (2026-09-23): "a agent specifically for writing random
+# catchy punchy subject instead of generic one which we are currently use
+# 'Would love to build at GroMo'". The fixed subject was his own line from
+# earlier the same day, chosen because a model rewriting it every morning
+# could only get it wrong. It is still the fallback whenever this writer
+# is unavailable or answers with nothing usable (`app.domain.letter.subject`).
+#
+# Three candidates rather than one: a subject is the one line the founder
+# reads before deciding whether to read anything else, and picking between
+# three is a two-second decision the operator is better placed to make
+# than any model.
+
+SUBJECTS_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "subjects": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": ["subjects"],
+}
+
+_SUBJECT_SYSTEM = """You write the SUBJECT LINE of a cold email from a computer science student
+to the founder of a startup, asking for a software engineering internship.
+
+The founder sees three things in their inbox: the sender's name, this
+subject line, and the first few words of the email. The subject decides
+whether the email is opened at all. Founders get dozens of these a week
+and most of them say "Internship inquiry" or "Quick question". Yours has
+to be the one that sounds like a specific person who actually looked at
+THIS company.
+
+You are given the company's name, its one-line summary, what the founders
+wrote about it on their own page, and the paragraph of the email that is
+about them. Everything you say must be true to those.
+
+WHAT MAKES ONE GOOD:
+
+- Specific. It could only have been sent to this company. Name the thing
+  they did, the choice they made, the problem they took on.
+- Human. Written the way a twenty-year-old would type it, not the way a
+  marketing team would. Sentence case or all lowercase - never Title Case
+  On Every Word, which reads like a newsletter.
+- Short. Three to eight words. It has to survive being cut off on a phone.
+- Curious, not clickbait. It makes them want to know what comes next
+  because it is interesting, not because it is withholding something.
+- Honest. It must never pretend to be something it is not.
+
+WRITE THREE, each in a different style:
+
+1. THEIR CHOICE, named: the specific decision you noticed.
+   e.g. for an invented used-car marketplace that inspects every car:
+   "you inspect every car before it's listed"
+2. THE ASK, made human: the internship, tied to what they build.
+   e.g. "an intern who wants to build Carvaan's inspections"
+3. THE HOOK: a short line that makes them want to read the email.
+   e.g. "the slow half of selling used cars"
+
+Use the company's name, spelled exactly as given, in at least two of the
+three. Vary the wording - three versions of the same sentence are one
+subject, not three.
+
+BANNED, every one of these:
+
+- Fake threads: "Re:", "Fwd:", "Following up", "Checking in" - the
+  founder has never written to him, and pretending otherwise is a lie.
+- The generic ones every founder deletes: "Internship inquiry",
+  "Internship application", "Quick question", "Opportunity",
+  "Collaboration", "Hello", "Hi", "Introduction", "Reaching out".
+- Clickbait and spam triggers: "You won't believe", "urgent", "free",
+  "guaranteed", "act now", "limited", money symbols.
+- Exclamation marks, question marks, emoji, and words in ALL CAPS.
+- Numbers of any kind - no metrics, funding, headcount, growth rates or
+  years from their page.
+- Hype: amazing, incredible, game-changing, revolutionary, disrupt,
+  passionate, excited, love.
+- The sender's name, and any claim that he has used their product.
+- Colon titles like "GroMo: A Proposal" or "Re GroMo - internship".
+
+Return JSON: {"subjects": ["...", "...", "..."]} - the three, and nothing
+else."""
+
+
+def build_subject_prompt(context: dict) -> str:
+    """What the subject is about, for `SubjectWriter.write`."""
+    lines = [
+        "COMPANY",
+        str(context.get("company_name") or "unknown"),
+        "",
+        "ONE-LINE SUMMARY",
+        str(context.get("one_liner") or "(none given)"),
+        "",
+        "WHAT THE FOUNDERS WROTE ABOUT IT",
+        str(context.get("description") or "").strip() or "(nothing given)",
+        "",
+        "THE PARAGRAPH OF THE EMAIL THAT IS ABOUT THEM",
+        str(context.get("paragraph") or "").strip() or "(none yet)",
+    ]
+    avoid = [str(a).strip() for a in (context.get("avoid") or []) if str(a).strip()]
+    if avoid:
+        lines += ["", "ALREADY OFFERED - write three that are different from these:"]
+        lines += [f"  - {a}" for a in avoid]
+    lines += ["", "Write the three subject lines."]
+    return "\n".join(lines)
+
+
+def _subjects(data: Any, stage: str) -> list[str]:
+    """The subject lines out of a response, whatever shape they arrived in."""
+    if isinstance(data, dict):
+        data = data.get("subjects", data.get("subject_lines", []))
+    if isinstance(data, str):
+        data = [data]
+    if not isinstance(data, list):
+        raise ValueError(f"{stage}: expected a list of subject lines")
+    return [str(s) for s in data if isinstance(s, str)]
+
+
+class GeminiSubjectWriter:
+    """Real `SubjectWriter` port. Writes candidate subject lines; decides
+    nothing. Whether one is usable is `app.application.write_subjects`'s
+    call, the same division as `GeminiInsightWriter` above."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def write(self, context: dict) -> list[str]:
+        response = _generate_with_retry(
+            self._client, self._sleep, "subjects",
+            model=self._model,
+            contents=build_subject_prompt(context),
+            config=types.GenerateContentConfig(
+                system_instruction=_SUBJECT_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=SUBJECTS_SCHEMA,
+                # Writing, and three different angles are the point.
+                temperature=0.9,
+            ),
+        )
+        return _subjects(_decode_json(response.text, "subjects"), "subjects")

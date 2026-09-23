@@ -109,7 +109,8 @@ def test_draft_command_wires_a_critic_into_draftoutreach(monkeypatch, tmp_path):
     captured = {}
 
     class _RecordingDraftOutreach:
-        def __init__(self, drafter, repos, keep_unverified=False, critic=None):
+        def __init__(self, drafter, repos, keep_unverified=False, critic=None,
+                     subject_writer=None):
             captured["critic"] = critic
 
         def run(self, limit=None):
@@ -124,6 +125,9 @@ def test_draft_command_wires_a_critic_into_draftoutreach(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_session", lambda: _StubSession())
     monkeypatch.setattr(cli, "_drafter", lambda: object())
     monkeypatch.setattr(cli, "_critic", lambda: sentinel)
+    # Never build a real subject writer in an offline test (2026-09-23).
+    from app.api import deps
+    monkeypatch.setattr(deps, "build_subject_writer", lambda settings: None)
     monkeypatch.setattr(
         "app.application.draft_outreach.DraftOutreach", _RecordingDraftOutreach
     )

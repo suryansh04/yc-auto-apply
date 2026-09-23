@@ -70,6 +70,8 @@ class Repos:
     # production, injected by tests, so no offline test can reach a
     # provider by forgetting to inject one.
     insight_writer: Any = None
+    # Same seam again, for the subject writer (2026-09-23).
+    subject_writer: Any = None
 
 
 def _session() -> Session:
@@ -308,6 +310,27 @@ def build_insight_writer(settings: Settings):
         raise RuntimeError("GEMINI_API_KEY is not set")
     client = genai.Client(api_key=settings.gemini_api_key)
     return GeminiInsightWriter(client, model=settings.gemini_model)
+
+
+def build_subject_writer(settings: Settings):
+    """The same LLM-provider switch as `build_insight_writer` above, for a
+    `SubjectWriter` adapter. Advisory in the same way: a caller that cannot
+    build one keeps the operator's fixed subject."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamSubjectWriter(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiSubjectWriter
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiSubjectWriter(client, model=settings.gemini_model)
 
 
 def require_send_config(settings: Settings) -> list[str]:

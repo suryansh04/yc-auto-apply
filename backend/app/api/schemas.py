@@ -203,6 +203,22 @@ class SuggestOut(BaseModel):
     unavailable: str | None = None
 
 
+class SubjectsIn(BaseModel):
+    """Subjects this letter has already been offered, so asking again
+    gets three new ones rather than the same three."""
+
+    avoid: list[str] = []
+
+
+class SubjectsOut(BaseModel):
+    """Candidate subject lines for one letter (2026-09-23). Advice: the
+    route writes nothing, and having nothing to offer is a 200 with a
+    reason - the letter keeps the subject it has."""
+
+    subjects: list[str] = []
+    unavailable: str | None = None
+
+
 class InsightIn(BaseModel):
     """Paragraphs this company has already been offered.
 

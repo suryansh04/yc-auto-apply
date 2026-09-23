@@ -184,3 +184,43 @@ def test_both_providers_are_sent_the_same_user_prompt():
     client = FakeGenAIClient(INSIGHT_JSON)
     GeminiInsightWriter(client, model=MODEL).write(CONTEXT)
     assert str(client.models.calls[0]["contents"]) == sarvam_prompt
+
+
+# --- the subject writer shares its prompt the same way (2026-09-23) ---------
+
+
+def test_the_subject_prompt_is_shared_with_sarvam_by_identity():
+    from app.adapters import gemini, sarvam
+
+    assert sarvam._SUBJECT_SYSTEM is gemini._SUBJECT_SYSTEM
+    assert sarvam.build_subject_prompt is gemini.build_subject_prompt
+
+
+@respx.mock
+def test_sarvam_subject_writer_returns_the_list():
+    from app.adapters.sarvam import SarvamSubjectWriter
+
+    route = respx.post(URL).mock(return_value=_ok(json.dumps({"subjects": ["a b c", "d e f"]})))
+    out = SarvamSubjectWriter(API_KEY, SARVAM_MODEL, _sleep=lambda s: None).write(
+        {"company_name": "Loop Health", "description": "Clinics and cover."})
+    assert out == ["a b c", "d e f"]
+    rf = json.loads(route.calls[0].request.content)["response_format"]
+    assert rf["json_schema"]["schema"]["required"] == ["subjects"]
+
+
+def test_the_subject_prompt_bans_fake_replies_and_the_generic_ones():
+    from app.adapters.gemini import _SUBJECT_SYSTEM
+
+    for banned in ('"Re:"', '"Internship inquiry"', '"Quick question"'):
+        assert banned in _SUBJECT_SYSTEM
+
+
+def test_the_paragraph_ends_on_why_he_is_writing():
+    """Operator request (2026-09-23): "show excitement about them and also
+    why i am applying". The closing line is required, not optional, and it
+    must not use the phrases the rest of the letter's checks reject."""
+    from app.adapters.gemini import _INSIGHT_SYSTEM
+
+    assert "ALWAYS end on HIM" in _INSIGHT_SYSTEM
+    assert "main reason I'm writing to you" in _INSIGHT_SYSTEM
+    assert 'Never "reaching out"' in _INSIGHT_SYSTEM

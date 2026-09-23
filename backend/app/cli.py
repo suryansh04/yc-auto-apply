@@ -443,8 +443,16 @@ def draft(
             message=MessageRepo(session),
             resume_profile=ResumeProfileRepo(session),
         )
+        # 2026-09-23: a subject written per company; without a writer the
+        # letter keeps the operator's fixed subject, as before.
+        from app.api.deps import build_subject_writer
+        try:
+            subject_writer = build_subject_writer(get_settings())
+        except RuntimeError:
+            subject_writer = None
         result = DraftOutreach(
             drafter, repos, keep_unverified=keep_unverified, critic=critic,
+            subject_writer=subject_writer,
         ).run(limit=limit)
         session.commit()
 

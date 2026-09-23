@@ -5,9 +5,11 @@ The attachment was the one part of an outgoing email nothing in the UI
 could show: the letter was reviewable down to the byte while the file
 beside it was a filename in a footer.
 """
+import os
+
 import pytest
 
-from app.config import get_operator_settings
+from app.config import DEFAULT_RESUME_PATH, get_operator_settings
 
 PDF = b"%PDF-1.4\nnot really a pdf but it starts like one\n%%EOF\n"
 
@@ -81,7 +83,7 @@ def test_replacing_the_resume_writes_the_new_bytes(client, resume_file):
     r = client.post("/api/resume", files={"file": ("new.pdf", new, "application/pdf")})
     assert r.status_code == 200
     assert resume_file.read_bytes() == new
-    assert r.json()["size_bytes"] == len(new)
+    assert r.json()["status"]["size_bytes"] == len(new)
 
 
 def test_replacing_the_resume_keeps_the_old_one(client, resume_file):
@@ -117,7 +119,7 @@ def test_an_oversized_upload_is_refused(client, resume_file):
 def test_replacing_works_when_there_was_no_file_before(client, no_resume_file):
     r = client.post("/api/resume", files={"file": ("first.pdf", PDF, "application/pdf")})
     assert r.status_code == 200
-    assert r.json()["configured"] is True
+    assert r.json()["status"]["configured"] is True
 
 
 # --- parsing it from the UI (operator request 2026-09-23) -----------------
@@ -193,13 +195,20 @@ def test_no_resume_file_is_404_rather_than_a_model_call(client, no_resume_file, 
     assert fake_parser.text is None
 
 
-def test_an_unset_resume_path_says_which_setting_is_missing(client, monkeypatch, fake_parser):
+def test_a_blank_resume_path_means_the_default_location(client, monkeypatch, fake_parser):
+    """Operator request (2026-09-23): a brand-new user opens My resume and
+    presses Upload. Answering "RESUME_PATH is not set in backend/.env" is
+    a dead end nothing in the browser can get out of, so a blank setting
+    names `backend/resume/resume.pdf` instead."""
     monkeypatch.delenv("RESUME_PATH", raising=False)
     get_operator_settings.cache_clear()
-    r = client.post("/api/resume/parse")
-    assert r.status_code == 400
-    assert "RESUME_PATH" in r.json()["detail"]
-    get_operator_settings.cache_clear()
+    try:
+        assert get_operator_settings().resume_path == DEFAULT_RESUME_PATH
+        # A location, not a permission: nothing is "configured" until a
+        # file is actually there, and an upload puts one there.
+        assert DEFAULT_RESUME_PATH.endswith(os.path.join("backend", "resume", "resume.pdf"))
+    finally:
+        get_operator_settings.cache_clear()
 
 
 def test_a_provider_failure_never_leaks_its_response(client, repos, text_resume):
@@ -212,3 +221,55 @@ def test_a_provider_failure_never_leaks_its_response(client, repos, text_resume)
     assert r.status_code == 502
     assert "sk_live_secret" not in r.text
     assert "RuntimeError" in r.json()["detail"]
+
+
+# --- uploading reads it (operator request 2026-09-23) ---------------------
+
+
+def test_uploading_a_resume_reads_it_in_the_same_request(client, repos, text_resume, fake_parser):
+    """A new PDF beside the old claims is a trap with no upside: the
+    claims are the only thing a letter may say about you. The upload
+    carries the parse, and the button that used to be asked for is gone.
+
+    (The bytes start with the PDF magic the route requires, but the
+    configured path ends in .txt so `read_resume_text` treats it as text
+    - the same trick the parse tests above use.)"""
+    fake_parser.claims = [_claim("shipped a payments rail", "Shipped a payments rail in Go")]
+    new = b"%PDF-1.7\nShipped a payments rail in Go\n"
+
+    body = client.post("/api/resume", files={"file": ("new.pdf", new, "application/pdf")}).json()
+
+    assert body["parse_error"] is None
+    assert body["claims"] == 1
+    assert body["status"]["claims"] == 1
+    assert "Shipped a payments rail in Go" in fake_parser.text
+    assert len(repos.resume_profile.get_current().claims) == 1
+
+
+def test_a_parse_failure_does_not_lose_the_uploaded_file(client, resume_file, fake_parser):
+    """The file is already replaced when the parse runs, so a failure is
+    reported, not raised - a 500 here would read as "your resume is gone"
+    to someone whose resume is in fact saved. `resume_file` is a .pdf
+    that is not really a PDF, so reading it fails."""
+    new = b"%PDF-1.7\nnot really a pdf\n"
+    r = client.post("/api/resume", files={"file": ("new.pdf", new, "application/pdf")})
+
+    assert r.status_code == 200
+    assert resume_file.read_bytes() == new
+    body = r.json()
+    assert body["parse_error"] and body["status"]["configured"] is True
+    assert body["claims"] == 0
+
+
+def test_a_parse_failure_after_an_upload_never_leaks_a_provider_response(
+    client, repos, text_resume
+):
+    class Boom:
+        def parse(self, raw_text):
+            raise RuntimeError("401 from provider: key sk_live_secret is bad")
+
+    repos.parser = Boom()
+    r = client.post("/api/resume", files={"file": ("new.pdf", b"%PDF-1.7\nwork\n", "application/pdf")})
+    assert r.status_code == 200
+    assert "sk_live_secret" not in r.text
+    assert "RuntimeError" in r.json()["parse_error"]

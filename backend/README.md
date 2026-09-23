@@ -78,7 +78,7 @@ of `app.config.Settings`; `.env.example` lists all ten.
 | `SARVAM_MODEL` | Sarvam chat model id. `sarvam-105b` is a reasoning model that spends thousands of output tokens thinking; the `-conversations` variant does not and is ~40x cheaper. | `sarvam-105b-conversations` |
 | `DAILY_SEND_CAP` | Maximum outbound emails per rolling 24-hour window (ruling R-A), counted against `messages.sent_at`. Gmail's own limit is 500/day; keep this low for deliverability (§18). | `20` |
 | `SIGNATURE` | Your sign-off, appended at send time under the body (ruling R2). Multi-line: quote it in `.env`. `send` refuses a blank signature. | empty |
-| `RESUME_PATH` | Path to the PDF attached to every email. `send` refuses if the file does not exist. | empty |
+| `RESUME_PATH` | Path to the PDF attached to every email. `send` refuses if the file does not exist. Blank means `backend/resume/resume.pdf`, where the UI's Upload button writes. | blank = `backend/resume/resume.pdf` |
 | `GMAIL_SENDER_ADDRESS` | The Gmail account `gmail-auth` authorised; also the recipient of `send --to-self`. | empty |
 | `GMAIL_CLIENT_SECRETS_PATH` | Path to the OAuth client JSON downloaded from Google Cloud (APIs & Services → Credentials → OAuth client ID → *Desktop app*; enable the Gmail API; scope used is `gmail.send` only). | empty |
 

@@ -222,9 +222,10 @@ export function useResumeStatus() {
  * POST /api/resume/parse - read the resume and replace the claims a
  * letter may assert about the operator.
  *
- * The one call on this screen that spends a model call, so it is never
- * automatic: the operator asks for it. Invalidating the status is what
- * updates the claim count everywhere it is shown.
+ * An upload now does this by itself (2026-09-23), so this is only the
+ * way to try again when the parse failed and the file is already saved.
+ * Invalidating the status is what updates the claim count everywhere it
+ * is shown.
  */
 export function useParseResume(options = {}) {
   const queryClient = useQueryClient()

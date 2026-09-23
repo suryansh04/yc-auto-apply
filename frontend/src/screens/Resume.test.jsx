@@ -45,13 +45,10 @@ it('reports the file and when it last changed', async () => {
   expect(screen.getByText('Last changed')).toBeInTheDocument()
 })
 
-it('says the claims come from parse-resume, not from this file', async () => {
-  // The consequence nobody would guess: replacing the PDF does not
-  // reparse it, so what a draft may say about the sender is unchanged.
+it('says what a draft is allowed to claim about you', async () => {
   mockResumeStatus({ claims: 33 })
   render()
-  expect(await screen.findByText(/33 claims parsed/i)).toBeInTheDocument()
-  expect(screen.getByText(/does not re-read it/i)).toBeInTheDocument()
+  expect(await screen.findByText(/33 claims read from this resume/i)).toBeInTheDocument()
 })
 
 it('still offers a tab for anyone who would rather have one', async () => {
@@ -62,9 +59,12 @@ it('still offers a tab for anyone who would rather have one', async () => {
   expect(link).toHaveAttribute('target', '_blank')
 })
 
-it('replaces the resume and warns that the claims are still the old ones', async () => {
+it('reads the resume it just uploaded, without being asked twice', async () => {
+  // Operator request (2026-09-23): the parse follows the upload. A new
+  // PDF beside the old claims is a trap with no upside, and the button
+  // that used to ask for it is gone.
   mockResumeStatus({ claims: 33 })
-  const replace = mockReplaceResume()
+  const replace = mockReplaceResume({ claims: 7 })
   render()
   await screen.findByTitle('My resume')
   await userEvent.upload(
@@ -72,12 +72,29 @@ it('replaces the resume and warns that the claims are still the old ones', async
     new File(['%PDF-1.4 x'], 'new.pdf', { type: 'application/pdf' }),
   )
   await waitFor(() => expect(replace).toHaveBeenCalled())
-  expect(await screen.findByText(/resume replaced/i)).toBeInTheDocument()
-  // 2026-09-23: the banner used to name a CLI command. It names the
-  // button on this screen now, because there is one.
-  expect(screen.getByText(/every letter from now on carries the new file/i))
-    .toBeInTheDocument()
-  expect(screen.getAllByText(/re-read my resume/i).length).toBeGreaterThanOrEqual(1)
+  expect(await screen.findByText(/resume replaced and read/i)).toBeInTheDocument()
+  expect(screen.getByText(/7 claims a letter may now make about you/i)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /re-read my resume/i })).not.toBeInTheDocument()
+})
+
+it('offers a way back in when the file saved but could not be read', async () => {
+  // The upload itself succeeded, so this is a report, not a failure -
+  // and the claims are still the previous ones, which has to be said.
+  mockResumeStatus({ claims: 33 })
+  mockReplaceResume({ claims: 0, parse_error: 'the resume parser failed (RuntimeError)' })
+  render()
+  await screen.findByTitle('My resume')
+  await userEvent.upload(
+    screen.getByLabelText(/replace the resume/i),
+    new File(['%PDF-1.4 x'], 'new.pdf', { type: 'application/pdf' }),
+  )
+  expect(await screen.findByText(/could not read it/i)).toBeInTheDocument()
+  expect(screen.getByText(/RuntimeError/)).toBeInTheDocument()
+
+  const parse = mockParseResume({ claims: 5 })
+  await userEvent.click(screen.getByRole('button', { name: /try reading it again/i }))
+  await waitFor(() => expect(parse).toHaveBeenCalled())
+  expect(await screen.findByText(/5 claims a letter may now make about you/i)).toBeInTheDocument()
 })
 
 it('shows why a rejected upload was rejected', async () => {
@@ -110,31 +127,32 @@ it('says nothing can be sent when there is no resume', async () => {
 // fails until the resume has been read, and the UI had nowhere to read
 // it from.
 
-it('offers to re-read the resume, and says what it found', async () => {
-  mockResumeStatus({ claims: 3 })
-  const parse = mockParseResume({ claims: 7 })
-  render()
-  await userEvent.click(await screen.findByRole('button', { name: /re-read my resume/i }))
-  await waitFor(() => expect(parse).toHaveBeenCalled())
-  expect(await screen.findByText(/7 claims a letter may now make about you/i)).toBeInTheDocument()
-})
+async function uploadOne() {
+  await screen.findByTitle('My resume')
+  await userEvent.upload(
+    screen.getByLabelText(/replace the resume/i),
+    new File(['%PDF-1.4 x'], 'new.pdf', { type: 'application/pdf' }),
+  )
+}
 
 it('does not let a partial parse look like a clean one', async () => {
   // "it worked" and "it worked and threw half of it away" must not read
   // the same.
   mockResumeStatus({ claims: 3 })
-  mockParseResume({ claims: 2, dropped: 4, unverified: 1 })
+  mockReplaceResume({ claims: 2, dropped: 4, unverified: 1 })
   render()
-  await userEvent.click(await screen.findByRole('button', { name: /re-read my resume/i }))
+  await uploadOne()
   expect(await screen.findByText(/4 were thrown away/i)).toBeInTheDocument()
   expect(screen.getByText(/1 could not be matched/i)).toBeInTheDocument()
 })
 
-it('says why a parse failed rather than leaving the count unchanged in silence', async () => {
+it('says why a retry failed rather than leaving the count unchanged in silence', async () => {
   mockResumeStatus({ claims: 3 })
+  mockReplaceResume({ claims: 0, parse_error: 'could not read that file (PdfReadError)' })
   mockParseResumeFailure(422, 'parser produced no usable claims; existing profile not replaced')
   render()
-  await userEvent.click(await screen.findByRole('button', { name: /re-read my resume/i }))
+  await uploadOne()
+  await userEvent.click(await screen.findByRole('button', { name: /try reading it again/i }))
   expect(await screen.findByText(/no usable claims/i)).toBeInTheDocument()
 })
 

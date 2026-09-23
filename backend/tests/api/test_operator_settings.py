@@ -14,10 +14,14 @@ from app.config import Settings, get_operator_settings
 @pytest.fixture
 def dotenv_only(monkeypatch, tmp_path):
     """Values present ONLY in a .env file - no DATABASE_URL anywhere."""
+    # A real file: the preview names the attachment only when one is
+    # actually there to attach (2026-09-23).
+    resume = tmp_path / "Suryansh_Singh_resume.pdf"
+    resume.write_bytes(b"%PDF-1.4")
     env = tmp_path / ".env"
     env.write_text(
         "SIGNATURE=Only In Dotenv\nEMAIL_VERIFIER_API_KEY=k\nDAILY_SEND_CAP=3\n"
-        "RESUME_PATH=C:/Users/someone/Documents/Suryansh_Singh_resume.pdf\n",
+        f"RESUME_PATH={resume.as_posix()}\n",
         encoding="utf-8",
     )
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -78,11 +82,15 @@ def test_queue_preview_names_the_resume_attachment_from_dotenv(dotenv_only, clie
     assert item["attachment_name"] == "Suryansh_Singh_resume.pdf"
 
 
-def test_queue_preview_attachment_is_null_when_no_resume_is_configured(monkeypatch, tmp_path, client, pending_draft):
+def test_queue_preview_attachment_is_null_when_there_is_no_resume_file(monkeypatch, tmp_path, client, pending_draft):
+    """A name on screen promises a file goes out with the letter. Since
+    2026-09-23 RESUME_PATH has a default location, so the preview asks
+    whether the FILE is there - the same question `send` asks before it
+    reserves anything."""
     env = tmp_path / ".env"
     env.write_text("SIGNATURE=Only In Dotenv\n", encoding="utf-8")
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.delenv("RESUME_PATH", raising=False)
+    monkeypatch.setenv("RESUME_PATH", str(tmp_path / "not-there.pdf"))
     monkeypatch.setitem(Settings.model_config, "env_file", str(env))
     get_operator_settings.cache_clear()
     try:

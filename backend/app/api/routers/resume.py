@@ -10,19 +10,19 @@ request names a path, so there is nothing to traverse; `GET /api/resume`
 serves exactly the file `send_approved` will attach, and `POST` replaces
 it in place after keeping a timestamped copy of what was there.
 
-Replacing the PDF deliberately does NOT re-parse it. The claims the
-drafter is held to (`resume_profile`) are a separate thing living in the
-database, so a new PDF changes what a founder receives and not what the
-model may say about you. Letting those two drift silently would be worse
-than either, so `GET /api/resume/status` reports the claim count and
-`POST /api/resume/parse` is how they are brought back into line.
+Uploading a resume reads it: `POST /api/resume` replaces the file and
+then does what `POST /api/resume/parse` does, because the claims the
+drafter is held to (`resume_profile`) live in the database and a new PDF
+sitting beside the old claims is a trap. Parsing used to be a separate
+button, and before that `python -m app.cli parse-resume PATH` and
+nothing else - which made a brand-new operator's first **Draft** a dead
+end, since drafting fails until the resume has been read.
 
-That fourth route exists as of 2026-09-23. Parsing used to be reachable
-only as `python -m app.cli parse-resume PATH`, which made a brand-new
-operator's first **Draft** a dead end: it fails until the resume has been
-read, and the UI had nowhere to read it from. It is the one route here
-that spends a model call, so it is never automatic - the operator asks
-for it.
+The parse route stays, for re-reading the same file after a failure.
+
+RESUME_PATH may be blank: it then means `backend/resume/resume.pdf`
+(`app.config.DEFAULT_RESUME_PATH`), so the Upload button works on a
+fresh checkout without editing .env first.
 """
 
 from __future__ import annotations
@@ -80,9 +80,27 @@ class ParseResultOut(BaseModel):
     dropped: int = 0
 
 
-def _resume_path() -> Path | None:
-    configured = get_operator_settings().resume_path
-    return Path(configured) if configured else None
+class ReplaceResultOut(ParseResultOut):
+    """What an upload did: the new file, and what reading it produced.
+
+    `parse_error` is set when the file was saved but could not be read -
+    the upload itself succeeded, so this is a report, not a failure. The
+    claims in `status` are then still the previous ones.
+    """
+
+    # 0 when the parse failed: the profile is untouched, and `status`
+    # still reports what the drafter actually has.
+    claims: int = 0
+    parse_error: str | None = None
+
+
+def _resume_path() -> Path:
+    """Where the resume is. Never None: a blank RESUME_PATH means
+    `backend/resume/resume.pdf` (`app.config.DEFAULT_RESUME_PATH`), so a
+    first-time operator can upload one from the browser without editing
+    a file first. The path is still a SETTING, never anything a request
+    said."""
+    return Path(get_operator_settings().resume_path)
 
 
 @router.get("/resume/status", response_model=ResumeStatusOut)
@@ -90,7 +108,7 @@ def resume_status(repos: Repos = Depends(get_repos)) -> ResumeStatusOut:
     path = _resume_path()
     profile = repos.resume_profile.get_current()
     claims = len(getattr(profile, "claims", None) or []) if profile is not None else 0
-    if path is None or not path.is_file():
+    if not path.is_file():
         return ResumeStatusOut(configured=False, claims=claims)
     stat = path.stat()
     return ResumeStatusOut(
@@ -117,7 +135,7 @@ def get_resume() -> FileResponse:
     this route a look at the current file.
     """
     path = _resume_path()
-    if path is None or not path.is_file():
+    if not path.is_file():
         raise HTTPException(404, "no resume file is configured")
     return FileResponse(
         path,
@@ -129,20 +147,32 @@ def get_resume() -> FileResponse:
     )
 
 
-@router.post("/resume", response_model=ResumeStatusOut)
+@router.post("/resume", response_model=ReplaceResultOut)
 async def replace_resume(
     file: UploadFile = File(...), repos: Repos = Depends(get_repos)
-) -> ResumeStatusOut:
-    """Replace the attached resume, keeping the old one beside it.
+) -> ReplaceResultOut:
+    """Replace the attached resume, keeping the old one beside it, and
+    read the new file.
 
     The upload is checked before anything is written: a PDF header and a
     size bound. The previous file is renamed rather than deleted, because
     overwriting the only copy of a resume on a mis-click is not a failure
     this app should be capable of.
+
+    Operator request (2026-09-23): the parse follows the upload. It used
+    to be a separate button, on the argument that a model call should
+    never be spent without being asked - but the claims are the only
+    thing a letter may say about you, and a new PDF with the old claims
+    beside it is a trap with no upside. The call is cheap and the
+    intent is unambiguous: you uploaded a new resume because it is now
+    the true one.
+
+    The parse cannot undo the upload. The file is already replaced when
+    it runs, so its failure is REPORTED (`parse_error`) rather than
+    raised - a 500 here would mean "your resume is gone" to someone whose
+    resume is in fact perfectly saved.
     """
     path = _resume_path()
-    if path is None:
-        raise HTTPException(400, "RESUME_PATH is not set in backend/.env")
 
     data = await file.read()
     if not data:
@@ -157,7 +187,19 @@ async def replace_resume(
         stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
         shutil.copy2(path, path.with_name(f"{path.stem}.{stamp}{path.suffix}"))
     path.write_bytes(data)
-    return resume_status(repos)
+
+    try:
+        parsed = parse_resume_route(repos)
+    except HTTPException as exc:
+        # `detail` is written for the operator by the parse route itself
+        # and carries a type name at worst, never a provider response.
+        return ReplaceResultOut(status=resume_status(repos), parse_error=str(exc.detail))
+    return ReplaceResultOut(
+        status=parsed.status,
+        claims=parsed.claims,
+        unverified=parsed.unverified,
+        dropped=parsed.dropped,
+    )
 
 
 @router.post("/resume/parse", response_model=ParseResultOut)
@@ -174,8 +216,6 @@ def parse_resume_route(repos: Repos = Depends(get_repos)) -> ParseResultOut:
     to replace it with nothing.
     """
     path = _resume_path()
-    if path is None:
-        raise HTTPException(400, "RESUME_PATH is not set in backend/.env")
     if not path.is_file():
         raise HTTPException(404, "there is no resume file at RESUME_PATH")
 

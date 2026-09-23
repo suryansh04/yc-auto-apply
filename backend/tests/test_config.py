@@ -1,4 +1,6 @@
-from app.config import Settings as _Settings
+import os
+
+from app.config import DEFAULT_RESUME_PATH, Settings as _Settings
 
 
 def Settings(**kw):
@@ -25,9 +27,22 @@ def test_send_settings_default_to_empty_so_nothing_can_send_by_accident():
     # default that would let a real email go out from a fresh .env.
     s = Settings(database_url="postgresql://x/y")
     assert s.signature == ""
-    assert s.resume_path == ""
     assert s.gmail_client_secrets_path == ""
     assert s.gmail_sender_address == ""
+
+
+def test_a_blank_resume_path_means_the_default_location():
+    """The one send setting with a default (2026-09-23), because it is a
+    LOCATION and not something only the operator knows. `send` still
+    refuses until a file exists there - `missing_send_config` checks the
+    file, not the setting - so this cannot let an email go out with no
+    attachment; it only means the Upload button in the UI works on a
+    fresh checkout, without editing .env first."""
+    s = Settings(database_url="postgresql://x/y")
+    assert s.resume_path == DEFAULT_RESUME_PATH
+    assert s.resume_path.endswith(os.path.join("backend", "resume", "resume.pdf"))
+    assert Settings(database_url="postgresql://x/y", resume_path="  ").resume_path == DEFAULT_RESUME_PATH
+    assert Settings(database_url="postgresql://x/y", resume_path="mine.pdf").resume_path == "mine.pdf"
 
 
 def test_email_verifier_key_is_provider_neutral():

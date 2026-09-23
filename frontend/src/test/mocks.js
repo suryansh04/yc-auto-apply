@@ -589,7 +589,9 @@ export function mockResumeStatus(over = {}) {
   )
 }
 
-/** POST /api/resume - replace the attached PDF. */
+/** POST /api/resume - replace the attached PDF AND read it. The upload
+ *  carries the parse since 2026-09-23, so the response is a parse result
+ *  with the new status inside it. */
 /** POST /api/resume/parse - read the resume into citable claims. */
 export function mockParseResume({ claims = 1, unverified = 0, dropped = 0, status = {} } = {}) {
   const spy = vi.fn()
@@ -623,9 +625,12 @@ export function mockReplaceResume({ status = 200, detail = null, ...over } = {})
     http.post('/api/resume', async ({ request }) => {
       spy(await request.text())
       if (status !== 200) return HttpResponse.json({ detail }, { status })
+      const { claims = 12, unverified = 0, dropped = 0, parse_error = null,
+              statusBody = {} } = over
       return HttpResponse.json({
-        configured: true, filename: 'resume.pdf', size_bytes: 1024,
-        modified_at: '2026-09-22T00:00:00Z', claims: 12, ...over,
+        claims, unverified, dropped, parse_error,
+        status: { configured: true, filename: 'resume.pdf', size_bytes: 1024,
+                  modified_at: '2026-09-22T00:00:00Z', claims, ...statusBody },
       })
     }),
   )

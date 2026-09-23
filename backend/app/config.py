@@ -1,7 +1,20 @@
 import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Where the resume lives when RESUME_PATH says nothing: `backend/resume/`,
+# beside this file rather than relative to whatever directory the process
+# happened to start in. Operator request (2026-09-23): a brand-new user
+# opens My resume, presses Upload, and it works - editing .env before the
+# app will accept a PDF is a step nothing in the browser could do for
+# them. It is a LOCATION, not a permission: `send` still refuses until a
+# file actually exists there (`missing_send_config`), so a default path
+# cannot let an email go out with no attachment.
+DEFAULT_RESUME_PATH = str(Path(__file__).resolve().parents[1] / "resume" / "resume.pdf")
 
 
 class Settings(BaseSettings):
@@ -26,7 +39,7 @@ class Settings(BaseSettings):
     # gap can let a real email go out with a blank signature, no resume, or
     # an unknown sender address.
     signature: str = ""                   # sign-off appended at send time (ruling R2, spec §18)
-    resume_path: str = ""                 # the PDF attached to every outreach email
+    resume_path: str = ""                 # the PDF attached to every outreach email (see below)
     gmail_client_secrets_path: str = ""   # OAuth "Desktop app" client JSON from Google Cloud
     gmail_sender_address: str = ""        # the Gmail account that was authorised by `gmail-auth`
 
@@ -34,6 +47,21 @@ class Settings(BaseSettings):
     # The Vite dev server by default; set it if the UI is served anywhere
     # else. Localhost only, like everything else here (spec A3).
     app_url: str = "http://localhost:5173"
+
+    @model_validator(mode="after")
+    def _default_resume_path(self) -> "Settings":
+        """Blank RESUME_PATH means `backend/resume/resume.pdf`.
+
+        The other three send settings stay empty-on-purpose: a signature,
+        a Gmail address and an OAuth client are things only the operator
+        knows. A file location is not - and leaving this one blank used to
+        make the Upload button on My resume answer "RESUME_PATH is not set
+        in backend/.env", which is a dead end a beginner cannot get out of
+        from the browser.
+        """
+        if not self.resume_path.strip():
+            self.resume_path = DEFAULT_RESUME_PATH
+        return self
 
 
 @lru_cache

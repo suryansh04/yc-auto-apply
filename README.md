@@ -76,7 +76,9 @@ Notes:
 - The database port is **5433**, not the 5432 in the example file — 5433
   is the Docker database you just started.
 - `RESUME_PATH` can be relative to `backend/`, like above, or a full
-  path. The folder `backend/resume/` is already git-ignored.
+  path. Leave it blank and it means `backend/resume/resume.pdf`, which
+  is where the Upload button in the app puts your PDF. That folder is
+  git-ignored.
 - The two `GMAIL_` lines can stay blank for now. The app's own setup
   guide tells you what goes there.
 - Leave the rest alone. `SARVAM_MODEL`, `DAILY_SEND_CAP` and the
@@ -112,9 +114,9 @@ In the app, in this order:
    Google side**. It walks you through Google Cloud, takes about 10
    minutes, and is only needed once. It ends with a
    `client_secret.json`, the file `GMAIL_CLIENT_SECRETS_PATH` points at.
-2. **My resume** — upload your PDF, then press **Re-read my resume**.
-   Drafts can only say things your resume actually says, so this has to
-   happen before drafting.
+2. **My resume** — upload your PDF. It is read as soon as it is
+   uploaded, because drafts may only say things your resume actually
+   says.
 3. **Pipeline** — press **Sync**, then **Scrape**, **Resolve**,
    **Draft**, in that order.
 4. **Review** — read each letter, edit what you want, press **Approve**.

@@ -98,9 +98,16 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
     # preview matches the wire text exactly.
     settings = get_operator_settings()
     signature = settings.signature
-    # Same `.env` value `send` attaches (`settings.resume_path`); the preview
-    # shows its basename so the reviewer knows the resume goes out with it.
-    attachment_name = os.path.basename(settings.resume_path) if settings.resume_path else None
+    # Same file `send` attaches (`settings.resume_path`); the preview shows
+    # its basename so the reviewer knows the resume goes out with it. The
+    # FILE, not the setting (2026-09-23): RESUME_PATH now has a default, so
+    # a name on screen would otherwise promise an attachment that does not
+    # exist - and `send` refuses in exactly that case.
+    attachment_name = (
+        os.path.basename(settings.resume_path)
+        if settings.resume_path and os.path.isfile(settings.resume_path)
+        else None
+    )
     message = item.message
     body = getattr(message, "body", None) or ""
     source = item.source

@@ -36,6 +36,20 @@ function resumeUrl(modifiedAt) {
   return modifiedAt ? `/api/resume?v=${encodeURIComponent(modifiedAt)}` : '/api/resume'
 }
 
+/** What a parse produced. Both counts, because "it worked" and "it
+ *  worked and threw half of it away" must not look the same. */
+function Counts({ result }) {
+  return (
+    <>
+      {result.claims} claim{result.claims === 1 ? '' : 's'} a letter may now make about you.
+      {result.dropped > 0 &&
+        ` ${result.dropped} were thrown away for quoting something that is not in the file.`}
+      {result.unverified > 0 &&
+        ` ${result.unverified} could not be matched to the resume word for word, so drafts will skip them.`}
+    </>
+  )
+}
+
 function when(iso) {
   if (!iso) return 'unknown'
   const date = new Date(iso)
@@ -92,22 +106,6 @@ export default function Resume() {
               </a>
             </Button>
           )}
-          {/* Operator request (2026-09-23): parsing used to be
-              `python -m app.cli parse-resume PATH` and nothing else,
-              which made a brand-new operator's first Draft a dead end -
-              it fails until the resume has been read, and the UI had
-              nowhere to read it from. It is the one button here that
-              spends a model call, so it is never automatic. */}
-          {data?.configured && (
-            <Button
-              variant="outline"
-              disabled={parse.isPending || replace.isPending}
-              onClick={() => parse.mutate()}
-            >
-              {parse.isPending ? <Spinner /> : <BookOpenCheck />}
-              Re-read my resume
-            </Button>
-          )}
           <Button disabled={replace.isPending || parse.isPending}
                   onClick={() => fileInput.current?.click()}>
             {replace.isPending ? <Spinner /> : <Upload />}
@@ -133,17 +131,35 @@ export default function Resume() {
           <AlertDescription>{replace.error.message}</AlertDescription>
         </Alert>
       )}
-      {replace.isSuccess && (
+      {/* Operator request (2026-09-23): uploading reads the file. It used
+          to be a second button, and a new PDF sitting beside the old
+          claims is a trap with no upside - the claims are the only thing
+          a letter may say about you. */}
+      {replace.isSuccess && !replace.data?.parse_error && (
         <Alert>
-          <AlertTitle>Resume replaced</AlertTitle>
+          <AlertTitle>Resume replaced and read</AlertTitle>
           <AlertDescription>
-            {/* The consequence nobody would guess: the claims the drafter
-                is held to come from `parse-resume`, not from this file.
-                Letting the two drift apart silently would be worse than
-                either. */}
-            Every letter from now on carries the new file. The {data?.claims ?? 0} claims the
-            drafter is held to still come from the old one &mdash; press{' '}
-            <strong>Re-read my resume</strong> to bring them into line.
+            <Counts result={replace.data} />
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* The file is saved either way. Only the reading failed, and the
+          claims are still the previous ones - so this needs a way back
+          in rather than just an apology. */}
+      {replace.isSuccess && replace.data?.parse_error && !parse.isSuccess && (
+        <Alert variant="destructive" role="alert">
+          <AlertTitle>Saved, but I could not read it</AlertTitle>
+          <AlertDescription className="grid items-start gap-2">
+            <span>
+              Every letter from now on carries the new file. What a draft may say about you is
+              still the {data?.claims ?? 0} claims from the old one. {replace.data.parse_error}
+            </span>
+            <Button size="sm" variant="outline" disabled={parse.isPending}
+                    onClick={() => parse.mutate()}>
+              {parse.isPending ? <Spinner /> : <BookOpenCheck />}
+              Try reading it again
+            </Button>
           </AlertDescription>
         </Alert>
       )}
@@ -158,14 +174,7 @@ export default function Resume() {
         <Alert>
           <AlertTitle>Resume read</AlertTitle>
           <AlertDescription>
-            {/* Both counts, because "it worked" and "it worked and threw
-                half of it away" must not look the same. */}
-            {parse.data.claims} claim{parse.data.claims === 1 ? '' : 's'} a letter may now make
-            about you.
-            {parse.data.dropped > 0 &&
-              ` ${parse.data.dropped} were thrown away for quoting something that is not in the file.`}
-            {parse.data.unverified > 0 &&
-              ` ${parse.data.unverified} could not be matched to the resume word for word, so drafts will skip them.`}
+            <Counts result={parse.data} />
           </AlertDescription>
         </Alert>
       )}
@@ -235,10 +244,9 @@ export default function Resume() {
               <CardHeader>
                 <CardTitle className="text-sm">What the drafter knows</CardTitle>
                 <CardDescription>
-                  {data.claims} claims parsed from a resume. These are the only things a draft
-                  may say about you &mdash; and they are stored separately from this file, so
-                  replacing the PDF does not re-read it. <strong>Re-read my resume</strong> is
-                  what brings the two back into line.
+                  {data.claims} claims read from this resume. These are the only things a draft
+                  may say about you. Uploading a new file reads it again, so the two stay in
+                  step.
                 </CardDescription>
               </CardHeader>
             </Card>

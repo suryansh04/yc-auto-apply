@@ -95,6 +95,8 @@ def test_parse_resume_does_not_warn_on_the_paid_tier(monkeypatch, env, tmp_path)
 
 import json  # noqa: E402
 
+from app import config  # noqa: E402
+
 
 class _SessionOpened(Exception):
     """Raised by the patched session factory: the guard passed and the
@@ -107,6 +109,11 @@ def send_env(monkeypatch, tmp_path):
     for var in ("SIGNATURE", "RESUME_PATH", "GMAIL_SENDER_ADDRESS", "GMAIL_CLIENT_SECRETS_PATH"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.chdir(tmp_path)  # no stray .env file can supply the settings
+    # 2026-09-23: a blank RESUME_PATH now means `backend/resume/resume.pdf`
+    # (`config.DEFAULT_RESUME_PATH`), which on a real machine is a real
+    # file. Point the default somewhere empty so these tests measure the
+    # guard and not whose laptop they run on.
+    monkeypatch.setattr(config, "DEFAULT_RESUME_PATH", str(tmp_path / "no-resume-here.pdf"))
     get_settings.cache_clear()
     built = []
 

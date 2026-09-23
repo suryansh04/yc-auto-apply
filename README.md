@@ -1,88 +1,91 @@
 # YC Auto Apply
 
-A single-user, single-laptop tool that finds YC-funded companies hiring
-interns in India, drafts a grounded outreach email to each founder from
-your resume and their public research material, and puts every draft in
-front of you before anything sends. Phase 2 adds reply polling,
-follow-ups and a browser UI on top of the Phase 1 CLI pipeline; nothing
-sends, labels, or replies to anything without a human clicking approve.
+Cold-email YC founders for an internship, without sending anything you
+have not read.
 
-Design specs (binding):
-- `docs/superpowers/specs/2026-09-03-yc-auto-apply-design.md` (Phase 1)
-- `docs/superpowers/specs/2026-09-13-yc-auto-apply-phase-2-design.md` (Phase 2)
+It finds YC companies in India, drafts one email per founder from your
+resume and their own public news, and puts every draft in front of you.
+Nothing is sent until you press **Approve**.
 
-Detailed operator guide: `backend/README.md` — read it before your first
-real run. This file is the quickstart plus the two things you must not
-skip.
+<!-- A screenshot of the Review screen belongs here. -->
 
-## Read this before you do anything else
+## What it does
 
-**The API has no authentication and binds to `127.0.0.1` by design**
-(spec A3). There is no login screen because a login screen on a
-single-user local app is theatre — binding to localhost is the real
-control. Anyone who can reach port 8000 on your machine can start jobs,
-read founder data and trigger a send. **Never** put this behind a
-reverse proxy, a tunnel (ngrok, Cloudflare Tunnel, etc.), `0.0.0.0`, or
-any port forward. If you ever want to expose it beyond your own laptop,
-that is a new design decision this project has not made.
+1. **Sync** — pulls the YC company list and keeps the Indian ones.
+2. **Scrape** — gets founders, news and launches from each company page.
+3. **Resolve** — guesses the founder's email and verifies it is real.
+4. **Draft** — writes one letter per founder, grounded in your resume.
+5. **Review** — you read, edit and approve. Bad claims are highlighted.
+6. **Send** — goes out from your own Gmail, with your resume attached.
+7. **Replies** — checks for answers and drafts follow-ups.
 
-**Free tiers first.** MyEmailVerifier's free tier gives 100
-verifications/day; Gemini's free tier gives 20 requests/day per model.
-On `GEMINI_TIER=free` the CLI's `draft` command refuses to run unless
-you pass `--allow-free-tier` — and even then it *does* send founders'
-names, titles and bios to the free-tier key (`backend/README.md` §3).
-The UI is stricter: the Pipeline's `Draft` and `Classify replies` jobs
-have no `--allow-free-tier` flag and always refuse to start on
-`GEMINI_TIER=free` — the job row shows `RuntimeError` with no further
-detail. Set `GEMINI_TIER=paid` or `LLM_PROVIDER=sarvam` before using
-those two jobs from the UI. See `backend/README.md` §3, §7 and §11 for
-the full cost picture before switching anything to a paid tier.
+## Before you start
 
-## Phase 2 quickstart
+- **Keep it on your laptop.** The API has no login and listens on
+  `127.0.0.1` on purpose. Do not put it behind a tunnel, a proxy or
+  `0.0.0.0`.
+- **Free tiers are limited.** Email verification gives 100 checks/day.
+  Gemini's free tier gives 20 requests/day and the app refuses to draft
+  on it, because drafting would send founder data to a free key. Use
+  `LLM_PROVIDER=sarvam` or a paid Gemini key for drafting.
 
-Prerequisites: Python 3.11, Node (for the frontend), Docker (for
-Postgres), a Gmail account with a Google Cloud OAuth "Desktop app"
-client, a MyEmailVerifier key, and either a Gemini or Sarvam key. Full
-detail, including every `.env` variable, is in `backend/README.md` §1–3.
+## Setup
 
-From the repo root, in order:
+You need Python 3.11, Node 20+, and Docker.
+
+**1. Start the database**
 
 ```bash
 cd backend
-docker compose up -d              # Postgres on localhost:5433
-python -m venv .venv              # first time only
+docker compose up -d
 ```
 
-Now activate the venv — every `pip`/`python` command from here on, in this
-terminal and any later one, must run inside it. Pick the line for your
-shell (do not use `&&`, it is a parse error in Windows PowerShell 5.1):
-
-```powershell
-.venv\Scripts\Activate.ps1        # PowerShell
-```
+**2. Install the backend**
 
 ```bash
-source .venv/Scripts/activate     # Git Bash
+python -m venv .venv
+.venv\Scripts\Activate.ps1        # PowerShell. Git Bash: source .venv/Scripts/activate
+pip install -e ".[dev]"
 ```
 
-Then, still in `backend/`:
+Keep this virtual environment active in every terminal where you run
+`python` or `pip`.
+
+**3. Add your settings**
 
 ```bash
-pip install -e ".[dev]"           # first time only
-cp .env.example .env              # first time only — then fill it in
-# .env.example's DATABASE_URL defaults to the native-Postgres port (5432).
-# Since the command above starts Docker's Postgres instead, set in .env:
-#   DATABASE_URL=postgresql+psycopg://yc:yc@localhost:5433/ycautoapply
+cp .env.example .env
+```
+
+Open `backend/.env` and fill in:
+
+```ini
+DATABASE_URL=postgresql+psycopg://yc:yc@localhost:5433/ycautoapply
+EMAIL_VERIFIER_API_KEY=your-myemailverifier-key
+LLM_PROVIDER=sarvam
+SARVAM_API_KEY=your-sarvam-key
+SIGNATURE=Your Name
+RESUME_PATH=C:/full/path/to/your_resume.pdf
+GMAIL_SENDER_ADDRESS=you@gmail.com
+GMAIL_CLIENT_SECRETS_PATH=C:/full/path/to/client_secret.json
+```
+
+The port is **5433**, not 5432 — that is the Docker database you just
+started. Leave the two `GMAIL_` lines blank for now; the app's own setup
+guide tells you what to put there.
+
+**4. Create the tables and run the API**
+
+```bash
 python -m alembic upgrade head
 python -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Gmail is connected from the app itself now, not the terminal: open the UI
-and press **Connect Gmail**. `python -m app.cli gmail-auth` still works and
-does the same thing, but you never need it.
+Leave it running.
 
-Leave that `uvicorn` process running — the API must stay up for the UI
-and the scheduled tasks below to do anything. In a second terminal:
+**5. Run the app**
+
+In a second terminal:
 
 ```bash
 cd frontend
@@ -90,67 +93,59 @@ npm install
 npm run dev
 ```
 
-The dev server prints a `localhost:5173` URL — that's the app (Pipeline,
-Review Queue, Contacts, Thread, Manual email).
+Open the URL it prints (usually http://localhost:5173).
 
-**One-time, only if you set up Gmail under Phase 1**: Phase 2 needs
-`gmail.readonly` in addition to Phase 1's `gmail.send` (spec A2), so
-reply polling can read your mailbox — it never labels, deletes or
-modifies anything. A send-only token from before cannot read mail; Google
-enforces scopes on the token, not on the request. Re-run this once (in
-the `backend` terminal, with the venv active):
+## First run
 
-```bash
-python -m app.cli gmail-auth
-```
+In the app, in this order:
 
-`gmail-auth` always runs Google's consent flow and replaces the stored
-token with a fresh one covering both scopes — it does not check what the
-old token already had. Re-running it once is enough; after that you can
-ignore this step.
+1. **Connect Gmail** — open the page and follow **First time? Set up the
+   Google side**. It walks you through Google Cloud, takes about 10
+   minutes, and is only needed once. It ends with a
+   `client_secret.json`, the file `GMAIL_CLIENT_SECRETS_PATH` points at.
+2. **My resume** — upload your PDF, then press **Re-read my resume**.
+   Drafts can only say things your resume actually says, so this has to
+   happen before drafting.
+3. **Pipeline** — press **Sync**, then **Scrape**, **Resolve**,
+   **Draft**, in that order.
+4. **Review** — read each letter, edit what you want, press **Approve**.
+5. **Approved** — press **Send**.
 
-**Scheduled polling and follow-ups.** The browser being closed must not
-stop replies from being noticed or follow-ups from going out (spec A1).
-With the API running, register two Windows Scheduled Tasks under your
-own user account (no admin rights needed):
+Everything after that is the same loop: draft, review, send.
+
+## Keeping it running in the background
+
+Replies should be noticed even when the app is closed. With the API
+running:
 
 ```powershell
 .\scripts\schedule-tasks.ps1
 ```
 
-This registers `poll-replies` (every 30 minutes — a deliberate choice,
-not a spec requirement; spec A1's "once a day" is only an example) and
-`schedule-follow-ups` (daily at 9am), each calling the exact same
-`POST /api/jobs/<kind>` endpoint the UI's own buttons call — one code
-path per stage, whether a human or the scheduler started it. Re-run the
-script any time to replace the tasks; `.\scripts\schedule-tasks.ps1
--Unregister` removes them. See the comment block at the top of the
-script for how it fails (harmlessly) when the API isn't running.
+This adds two Windows scheduled tasks: reply polling every 30 minutes
+and follow-up scheduling daily at 9am. Remove them with
+`.\scripts\schedule-tasks.ps1 -Unregister`.
 
-**Classification is not scheduled.** `poll-replies` only fetches replies
-and marks bounces; it never calls the LLM. `classify-replies` is a
-separate job that spends LLM calls, so it is left for you to trigger —
-open the Pipeline screen and click **Classify** when you want replies
-labelled.
-
-## Repo layout
-
-```
-backend/   FastAPI app, CLI, domain logic, Postgres migrations, tests
-frontend/  Vite + React UI (Pipeline, Review Queue, Contacts, Thread, Manual email)
-scripts/   schedule-tasks.ps1 — Windows Task Scheduler setup for A1
-docs/      design specs and SDD process artifacts
-```
+Reply classification is not scheduled, because it costs model calls.
+Press **Classify replies** on the Pipeline when you want it.
 
 ## Tests
 
 ```bash
-cd backend
-python -m pytest -q                        # offline, no DB, no network
-python -m pytest -m integration            # needs DATABASE_URL
+cd backend && python -m pytest -q      # offline, no database needed
+cd frontend && npm test
 ```
 
-```bash
-cd frontend
-npm test
+## Layout
+
 ```
+backend/    FastAPI app, CLI, domain logic, migrations, tests
+frontend/   React UI
+scripts/    Windows scheduled tasks
+docs/       design specs
+```
+
+## More detail
+
+`backend/README.md` is the long version: every setting, every command,
+costs, and what to do when a step fails.

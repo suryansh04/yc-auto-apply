@@ -6,7 +6,8 @@ Every state change goes through `assert_transition`; `approve` stamps
 `approved_at` on the step's outbound row (the DB CHECK `sent_requires_
 approved` and `reserve_for_send`'s `approved_at IS NOT NULL` both key off
 it); `edit` re-runs `validate_draft` and persists nothing on failure; a row
-flagged needs-manual-write cannot be approved until it has been edited.
+flagged needs-manual-write CAN be approved (2026-09-22 - the checks are
+advice, and the operator signs the letter), and keeps its note.
 """
 
 from datetime import datetime, timezone
@@ -98,12 +99,18 @@ def test_approve_from_a_non_pending_state_is_an_illegal_transition(repos, one_ap
         ReviewOutreach(repos).approve(one_approved.id, NOW)
 
 
-def test_approve_is_refused_for_an_unedited_needs_manual_write_row(repos, manual_write_pending):
-    with pytest.raises(ValueError, match="edit"):
-        ReviewOutreach(repos).approve(manual_write_pending.id, NOW)
+def test_an_unedited_needs_manual_write_row_can_still_be_approved(repos, manual_write_pending):
+    # 2026-09-22: this used to be a refusal. The operator's ruling: the
+    # checks are advice, and the person pressing approve is the one whose
+    # name is on the letter. The note is still stored and still shown; it
+    # no longer overrules him.
+    ReviewOutreach(repos).approve(manual_write_pending.id, NOW)
     o = repos.outreach.get(manual_write_pending.id)
-    assert o.state == S.PENDING_APPROVAL and o.last_error == MANUAL_WRITE_ERROR
-    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at is None
+    assert o.state == S.APPROVED
+    # The note survives the approve - it is a record of what was noticed,
+    # not a lock that got picked.
+    assert o.last_error == MANUAL_WRITE_ERROR
+    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at == NOW
 
 
 def test_approve_is_refused_when_there_is_no_draft_row_at_all(repos, no_material_pending):
@@ -174,11 +181,14 @@ SENIORITY_BODY = (
 )
 
 
-def test_edit_that_fails_validation_returns_the_errors_and_persists_nothing(repos, one_pending):
-    errors = ReviewOutreach(repos).edit(one_pending.id, "New subject", SENIORITY_BODY)
-    assert errors and any("implies seniority" in e for e in errors)
+def test_an_edit_the_checks_dislike_is_still_saved(repos, one_pending):
+    # 2026-09-22: the checks no longer refuse a save. They are advice
+    # about the operator's own words - the same ruling that stopped
+    # `approve` refusing. The text is kept; the notes come back.
+    notes = ReviewOutreach(repos).edit(one_pending.id, "New subject", SENIORITY_BODY)
+    assert notes and any("implies seniority" in n for n in notes)
     row = repos.message.get_outbound(one_pending.id, 0)
-    assert (row.subject, row.body, row.edited_by_user) == (PENDING_SUBJECT, PENDING_BODY, False)
+    assert (row.subject, row.body, row.edited_by_user) == ("New subject", SENIORITY_BODY, True)
     assert repos.outreach.get(one_pending.id).state == S.PENDING_APPROVAL
 
 
@@ -207,10 +217,13 @@ def test_edit_clears_the_needs_manual_write_flag(repos, manual_write_pending):
     assert repos.outreach.get(manual_write_pending.id).last_error is None
 
 
-def test_a_failed_edit_keeps_the_needs_manual_write_flag(repos, manual_write_pending):
-    errors = ReviewOutreach(repos).edit(manual_write_pending.id, PENDING_SUBJECT, BANNED_BODY)
-    assert errors
-    assert repos.outreach.get(manual_write_pending.id).last_error == MANUAL_WRITE_ERROR
+def test_an_edit_clears_the_draft_time_flag_even_when_the_checks_complain(repos, manual_write_pending):
+    """`last_error` describes what the MODEL wrote. Once the operator has
+    rewritten the text it no longer describes anything, so it goes - and
+    what the checks make of the new text comes back instead."""
+    notes = ReviewOutreach(repos).edit(manual_write_pending.id, PENDING_SUBJECT, BANNED_BODY)
+    assert notes
+    assert repos.outreach.get(manual_write_pending.id).last_error is None
 
 
 def test_edit_revalidates_against_the_cited_source(repos, one_pending):
@@ -218,9 +231,10 @@ def test_edit_revalidates_against_the_cited_source(repos, one_pending):
     grounding - the citation stays what the drafter chose."""
     ungrounded = ("Your company Vahan is interesting to me.\n\n"
                   "I built a scheduler in Python.\n\nWould you take an intern?")
-    errors = ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, ungrounded)
-    assert any("hook shares no distinctive term" in e for e in errors)
-    assert repos.message.get_outbound(one_pending.id, 0).body == PENDING_BODY
+    notes = ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, ungrounded)
+    assert any("hook shares no distinctive term" in n for n in notes)
+    # Saved anyway (2026-09-22): the note is advice, not a refusal.
+    assert repos.message.get_outbound(one_pending.id, 0).body == ungrounded
 
 
 def test_edit_applies_the_resume_claims_rule(repos, one_pending):
@@ -250,24 +264,65 @@ def test_edit_creates_the_draft_row_for_a_flagged_row_without_one(repos, no_mate
 
 
 def test_edit_without_a_source_still_applies_style_and_claims_rules(repos, no_material_pending):
-    errors = ReviewOutreach(repos).edit(no_material_pending.id, "Subject", SENIORITY_BODY)
-    assert any("implies seniority" in e for e in errors)
-    assert repos.message.get_outbound(no_material_pending.id, 0) is None
-    errors = ReviewOutreach(repos).edit(no_material_pending.id, "Subject",
-                                        "You're building Vahan.\n\nI built it in Rust.\n\nIntern?")
-    assert any("no resume claim" in e for e in errors)
-    assert repos.message.get_outbound(no_material_pending.id, 0) is None
+    notes = ReviewOutreach(repos).edit(no_material_pending.id, "Subject", SENIORITY_BODY)
+    assert any("implies seniority" in n for n in notes)
+    # The rules still RUN on a row with no citable source (2026-09-22) -
+    # they just no longer refuse the save.
+    assert repos.message.get_outbound(no_material_pending.id, 0).body == SENIORITY_BODY
+    notes = ReviewOutreach(repos).edit(no_material_pending.id, "Subject",
+                                       "You're building Vahan.\n\nI built it in Rust.\n\nIntern?")
+    assert any("no resume claim" in n for n in notes)
 
 
-def test_edit_is_refused_outside_pending_approval(repos, one_approved):
-    with pytest.raises(ValueError, match="PENDING_APPROVAL"):
+def test_edit_is_refused_in_a_state_that_has_no_draft_to_change(repos, one_approved):
+    repos.outreach.get(one_approved.id).state = S.SENT
+    with pytest.raises(ValueError, match="PENDING_APPROVAL or APPROVED"):
+        ReviewOutreach(repos).edit(one_approved.id, PENDING_SUBJECT, PENDING_BODY, now=NOW)
+
+
+def test_an_approved_letter_can_be_edited_and_keeps_its_approval(repos, one_approved):
+    """Operator request (2026-09-22): waiting to send is exactly when a
+    typo gets noticed, and bouncing the letter back through the review
+    queue to fix one word is busywork. The edit IS the approval of the new
+    text, so the stamp moves to it."""
+    new_body = PENDING_BODY.replace("Would you take an intern?", "Could you use an intern?")
+    assert ReviewOutreach(repos).edit(one_approved.id, PENDING_SUBJECT, new_body, now=NOW) == []
+    row = repos.message.get_outbound(one_approved.id, 0)
+    assert (row.body, row.edited_by_user) == (new_body, True)
+    # Still approved, and approved AT THE EDIT - the old stamp approved
+    # words that no longer exist.
+    assert repos.outreach.get(one_approved.id).state == S.APPROVED
+    assert row.approved_at == NOW
+
+
+def test_editing_an_approved_letter_without_a_clock_is_refused(repos, one_approved):
+    """There is no sensible third behaviour: keeping the old stamp would
+    send text nobody approved, and clearing it would strand the row in
+    APPROVED with nothing `reserve_for_send` can act on."""
+    with pytest.raises(ValueError, match="clock"):
         ReviewOutreach(repos).edit(one_approved.id, PENDING_SUBJECT, PENDING_BODY)
     assert repos.message.get_outbound(one_approved.id, 0).edited_by_user is False
 
 
+def test_an_approved_letter_the_checks_dislike_is_still_saved_and_still_approved(repos, one_approved):
+    # 2026-09-22: the checks no longer refuse a save. They are advice
+    # about the operator's own words - the same ruling that stopped
+    # `approve` refusing. The text is kept; the notes come back.
+    assert ReviewOutreach(repos).edit(one_approved.id, PENDING_SUBJECT, SENIORITY_BODY, now=NOW)
+    row = repos.message.get_outbound(one_approved.id, 0)
+    assert row.body == SENIORITY_BODY
+    # Re-stamped onto the new text, not left approving the old words.
+    assert row.approved_at == NOW
+    assert repos.outreach.get(one_approved.id).state == S.APPROVED
+
+
 def test_edit_refuses_without_resume_claims(repos, one_pending):
+    # 2026-09-23: the message now names the button rather than the CLI
+    # command, and is an `OperatorError` so the UI may show it verbatim.
+    from app.application.errors import OperatorError
+
     repos.resume_profile.profile = None
-    with pytest.raises(ValueError, match="parse-resume"):
+    with pytest.raises(OperatorError, match="Re-read my resume"):
         ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, PENDING_BODY)
 
 
@@ -438,9 +493,9 @@ def test_edit_rejects_a_body_naming_a_non_cited_outlet(repos, one_pending):
     repos.news.add(id=900, company_id=one_pending.company_id, title="Vahan hires a CFO", source="Mint")
     body = PENDING_BODY.replace("That routing problem is what I keep thinking about.",
                                 "Mint called that routing problem the one to watch.")
-    errors = ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body)
-    assert any("publication name appears" in e for e in errors)
-    assert repos.message.get_outbound(one_pending.id, 0).body == PENDING_BODY
+    notes = ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body)
+    assert any("publication name appears" in n for n in notes)
+    assert repos.message.get_outbound(one_pending.id, 0).body == body
 
 
 def test_an_operator_edit_keeps_his_own_word_choice(repos, one_pending):
@@ -457,3 +512,45 @@ def test_an_operator_edit_keeps_his_own_word_choice(repos, one_pending):
     )
     assert ReviewOutreach(repos).edit(one_pending.id, PENDING_SUBJECT, body) == []
     assert repos.message.get_outbound(one_pending.id, 0).body == body
+
+
+# --- back to review (operator request 2026-09-22) --------------------------
+
+def test_unapprove_returns_an_approved_letter_to_the_queue(repos, one_approved):
+    """Neither "send it" nor "discard it": reject throws the founder away
+    and redraft spends a model call. This just undoes the decision."""
+    ReviewOutreach(repos).unapprove(one_approved.id)
+    assert repos.outreach.get(one_approved.id).state == S.PENDING_APPROVAL
+    # The approval goes with it - a PENDING_APPROVAL row still carrying
+    # `approved_at` is the inconsistency `send`'s own guard catches.
+    assert repos.message.get_outbound(one_approved.id, 0).approved_at is None
+
+
+def test_an_unapproved_letter_shows_up_in_the_review_queue_again(repos, one_approved):
+    uc = ReviewOutreach(repos)
+    assert [i.founder.id for i in uc.pending()] == []
+    uc.unapprove(one_approved.id)
+    assert [i.founder.id for i in uc.pending()] == [one_approved.id]
+    assert [i.founder.id for i in uc.approved()] == []
+
+
+def test_unapprove_keeps_the_text_exactly_as_it_was(repos, one_approved):
+    before = repos.message.get_outbound(one_approved.id, 0)
+    subject, body = before.subject, before.body
+    ReviewOutreach(repos).unapprove(one_approved.id)
+    row = repos.message.get_outbound(one_approved.id, 0)
+    assert (row.subject, row.body) == (subject, body)
+
+
+def test_unapprove_is_refused_for_a_letter_that_was_never_approved(repos, one_pending):
+    with pytest.raises(ValueError, match="APPROVED"):
+        ReviewOutreach(repos).unapprove(one_pending.id)
+    assert repos.outreach.get(one_pending.id).state == S.PENDING_APPROVAL
+
+
+def test_an_unapproved_letter_can_be_approved_again(repos, one_approved):
+    uc = ReviewOutreach(repos)
+    uc.unapprove(one_approved.id)
+    uc.approve(one_approved.id, NOW)
+    assert repos.outreach.get(one_approved.id).state == S.APPROVED
+    assert repos.message.get_outbound(one_approved.id, 0).approved_at == NOW

@@ -43,10 +43,13 @@ from app.adapters.gemini import (
     _DRAFTER_SYSTEM,
     _FIRST_EMAIL_SYSTEM,
     _PARSER_PROMPT,
+    _REVISER_SYSTEM,
     _decode_json,
+    _revisions,
     build_classify_prompt,
     build_critic_prompt,
     build_draft_prompt,
+    build_revise_prompt,
     first_email_source,
 )
 from app.domain.replies import LABELS
@@ -163,6 +166,27 @@ CRITIC_JSON_SCHEMA: dict[str, Any] = {
         "overall_note": {"type": "string"},
     },
     "required": ["verdict", "concerns", "overall_note"],
+    "additionalProperties": False,
+}
+
+REVISION_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "revisions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "replacement": {"type": "string"},
+                    "why": {"type": "string"},
+                },
+                "required": ["index", "replacement", "why"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["revisions"],
     "additionalProperties": False,
 }
 
@@ -396,3 +420,27 @@ class SarvamCritic:
             "concerns": data["concerns"],
             "overall_note": str(data["overall_note"]),
         }
+
+
+class SarvamReviser:
+    """Real `Reviser` port over Sarvam - the provider that actually runs
+    (`LLM_PROVIDER=sarvam`). Same contract as `GeminiReviser`, sharing the
+    same prompt (`_REVISER_SYSTEM`/`build_revise_prompt`, imported from
+    `app.adapters.gemini`) so both providers rewrite a flagged span under
+    exactly the same rules. Advisory only: nothing here changes a draft."""
+
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, **chat_kwargs):
+        self._chat = _SarvamChat(api_key, model, **chat_kwargs)
+
+    def revise(self, context: dict) -> list[dict]:
+        content = self._chat.complete(
+            "reviser",
+            [
+                {"role": "system", "content": _REVISER_SYSTEM},
+                {"role": "user", "content": build_revise_prompt(context)},
+            ],
+            REVISION_JSON_SCHEMA,
+            "revisions",
+            temperature=0.3,
+        )
+        return _revisions(_decode_json(content, "reviser"), "reviser")

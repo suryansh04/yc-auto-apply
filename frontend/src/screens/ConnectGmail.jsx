@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/card'
 import { Item, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item'
 import { Spinner } from '@/components/ui/spinner'
+import SetupGuide from './SetupGuide'
 
 // The outcomes `GET /api/gmail/callback` can redirect back with. Each
 // one says what happened and what to do next - an error that leaves the
@@ -64,7 +65,7 @@ export default function ConnectGmail({ status, outcome }) {
 
   if (!status?.configured) {
     return (
-      <Card className="max-w-xl">
+      <Card className="max-w-2xl">
         <CardHeader>
           <CardTitle>
             <h1>Gmail is not set up yet</h1>
@@ -75,7 +76,7 @@ export default function ConnectGmail({ status, outcome }) {
             before the app can send anything. Add them, then restart the API.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="grid gap-4">
           <ul className="grid gap-1">
             {(status?.missing_config ?? []).map((item) => (
               <li key={item} className="font-mono text-sm">
@@ -83,13 +84,16 @@ export default function ConnectGmail({ status, outcome }) {
               </li>
             ))}
           </ul>
+          {/* Open on this branch: nothing is configured, so whoever is
+              reading this has not done the Google side either. */}
+          <SetupGuide defaultOpen />
         </CardContent>
       </Card>
     )
   }
 
   return (
-    <Card className="max-w-xl">
+    <Card className="max-w-2xl">
       <CardHeader>
         <CardTitle>
           <h1>{reconnecting ? 'Reconnect Gmail' : 'Connect Gmail'}</h1>
@@ -111,19 +115,37 @@ export default function ConnectGmail({ status, outcome }) {
           </Alert>
         )}
 
-        <Item variant="outline">
-          <ItemContent>
-            <ItemDescription>Account</ItemDescription>
-            <ItemTitle>{status.account}</ItemTitle>
-          </ItemContent>
-        </Item>
+        {/* First, because it is the only thing on this screen that is
+            work: on a first connect the Google side has to exist before
+            the button can do anything. Closed by default - the settings
+            are in place, so whoever is here has probably done it - but
+            it sits above the account rather than under the button, where
+            it read as a footnote. */}
+        <SetupGuide />
 
-        <Item variant="outline">
-          <ItemContent>
-            <ItemDescription>Google will be asked for</ItemDescription>
-            <ItemTitle>Sending mail as you, and reading your mail to find replies</ItemTitle>
-          </ItemContent>
-        </Item>
+        {/* Operator request (2026-09-23): only while the account is
+            being set up for the first time. On a reconnect the operator
+            already knows which account this is - he authorised it - and
+            the heading above has just told him what is wrong with it, so
+            repeating the address and the permissions is two boxes
+            between him and the one button he came for. */}
+        {!status.connected && (
+          <>
+            <Item variant="outline">
+              <ItemContent>
+                <ItemDescription>Account</ItemDescription>
+                <ItemTitle>{status.account}</ItemTitle>
+              </ItemContent>
+            </Item>
+
+            <Item variant="outline">
+              <ItemContent>
+                <ItemDescription>Google will be asked for</ItemDescription>
+                <ItemTitle>Sending mail as you, and reading your mail to find replies</ItemTitle>
+              </ItemContent>
+            </Item>
+          </>
+        )}
 
         {connect.isError && (
           <Alert variant="destructive" role="alert">

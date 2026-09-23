@@ -7,8 +7,8 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithQuery } from '../test/render'
-import { mockJobs, mockStartJob, mockStats } from '../test/mocks'
-import Pipeline, { funnelDomainMax } from './Pipeline'
+import { mockJobs, mockStartJob, mockStats, mockSend } from '../test/mocks'
+import Pipeline, { describeSendResult, funnelDomainMax } from './Pipeline'
 
 // The screen links the two counts that need a decision through to the
 // screens where that decision gets made, so it needs a router.
@@ -157,7 +157,11 @@ it('renders exactly the seven registered job kinds as stage buttons, in order', 
   render(<Pipeline />)
   await screen.findByText('Pipeline')
 
-  const buttons = screen.getAllByRole('button')
+  // Scoped to the stage tables: the screen has other buttons (Send now,
+  // the two queue links), and this test is about the job registry.
+  const buttons = screen
+    .getAllByRole('button')
+    .filter((b) => b.closest('table'))
   expect(buttons.map((b) => b.textContent)).toEqual([
     'Sync',
     'Scrape',
@@ -280,4 +284,56 @@ it('draws both funnel groups on one scale', () => {
   expect(funnelDomainMax({ new: 2, discarded: 57 })).toBe(57)
   // Never zero: an all-empty pipeline must not divide by it.
   expect(funnelDomainMax({})).toBe(1)
+})
+
+
+// --- sending (operator finding 2026-09-22) ---------------------------------
+
+it('points at the approved letters rather than sending from a number', async () => {
+  // "clicking approve does nothing, not sending the email": approve was
+  // working, but there was no way to send from the UI at all. Sending now
+  // lives on its own screen, where the letters can be read first, so this
+  // card is the way in rather than the trigger.
+  mockStats({ counts: { approved: 3 } })
+  mockJobs([])
+  render(<Pipeline />)
+  const link = await screen.findByRole('link', { name: /review and send/i })
+  expect(link).toHaveAttribute('href', '/approved')
+})
+
+it('names every outcome of a send, not just the ones that went', () => {
+  // "sent 3" alone hides the four the operator has to act on.
+  expect(describeSendResult({ sent: 3, skipped_cap: 4, needs_manual_check: 0,
+                              skipped_not_reservable: 0, errors: 0 }))
+    .toMatch(/4 held back by the daily cap/)
+  expect(describeSendResult({ sent: 1, skipped_cap: 0, needs_manual_check: 2,
+                              skipped_not_reservable: 0, errors: 1 }))
+    .toMatch(/2 need a manual check.*1 could not be sent/)
+  expect(describeSendResult({ sent: 1, skipped_cap: 0, needs_manual_check: 0,
+                              skipped_not_reservable: 0, errors: 0 }))
+    .toBe('Nothing else was waiting.')
+})
+
+it('shows a stage refusal as the sentence it is, not as a type name', async () => {
+  // 2026-09-23: a brand-new operator pressing Draft before the resume
+  // was read saw `failed: ValueError`, while the sentence telling him
+  // what to do sat in a terminal he had no reason to be watching.
+  mockStats()
+  mockJobs([{
+    id: 11, kind: 'draft', status: 'failed', done: 0, total: null,
+    error: 'no resume claims yet - open My resume and press Re-read my resume.',
+  }])
+  render(<Pipeline />)
+  expect(await screen.findByText(/open My resume and press Re-read my resume/i))
+    .toBeInTheDocument()
+})
+
+it('still shows a bare exception type compactly', async () => {
+  // The rule did not change for everything else: a message the app did
+  // not author is a type name, and a type name fits a badge.
+  mockStats()
+  mockJobs([{ id: 12, kind: 'scrape', status: 'failed', done: 0, total: null,
+              error: 'HTTPError' }])
+  render(<Pipeline />)
+  expect(await screen.findByText('failed: HTTPError')).toBeInTheDocument()
 })

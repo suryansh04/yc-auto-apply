@@ -116,8 +116,12 @@ it('names the missing .env keys when Gmail was never configured', async () => {
   })
   render()
   expect(await screen.findByRole('heading', { name: /not set up yet/i })).toBeInTheDocument()
-  expect(screen.getByText(/GMAIL_SENDER_ADDRESS/)).toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: /connect gmail/i })).not.toBeInTheDocument()
+  // The setup guide names the same keys in its own .env example, so the
+  // assertion is about the missing-config LIST, not about the page.
+  expect(
+    screen.getByText(/GMAIL_SENDER_ADDRESS \(the Gmail account authorised by gmail-auth\)/),
+  ).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /^connect gmail$/i })).not.toBeInTheDocument()
 })
 
 it('explains a cancelled consent instead of silently showing the button again', async () => {
@@ -164,4 +168,95 @@ it('does not name an account before Gmail is connected', async () => {
   await screen.findByRole('heading', { name: /connect gmail/i })
   const sidebar = document.querySelector('[data-slot="sidebar"]')
   expect(sidebar.textContent).not.toMatch(/operator@example\.com/)
+})
+
+
+// --- the first-time setup guide (operator request 2026-09-23) -------------
+//
+// "write the step by step procedure a new beginner has to do in order to
+// connect gmail when he first time uses this app". Everything Google
+// needs is set up in a console this app cannot see, so the instructions
+// live on the screen that is blocking the person.
+
+it('opens the setup guide when nothing is configured yet', async () => {
+  mockStatus({
+    configured: false,
+    missing_config: ['GMAIL_SENDER_ADDRESS (the Gmail account authorised by gmail-auth)'],
+    connected: false,
+    account: null,
+    can_read_replies: false,
+  })
+  render()
+  // Nobody in this state has done the Google side either, so it is open
+  // rather than one more thing to find.
+  expect(await screen.findByText(/enable the gmail api/i)).toBeInTheDocument()
+})
+
+it('keeps the guide out of the way once the settings are in place', async () => {
+  mockStatus(NOT_CONNECTED)
+  render()
+  await screen.findByRole('button', { name: /^connect gmail$/i })
+  expect(screen.queryByText(/enable the gmail api/i)).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: /first time\? set up the google side/i }))
+  expect(await screen.findByText(/enable the gmail api/i)).toBeInTheDocument()
+})
+
+it('says Desktop app, because a Web client rejects the loopback callback', async () => {
+  mockStatus(NOT_CONNECTED)
+  render()
+  await userEvent.click(
+    await screen.findByRole('button', { name: /first time\? set up the google side/i }),
+  )
+  expect(await screen.findByText(/Application type: Desktop app/i)).toBeInTheDocument()
+  expect(screen.getByText('http://127.0.0.1:8000/api/gmail/callback')).toBeInTheDocument()
+})
+
+it('warns about the 7-day token expiry in testing mode', async () => {
+  // The thing that bites hardest: sending simply stops a week later.
+  mockStatus(NOT_CONNECTED)
+  render()
+  await userEvent.click(
+    await screen.findByRole('button', { name: /first time\? set up the google side/i }),
+  )
+  expect(await screen.findByText(/7 days/)).toBeInTheDocument()
+  expect(screen.getByText(/Google Auth Platform → Audience → Publish app/)).toBeInTheDocument()
+})
+
+it('says both permissions have to be ticked', async () => {
+  mockStatus(NOT_CONNECTED)
+  render()
+  await userEvent.click(
+    await screen.findByRole('button', { name: /first time\? set up the google side/i }),
+  )
+  expect(await screen.findByText(/Both must be ticked/i)).toBeInTheDocument()
+})
+
+
+// --- what the screen shows when (operator request 2026-09-23) -------------
+
+it('shows the account while it is being set up for the first time', async () => {
+  mockStatus(NOT_CONNECTED)
+  render()
+  expect(await screen.findByText('Account')).toBeInTheDocument()
+  expect(screen.getByText(/Sending mail as you, and reading your mail/)).toBeInTheDocument()
+})
+
+it('drops the account boxes on a reconnect', async () => {
+  // He authorised this account himself, and the heading has just told
+  // him what is wrong with it - repeating the address and the
+  // permissions is two boxes between him and the one button.
+  mockStatus({ ...CONNECTED, can_read_replies: false })
+  render()
+  await screen.findByRole('heading', { name: /reconnect gmail/i })
+  expect(screen.queryByText('Account')).not.toBeInTheDocument()
+  expect(screen.queryByText(/Sending mail as you, and reading your mail/)).not.toBeInTheDocument()
+})
+
+it('puts the setup guide above the account, not under the button', async () => {
+  mockStatus(NOT_CONNECTED)
+  render()
+  const guide = await screen.findByRole('button', { name: /first time\? set up the google side/i })
+  const account = screen.getByText('Account')
+  // It is the only thing on this screen that is work, so it comes first.
+  expect(guide.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })

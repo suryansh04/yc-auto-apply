@@ -1,5 +1,10 @@
-"""Task 15, ruling R2: the greeting, signature and opt-out line are composed
-at send time by a pure function; the stored body is never touched."""
+"""Task 15, ruling R2: the greeting and signature are composed at send
+time by a pure function; the stored body is never touched.
+
+2026-09-23: the opt-out line was deleted at the operator's instruction,
+so the fourth part is empty and the wire text now ends at the signature.
+The tests that pinned its wording are gone; the one that pins its absence
+is `test_there_is_no_opt_out_line`."""
 
 import pytest
 
@@ -14,36 +19,43 @@ BODY = (
 
 
 def test_exact_wire_text_shape():
-    out = compose_wire_text("Madhav", BODY, SIGNATURE, OPT_OUT_LINE)
-    assert out == f"Hi Madhav,\n\n{BODY}\n\n{SIGNATURE}\n\n{OPT_OUT_LINE}"
+    out = compose_wire_text("Madhav", BODY, SIGNATURE)
+    assert out == f"Hi Madhav,\n\n{BODY}\n\n{SIGNATURE}"
 
 
-def test_opt_out_line_is_the_default_fourth_part():
-    assert compose_wire_text("Madhav", BODY, SIGNATURE) == compose_wire_text(
-        "Madhav", BODY, SIGNATURE, OPT_OUT_LINE
-    )
+def test_there_is_no_opt_out_line():
+    # 2026-09-23, operator instruction: "delete this line from the
+    # email". Spec 18 asks for one; the person whose name is on the
+    # letter decided against it. Emptying the constant is the whole
+    # change, and is what makes it reversible.
+    assert OPT_OUT_LINE == ""
 
 
-def test_opt_out_line_is_a_single_line_and_offers_a_way_out():
-    assert "\n" not in OPT_OUT_LINE
-    assert OPT_OUT_LINE.strip() == OPT_OUT_LINE
-    # 2026-09-16: shortened at the operator's request - "no" is the whole
-    # reply, and the line must say so in one plain sentence.
-    assert '"no"' in OPT_OUT_LINE
-    assert "won't follow up" in OPT_OUT_LINE
-    assert OPT_OUT_LINE == "If not, a one-word \"no\" is fine and I won't follow up."
+def test_an_empty_opt_out_line_leaves_no_trailing_blank_line():
+    # `compose_wire_text` drops empty parts, so deleting the sentence
+    # cannot leave the letter ending in whitespace.
+    out = compose_wire_text("Madhav", BODY, SIGNATURE)
+    assert out.endswith(SIGNATURE)
+    assert not out.endswith("\n")
+
+
+def test_a_caller_can_still_pass_a_closing_line():
+    # The part was emptied, not removed: putting a sentence back is one
+    # string in `app.domain.compose`.
+    out = compose_wire_text("Madhav", BODY, SIGNATURE, "One word is enough.")
+    assert out == f"Hi Madhav,\n\n{BODY}\n\n{SIGNATURE}\n\nOne word is enough."
 
 
 def test_stored_body_is_used_verbatim_in_the_middle():
     out = compose_wire_text("Riya", BODY, SIGNATURE)
     assert BODY in out
     assert out.startswith("Hi Riya,\n\n")
-    assert out.endswith("\n\n" + OPT_OUT_LINE)
+    assert out.endswith(SIGNATURE)
 
 
 def test_body_and_signature_surrounding_whitespace_does_not_double_blank_lines():
     out = compose_wire_text("Riya", BODY + "\n", "\n" + SIGNATURE + "\n")
-    assert out == f"Hi Riya,\n\n{BODY}\n\n{SIGNATURE}\n\n{OPT_OUT_LINE}"
+    assert out == f"Hi Riya,\n\n{BODY}\n\n{SIGNATURE}"
     assert "\n\n\n" not in out
 
 
@@ -53,7 +65,7 @@ def test_empty_or_whitespace_signature_drops_the_part_instead_of_a_triple_blank_
     configured; the CLI guard, not this function, is what makes a real
     send require one."""
     out = compose_wire_text("Riya", BODY, signature)
-    assert out == f"Hi Riya,\n\n{BODY}\n\n{OPT_OUT_LINE}"
+    assert out == f"Hi Riya,\n\n{BODY}"
     assert "\n\n\n" not in out
 
 

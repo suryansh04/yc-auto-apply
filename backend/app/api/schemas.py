@@ -99,11 +99,111 @@ class QueueItemOut(BaseModel):
     # said so. Basename only (never the operator's filesystem path); None
     # when RESUME_PATH is unset, which is exactly the case `send` refuses.
     attachment_name: str | None = None
+    # The generic company paragraph as it would read for THIS company, so
+    # the screen can show it on hover before the operator commits to the
+    # swap (operator request, 2026-09-23). Sent from here rather than
+    # written into the JavaScript because the copy lives in
+    # `app.domain.letter` and must have exactly one home - the preview and
+    # what `generic-line` actually writes are the same string.
+    generic_line: str | None = None
+    # The company paragraph as it currently stands - a verbatim substring
+    # of `body`, and therefore of `wire_text`. The screen marks exactly
+    # these characters so the operator can SEE which part of the letter
+    # the generic line would replace, rather than being asked to take the
+    # swap on trust. None for a letter that does not have the assembled
+    # shape, which is the same condition `generic_line` is gated on.
+    insight_text: str | None = None
 
 
 class EditIn(BaseModel):
     subject: str
     body: str
+
+
+class ApplicationOut(BaseModel):
+    """One application on the Applications screen.
+
+    `outcome` is the bucket (`app.api.routers.applications.OUTCOMES`), not
+    the state: `sent`, `replied`, `closed` and `bounced` are four states
+    and one outcome, and `pending_approval` is one state and two outcomes
+    depending on whether it was skipped. `state` comes along anyway, so
+    the raw truth is never hidden behind the summary."""
+
+    outreach_id: int
+    company_name: str | None = None
+    founder_name: str
+    to: str | None = None
+    state: str
+    outcome: str
+    subject: str | None = None
+    sent_at: str | None = None
+    skipped_at: str | None = None
+    last_error: str | None = None
+
+
+class CheckIn(BaseModel):
+    """Optional text to judge instead of the stored draft, so the operator
+    can ask "is this any good?" about something he is still typing."""
+
+    subject: str | None = None
+    body: str | None = None
+
+
+class HighlightOut(BaseModel):
+    """One note, plus the exact words it is about.
+
+    `quote` is a verbatim substring of the draft body, or None when the
+    note is about the letter as a whole (its length, its shape) or its
+    quote could not be resolved. The screen wraps those characters and
+    nothing else - marking the wrong words would be worse than marking
+    none."""
+
+    message: str
+    quote: str | None = None
+
+
+class SuggestionOut(BaseModel):
+    """One rewrite for one highlighted span.
+
+    `index` is the position in the same `highlights` list `/check`
+    returned, so the screen pairs a rewrite with its note without matching
+    on text. `quote` is repeated here so a hover card has everything it
+    needs in one object. `replacement` is the new text for that span
+    alone; an empty string is a real suggestion - it means delete it."""
+
+    index: int
+    quote: str
+    message: str
+    replacement: str
+    why: str = ""
+
+
+class SuggestOut(BaseModel):
+    """What the model would write instead, for the spans the checks
+    flagged. Advice on top of advice: the route writes nothing, refuses
+    nothing, and a provider that is unconfigured or failing yields an
+    empty list rather than an error - the checks are already on screen and
+    must stay there.
+
+    `unavailable` names the missing SETTING when no rewriter could be
+    built (never its value), so the screen can say why the hover cards are
+    empty instead of looking broken."""
+
+    suggestions: list[SuggestionOut] = []
+    unavailable: str | None = None
+
+
+class CheckOut(BaseModel):
+    """What the checks say about a draft. Advice, not a gate (operator
+    decision, 2026-09-22): the route writes nothing and refuses nothing -
+    the human decides what to do about it.
+
+    `notes` is the plain list; `highlights` is the same notes paired with
+    the text each one objects to. Both are sent so a caller that only
+    wants the sentences is not forced to unwrap anything."""
+
+    notes: list[str] = []
+    highlights: list[HighlightOut] = []
 
 
 class OkOut(BaseModel):
@@ -145,9 +245,14 @@ class ManualEmailIn(BaseModel):
 
 class SendIn(BaseModel):
     """Body of `POST /api/send`: `limit` caps this one run on top of the
-    rolling 24h `daily_send_cap`, same as the CLI's `--limit`."""
+    rolling 24h `daily_send_cap`, same as the CLI's `--limit`.
+
+    `outreach_id` narrows the run to one letter (the per-letter Send on
+    the Approved screen). Every other rule still applies - it is a
+    filter, not a bypass."""
 
     limit: int | None = None
+    outreach_id: int | None = None
 
 
 class SendResultOut(BaseModel):

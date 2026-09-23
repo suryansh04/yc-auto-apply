@@ -68,8 +68,30 @@ export function useConnectGmail() {
   })
 }
 
+/**
+ * POST /api/gmail/disconnect - forget the stored token.
+ *
+ * Invalidating the status is the whole effect on this side: the shell
+ * gates on `connected`, so the next status read is what sends the
+ * operator back to the connect screen. Nothing about the token was ever
+ * here to clear.
+ */
+export function useDisconnectGmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiPost('/gmail/disconnect'),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['gmail-status'] }),
+  })
+}
+
 export function useQueue() {
   return useQuery({ queryKey: ['queue'], queryFn: () => apiGet('/queue'), ...QUERY_DEFAULTS })
+}
+
+// The letters approved and not yet sent. Same shape as the queue - it is
+// the same thing at a later moment.
+export function useApproved() {
+  return useQuery({ queryKey: ['approved'], queryFn: () => apiGet('/approved'), ...QUERY_DEFAULTS })
 }
 
 export function useQueueItem(id) {
@@ -143,6 +165,7 @@ export function useApprove() {
     mutationFn: (id) => apiPost(`/outreach/${id}/approve`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
       queryClient.invalidateQueries({ queryKey: ['stats'] })
     },
   })
@@ -155,6 +178,95 @@ export function useEdit() {
     onSuccess: (_data, { id }) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] })
       queryClient.invalidateQueries({ queryKey: ['queue', id] })
+      // An approved letter is editable too (2026-09-22), so the Approved
+      // screen's copy of the text is stale after a save.
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
+    },
+  })
+}
+
+/**
+ * POST /api/outreach/{id}/unapprove - send an approved letter back to the
+ * review queue. Neither sending it nor discarding it: it leaves the
+ * Approved screen and reappears in Review with its text untouched.
+ */
+// The resume PDF `send` attaches to every letter. `useResumeStatus` also
+// carries the parsed-claim count, because replacing the file does NOT
+// reparse it and the two can silently disagree.
+// Every application with the OUTCOME it ended in - a different question
+// from `useContacts`, which filters by raw state. Fetched whole and
+// filtered on the screen, so the tab counts are right whichever tab is
+// open.
+export function useApplications() {
+  return useQuery({
+    queryKey: ['applications'],
+    queryFn: () => apiGet('/applications'),
+    ...QUERY_DEFAULTS,
+  })
+}
+
+export function useResumeStatus() {
+  return useQuery({
+    queryKey: ['resume-status'],
+    queryFn: () => apiGet('/resume/status'),
+    ...QUERY_DEFAULTS,
+  })
+}
+
+/**
+ * POST /api/resume - replace the attached PDF. Multipart, so it does not
+ * go through `apiPost` (which sends JSON); the error shape is the same
+ * `{detail}` FastAPI raises everywhere else.
+ */
+/**
+ * POST /api/resume/parse - read the resume and replace the claims a
+ * letter may assert about the operator.
+ *
+ * The one call on this screen that spends a model call, so it is never
+ * automatic: the operator asks for it. Invalidating the status is what
+ * updates the claim count everywhere it is shown.
+ */
+export function useParseResume(options = {}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiPost('/resume/parse'),
+    ...options,
+    onSuccess: (data, vars, ctx) => {
+      queryClient.invalidateQueries({ queryKey: ['resume-status'] })
+      options.onSuccess?.(data, vars, ctx)
+    },
+  })
+}
+
+export function useReplaceResume() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (file) => {
+      const form = new FormData()
+      form.append('file', file)
+      const response = await fetch('/api/resume', { method: 'POST', body: form })
+      const data = await response.json().catch(() => ({}))
+      // Same (status, body) shape every other failure in this app has.
+      if (!response.ok) throw new ApiError(response.status, data)
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resume-status'] })
+      // Every preview footer names the attachment.
+      queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
+    },
+  })
+}
+
+export function useUnapprove() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => apiPost(`/outreach/${id}/unapprove`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
+      queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
     },
   })
 }
@@ -181,6 +293,60 @@ export function useRedraft() {
   })
 }
 
+/**
+ * POST /api/outreach/{id}/check - re-run the checks and return what they
+ * say. Writes nothing and refuses nothing (operator decision,
+ * 2026-09-22): the notes are advice, so asking for them can never block
+ * the person who signs the letter. Optionally judges text being typed
+ * rather than the stored draft.
+ */
+export function useCheckDraft(options = {}) {
+  return useMutation({
+    mutationFn: ({ id, subject, body }) =>
+      apiPost(`/outreach/${id}/check`, subject != null || body != null ? { subject, body } : {}),
+    ...options,
+  })
+}
+
+/**
+ * POST /api/outreach/{id}/suggest - what to write instead, for each span
+ * `/check` highlighted. A separate request from the check on purpose: the
+ * checks are deterministic and instant, this one waits on Sarvam, and the
+ * highlights must not wait with it.
+ *
+ * Answers `{suggestions: [{index, quote, message, replacement, why}],
+ * unavailable}`. `index` is a position in the check's `highlights`, so a
+ * rewrite is paired with its note without matching on text.
+ */
+/**
+ * POST /api/outreach/{id}/generic-line - swap the company paragraph for
+ * the written generic one. An edit like any other: saved, validated,
+ * never refused, and it answers with the checks' notes.
+ *
+ * Invalidates the queue and the approved list because the stored body
+ * changed - this is the one "suggestion" on the screen that writes.
+ */
+export function useGenericLine(options = {}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => apiPost(`/outreach/${id}/generic-line`),
+    ...options,
+    onSuccess: (data, id, ctx) => {
+      queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
+      options.onSuccess?.(data, id, ctx)
+    },
+  })
+}
+
+export function useSuggestFixes(options = {}) {
+  return useMutation({
+    mutationFn: ({ id, subject, body }) =>
+      apiPost(`/outreach/${id}/suggest`, subject != null || body != null ? { subject, body } : {}),
+    ...options,
+  })
+}
+
 export function useSetEmail() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -196,10 +362,20 @@ export function useSetEmail() {
 export function useSend() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (limit) => apiPost('/send', limit != null ? { limit } : undefined),
+    // `mutate()` sends everything approved; `mutate({ outreachId })` sends
+    // exactly one. `limit` caps a batch run, as the CLI's --limit does.
+    mutationFn: (vars) => {
+      if (vars == null) return apiPost('/send', undefined)
+      if (typeof vars === 'number') return apiPost('/send', { limit: vars })
+      const body = {}
+      if (vars.limit != null) body.limit = vars.limit
+      if (vars.outreachId != null) body.outreach_id = vars.outreachId
+      return apiPost('/send', Object.keys(body).length ? body : undefined)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stats'] })
       queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
     },
   })
 }

@@ -38,22 +38,28 @@ def test_approve_moves_the_row_and_stamps_approved_at(client, repos, pending_dra
     assert repos.session.commit_calls == 1
 
 
-def test_approve_is_refused_for_a_flagged_unedited_draft(client, repos, flagged_draft):
+def test_a_flagged_draft_can_still_be_approved(client, repos, flagged_draft):
+    # 2026-09-22: this used to be a refusal. The operator's ruling: the
+    # checks are advice, and the person pressing approve is the one whose
+    # name is on the letter. The note is still stored and still shown; it
+    # no longer overrules him.
     r = client.post(f"/api/outreach/{flagged_draft.outreach.id}/approve")
-    assert r.status_code == 409
-    assert repos.outreach.get(flagged_draft.outreach.id).state == S.PENDING_APPROVAL
-    # A refused (409) action must commit nothing.
-    assert repos.session.commit_calls == 0
+    assert r.status_code == 200
+    assert repos.outreach.get(flagged_draft.outreach.id).state == S.APPROVED
 
 
-def test_edit_returns_422_with_the_validators_own_messages(client, repos, pending_draft):
+def test_edit_saves_and_returns_what_the_checks_noticed(client, repos, pending_draft):
+    """2026-09-22: this answered 422 and persisted nothing, which made the
+    checks a gate on the operator's own typing - the same mistake
+    `approve` was making. The save always happens now; the notes come back
+    in the body as advice."""
     r = client.post(f"/api/outreach/{pending_draft.outreach.id}/edit",
                     json={"subject": "hi", "body": "I hope this email finds you well."})
-    assert r.status_code == 422
-    assert any("banned" in e or "paragraph" in e or "intern" in e for e in r.json()["errors"])
-    # Nothing persisted on a rejected edit.
-    assert repos.message.get_outbound(pending_draft.outreach.id, 0).edited_by_user is False
-    assert repos.session.commit_calls == 0
+    assert r.status_code == 200
+    notes = r.json()["notes"]
+    assert any("paragraph" in n or "intern" in n or "subject" in n for n in notes)
+    assert repos.message.get_outbound(pending_draft.outreach.id, 0).edited_by_user is True
+    assert repos.session.commit_calls == 1
 
 
 def test_a_valid_edit_persists_and_marks_it_human_written(client, repos, pending_draft, good_body):

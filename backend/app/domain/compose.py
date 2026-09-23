@@ -11,20 +11,28 @@ actually leaves the mailbox is
 
     {signature}
 
-    {opt-out line}
+    {opt-out line, if there is one}
 
 `compose_wire_text` is the single pure function that produces it, so the
 sender (Task 15) and the review screen's preview (Task 16) cannot drift
 apart: what the human approves is byte-for-byte what is sent. The stored
 body is never modified.
 
-Spec §18 requires "a single-line opt-out sentence in every email" but does
-not fix its wording, so `OPT_OUT_LINE` below is this module's wording —
-one line, plain text (D10), offering a reply-based way out that costs the
-founder one word. Change it here and nowhere else.
+**The opt-out line is empty (operator instruction, 2026-09-23: "delete
+this line from the email").** Spec §18 asks for "a single-line opt-out
+sentence in every email"; the person whose name is on the letter has
+decided against one, and his letter already ends by telling the founder
+a "no" needs no explanation. That is a deliberate departure from the
+spec, recorded here rather than quietly dropped.
+
+Emptying the constant, rather than deleting the part, is what makes this
+reversible: `compose_wire_text` drops empty parts, so the wire text is
+already correct, and putting a sentence back here is the whole change.
+It also takes effect on letters already drafted - this is composed at
+send and preview time, never stored in a body.
 """
 
-OPT_OUT_LINE = "If not, a one-word \"no\" is fine and I won't follow up."
+OPT_OUT_LINE = ""
 
 _FALLBACK_GREETING_NAME = "there"
 

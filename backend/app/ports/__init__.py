@@ -168,6 +168,31 @@ class Critic(Protocol):
 
 
 @runtime_checkable
+class Reviser(Protocol):
+    """Operator request (2026-09-22): "when i hover over it, it shows
+    suggestion just like grammarly use sarvam for suggestion".
+
+    The deterministic validator says what is WRONG with a span
+    (`app.domain.validation` -> `app.domain.highlight`); this says what to
+    write INSTEAD. `revise(context)` takes
+    `{body, company_name, spans: [{index, quote, note}]}` and answers one
+    entry per span it could improve:
+    `[{index, replacement, why}]` - `replacement` is the rewritten text
+    for that span alone, `why` one short line for the hover card.
+
+    Advisory, like `Critic` above and for the same reason: the operator
+    reads the rewrite and decides. Nothing here writes to a draft, and a
+    `revise` call that raises must leave the checks (which are already on
+    screen) exactly as they were - see
+    `app.application.suggest_fixes.run_reviser`. Skipping a span is always
+    allowed: a note about the letter's length has no single phrase to
+    rewrite, and a span the model has nothing better for is better left
+    alone than churned."""
+
+    def revise(self, context: dict) -> list[dict]: ...  # [{index, replacement, why}]
+
+
+@runtime_checkable
 class ResumeParser(Protocol):
     def parse(self, raw_text: str) -> list[dict]: ...  # [{kind, text, source_span}]
 

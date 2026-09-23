@@ -69,3 +69,20 @@ if (!globalThis.ResizeObserver) {
     disconnect() {}
   }
 }
+
+
+// IntersectionObserver - the incremental row lists (src/lib/paging.js)
+// use one to press "Load more" when the sentinel scrolls into view.
+// jsdom has no layout, so nothing can ever intersect; a stub that
+// observes nothing is the honest answer, and the button still works,
+// which is what the tests exercise.
+if (!globalThis.IntersectionObserver) {
+  globalThis.IntersectionObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return []
+    }
+  }
+}

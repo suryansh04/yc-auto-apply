@@ -59,9 +59,11 @@ def test_screen_shows_the_composed_wire_text_not_the_bare_body(a_pending_message
     assert expected in out
     assert "Hi Madhav," in out
     assert "Suryansh\nIIT Delhi" in out
-    assert OPT_OUT_LINE in out
+    # 2026-09-23: there is no opt-out line any more, so the signature is
+    # what the screen ends the letter with.
+    assert OPT_OUT_LINE == ""
     # The greeting precedes the body and the signature follows it.
-    assert out.index("Hi Madhav,") < out.index(PENDING_BODY) < out.index(OPT_OUT_LINE)
+    assert out.index("Hi Madhav,") < out.index(PENDING_BODY) < out.index("IIT Delhi")
 
 
 def test_screen_uses_the_signature_it_is_given(a_pending_message, a_news_source):
@@ -274,23 +276,21 @@ def test_review_edit_opens_the_editor_on_subject_and_body_then_recomposes(
     assert repos.session.commit_calls == 2                # one for the edit, one for the approve
 
 
-def test_review_edit_that_fails_validation_prints_errors_persists_nothing_and_reprompts(
+def test_review_edit_prints_what_the_checks_noticed_and_saves_anyway(
     wired_review, repos, one_pending,
 ):
-    # A structural failure, not a banned phrase: as of 2026-09-22 the
-    # phrase bans do not apply to text the operator typed himself (they
-    # police the model's habits, not his voice). Implying seniority is a
-    # false claim about him, so it is still rejected.
-    wired_review.editor = staticmethod(
-        lambda text: f"{PENDING_SUBJECT}\n\nYou're at Vahan.\n\nI built it with my team.\n\nIntern?"
-    )
+    # 2026-09-22: the checks no longer refuse a save. They are advice
+    # about the operator's own words - the same ruling that stopped
+    # `approve` refusing - so they are printed and the text is kept.
+    body = "You're at Vahan.\n\nI built it with my team.\n\nIntern?"
+    wired_review.editor = staticmethod(lambda text: f"{PENDING_SUBJECT}\n\n{body}")
     wired_review.keys = ["e", "s"]
     result = runner.invoke(cli.app, ["review"])
     assert result.exit_code == 0, result.output
     assert "implies seniority" in result.output
     row = repos.message.get_outbound(one_pending.id, 0)
-    assert (row.subject, row.body, row.edited_by_user) == (PENDING_SUBJECT, PENDING_BODY, False)
-    assert repos.session.commit_calls == 0
+    assert (row.body, row.edited_by_user) == (body, True)
+    assert repos.session.commit_calls == 1
     assert wired_review.prompts == 2
 
 
@@ -316,18 +316,21 @@ def test_review_edit_aborted_in_the_editor_changes_nothing(wired_review, repos, 
     assert "aborted" in result.output and "empty" not in result.output
 
 
-def test_review_refuses_to_approve_an_unedited_needs_manual_write_row(
+def test_review_approves_an_unedited_needs_manual_write_row_but_still_shows_the_note(
     wired_review, repos, manual_write_pending,
 ):
-    wired_review.keys = ["a", "s"]
+    # 2026-09-22: this used to be a refusal. The operator's ruling: the
+    # checks are advice, and the person pressing approve is the one whose
+    # name is on the letter. The note is still stored and still shown; it
+    # no longer overrules him.
+    wired_review.keys = ["a"]
     result = runner.invoke(cli.app, ["review"])
     assert result.exit_code == 0, result.output
+    # Still told, every time - the operator decides what to do about it.
     assert "NEEDS MANUAL WRITE" in result.output
-    assert "edit" in result.output.lower() and "refus" in result.output.lower()
-    assert repos.outreach.get(manual_write_pending.id).state == S.PENDING_APPROVAL
-    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at is None
-    assert repos.session.commit_calls == 0
-    assert wired_review.prompts == 2
+    assert "refus" not in result.output.lower()
+    assert repos.outreach.get(manual_write_pending.id).state == S.APPROVED
+    assert repos.message.get_outbound(manual_write_pending.id, 0).approved_at is not None
 
 
 def test_review_edit_then_approve_of_a_needs_manual_write_row(
@@ -450,9 +453,10 @@ def test_review_edit_citing_an_unverified_claim_is_rejected_without_keep_unverif
     wired_review.keys = ["e", "s"]
     result = runner.invoke(cli.app, ["review"])
     assert result.exit_code == 0, result.output
+    # Still SAID (the claim set an edit is held to is unchanged), no
+    # longer refused (2026-09-22).
     assert "no resume claim" in result.output and "Rust" in result.output
-    assert repos.message.get_outbound(one_pending.id, 0).body == PENDING_BODY
-    assert repos.session.commit_calls == 0
+    assert repos.message.get_outbound(one_pending.id, 0).body == UNVERIFIED_BODY
 
 
 def test_review_edit_citing_an_unverified_claim_is_accepted_with_keep_unverified(

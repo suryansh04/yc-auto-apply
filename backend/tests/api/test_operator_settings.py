@@ -40,18 +40,30 @@ def test_operator_settings_load_dotenv_without_a_database_url(dotenv_only):
 
 def test_queue_preview_signature_comes_from_dotenv(dotenv_only, client, pending_draft):
     item = client.get("/api/queue").json()[0]
-    assert "\n\nOnly In Dotenv\n\n" in item["wire_text"]
+    # The signature is the last part of the letter now that the opt-out
+    # line is gone (2026-09-23), so it ends the wire text.
+    assert item["wire_text"].endswith("\n\nOnly In Dotenv")
 
 
 def test_stats_verifier_configured_comes_from_dotenv(dotenv_only, client):
     assert client.get("/api/stats").json()["quota"]["configured"] is True
 
 
-def test_send_offline_path_daily_cap_comes_from_dotenv(dotenv_only, client, repos, five_approved, fake_sender):
+def test_send_offline_path_daily_cap_comes_from_dotenv(
+    dotenv_only, client, repos, five_approved, fake_sender, monkeypatch, tmp_path
+):
     """The `fake_sender`-injected offline path in `send.py` (`owns_sender`
     is False) reads `settings.daily_send_cap` off `get_operator_settings()`,
     not `os.environ` - `dotenv_only` writes DAILY_SEND_CAP=3 to the .env
     file only, and never sets it as an actual environment variable."""
+    # 2026-09-23: the run now refuses before reserving anything when the
+    # resume cannot be read, and `dotenv_only`'s RESUME_PATH points at a
+    # file that has never existed. This test is about the cap, so give it
+    # a real one.
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4")
+    monkeypatch.setenv("RESUME_PATH", str(resume))
+    get_operator_settings.cache_clear()
     body = client.post("/api/send", json={}).json()
     assert body["sent"] == 3
     assert body["skipped_cap"] == 2

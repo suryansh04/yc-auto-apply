@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import { useManual, useSetEmail } from '../api/hooks'
 import { useSortedRows } from '@/lib/sort'
+import { useIncrementalRows } from '@/lib/paging'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -159,6 +160,11 @@ export default function ManualEmail() {
     getRowKey: (row) => row.outreach_id,
     defaultSortKey: 'founder_name',
   })
+  // Each row here carries a form, so the cost per row is higher than a
+  // plain table's - worth paging at 65 rows, never mind 284.
+  const page = useIncrementalRows(sorted.rows, {
+    resetKey: `${sorted.sortKey}|${sorted.sortDir}`,
+  })
 
   if (manualQuery.isLoading) {
     return (
@@ -237,7 +243,7 @@ export default function ManualEmail() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sorted.rows.map((row) => (
+              {page.visible.map((row) => (
                 <TableRow key={row.outreach_id}>
                   <TableCell className="font-medium whitespace-nowrap">
                     {row.founder_name}
@@ -277,6 +283,21 @@ export default function ManualEmail() {
           </Table>
         </CardContent>
       </Card>
+
+      {items.length > 0 && (
+        <div className="flex items-center justify-center gap-3 pb-2">
+          <span className="text-muted-foreground text-sm">
+            Showing {page.shown} of {page.total}
+          </span>
+          {page.hasMore && (
+            <Button variant="outline" size="sm" onClick={page.loadMore}>
+              Load more
+            </Button>
+          )}
+          {/* Scrolled into view, this presses the button for you. */}
+          <span ref={page.sentinelRef} aria-hidden="true" />
+        </div>
+      )}
     </>
   )
 }

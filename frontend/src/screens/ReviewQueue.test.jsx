@@ -19,10 +19,16 @@ import {
   item,
   mockApprove,
   mockApproveFailure,
+  mockEdit,
   mockEditFailure,
   mockQueue,
   mockQueueSequence,
   mockRedraft,
+  mockCheckDraft,
+  mockSuggestFixes,
+  mockSuggestFailure,
+  mockGenericLine,
+  mockGenericLineFailure,
 } from '../test/mocks'
 import ReviewQueue from './ReviewQueue'
 
@@ -84,10 +90,37 @@ it('keeps the typed text when an edit is rejected', async () => {
   expect(await screen.findByDisplayValue(/my own words/)).toBeInTheDocument()
 })
 
-it('marks a needs-manual-write draft and refuses a bare approve', async () => {
+it('shows what the checks noticed as advice, not as a refusal', async () => {
+  // 2026-09-22: this used to shout "Needs a fix before approving" in red,
+  // which read as a gate. Nothing ever stopped the approve, and it is the
+  // operator's name on the letter, so the note is grouped as a suggestion.
   mockQueue([item({ last_error: 'cited posting is not intern-appropriate' })])
   render(<ReviewQueue />)
-  expect(await screen.findByText(/needs a fix before approving/i)).toBeInTheDocument()
+  expect(await screen.findByText(/ai suggestions/i)).toBeInTheDocument()
+  expect(screen.getByText(/cited posting is not intern-appropriate/)).toBeInTheDocument()
+  expect(screen.getByText(/you can approve anyway/i)).toBeInTheDocument()
+  expect(screen.queryByText(/needs a fix before approving/i)).not.toBeInTheDocument()
+  // ...and Approve is live, not disabled.
+  expect(screen.getByRole('button', { name: /approve/i })).toBeEnabled()
+})
+
+it('re-checks the draft on demand and shows the fresh notes', async () => {
+  mockQueue([item({ last_error: 'cited posting is not intern-appropriate' })])
+  const check = mockCheckDraft({ notes: ['contains a semicolon'] })
+  render(<ReviewQueue />)
+  await screen.findByText(/ai suggestions/i)
+  await userEvent.click(screen.getByRole('button', { name: /re-check/i }))
+  expect(await screen.findByText('contains a semicolon')).toBeInTheDocument()
+  expect(check).toHaveBeenCalled()
+})
+
+it('a re-check that finds nothing says so', async () => {
+  mockQueue([item({ last_error: 'cited posting is not intern-appropriate' })])
+  mockCheckDraft({ notes: [] })
+  render(<ReviewQueue />)
+  await screen.findByText(/ai suggestions/i)
+  await userEvent.click(screen.getByRole('button', { name: /re-check/i }))
+  expect(await screen.findByText(/nothing flagged on the last check/i)).toBeInTheDocument()
 })
 
 it('shows the critic note as one dismissible line', async () => {
@@ -591,4 +624,294 @@ it('optional (S07): advancing past a settled item resolves the true visible neig
   await userEvent.keyboard('a')
   expect(await screen.findByText(/Second Co/)).toBeInTheDocument()
   expect(screen.queryByText(/First Co/)).not.toBeInTheDocument()
+})
+
+
+it('saves an edit the checks dislike, and shows what they said', async () => {
+  // The operator's own words are never refused: the checks are advice.
+  mockQueue([item({})])
+  const edit = mockEdit({ notes: ['implies seniority: my team'] })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /^edit/i }))
+  await userEvent.clear(screen.getByLabelText('Body'))
+  await userEvent.type(screen.getByLabelText('Body'), 'I built it with my team.')
+  await userEvent.click(screen.getByRole('button', { name: /save/i }))
+  await waitFor(() => expect(edit).toHaveBeenCalled())
+  // The editor closed - the save happened.
+  await waitFor(() => expect(screen.queryByLabelText('Body')).not.toBeInTheDocument())
+  expect(await screen.findByText('implies seniority: my team')).toBeInTheDocument()
+})
+
+
+// --- highlighting what a note is about (operator request 2026-09-22) -------
+
+it('marks the words a note objects to, in the letter itself', async () => {
+  mockQueue([item({ wire_text: 'Hi Madhav,\n\nOne thing; another thing.\n\nSuryansh' })])
+  mockCheckDraft({
+    notes: ['contains a semicolon'],
+    highlights: [{ message: 'contains a semicolon', quote: ';' }],
+  })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /re-check/i }))
+  const mark = await screen.findByLabelText('contains a semicolon')
+  expect(mark.tagName).toBe('MARK')
+  expect(mark).toHaveTextContent(';')
+})
+
+it('says which notes point at actual words', async () => {
+  mockQueue([item({ wire_text: 'Hi Madhav,\n\nOne thing; another thing.\n\nSuryansh' })])
+  mockCheckDraft({
+    notes: ['contains a semicolon', 'body exceeds 380 words'],
+    highlights: [
+      { message: 'contains a semicolon', quote: ';' },
+      { message: 'body exceeds 380 words', quote: null },
+    ],
+  })
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /re-check/i }))
+  expect(await screen.findByRole('button', { name: /contains a semicolon.*highlighted/i }))
+    .toBeEnabled()
+  // A note with nothing to mark is not clickable - it would look like a
+  // broken highlight.
+  expect(screen.getByRole('button', { name: /body exceeds 380 words/ })).toBeDisabled()
+})
+
+it('a note with no quote leaves the letter unmarked', async () => {
+  mockQueue([item({ wire_text: 'Hi Madhav,\n\nA clean letter.\n\nSuryansh' })])
+  mockCheckDraft({
+    notes: ['body exceeds 380 words'],
+    highlights: [{ message: 'body exceeds 380 words', quote: null }],
+  })
+  const { container } = render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /re-check/i }))
+  await screen.findByRole('button', { name: /body exceeds 380 words/ })
+  expect(container.querySelectorAll('mark')).toHaveLength(0)
+})
+
+
+// --- the rewrite behind a highlight (operator request 2026-09-23) ----------
+//
+// "i want when i hover over it, it shows suggestion just like grammarly
+// use sarvam for suggestion". `/check` is instant; `/suggest` is the LLM
+// call, fired after it so the amber marks never wait on a model.
+
+const MARKED = {
+  wire_text: ['Hi Madhav,', '', 'One thing; another thing.', '', 'Suryansh'].join('\n'),
+  body: 'One thing; another thing.',
+}
+
+function checkFindsASemicolon() {
+  return mockCheckDraft({
+    notes: ['contains a semicolon'],
+    highlights: [{ message: 'contains a semicolon', quote: ';' }],
+  })
+}
+
+it('asks for rewrites once the checks have found words to mark', async () => {
+  mockQueue([item(MARKED)])
+  checkFindsASemicolon()
+  const suggest = mockSuggestFixes({ suggestions: [] })
+  render(<ReviewQueue />)
+  await screen.findByLabelText('contains a semicolon')
+  await waitFor(() => expect(suggest).toHaveBeenCalled())
+})
+
+it('asks even when no check resolved to words, because the company paragraph always can', async () => {
+  // 2026-09-23: this used to assert the screen did NOT ask. The company
+  // paragraph is a rewrite candidate whether or not a check complained
+  // about it, so the "is there anything to rewrite?" decision moved to
+  // the backend, which has the letter and can answer it properly - and
+  // which spends no model call when the answer is no
+  // (tests/application/test_suggest_fixes.py).
+  mockQueue([item({ wire_text: ['Hi Madhav,', '', 'A clean letter.', '', 'Suryansh'].join('\n') })])
+  mockCheckDraft({
+    notes: ['body exceeds 380 words'],
+    highlights: [{ message: 'body exceeds 380 words', quote: null }],
+  })
+  const suggest = mockSuggestFixes({ suggestions: [] })
+  render(<ReviewQueue />)
+  expect(await screen.findByText('body exceeds 380 words')).toBeInTheDocument()
+  await waitFor(() => expect(suggest).toHaveBeenCalled())
+})
+
+it('shows the rewrite when the mark is hovered', async () => {
+  mockQueue([item(MARKED)])
+  checkFindsASemicolon()
+  mockSuggestFixes({
+    suggestions: [{ index: 0, quote: ';', message: 'contains a semicolon',
+                    replacement: '.', why: 'a full stop reads plainer' }],
+  })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText('contains a semicolon'))
+  expect(await screen.findByText('a full stop reads plainer')).toBeInTheDocument()
+})
+
+it('accepting a rewrite saves the letter with the words replaced', async () => {
+  mockQueue([item(MARKED)])
+  checkFindsASemicolon()
+  mockSuggestFixes({
+    suggestions: [{ index: 0, quote: ';', message: 'contains a semicolon',
+                    replacement: '.', why: 'plainer' }],
+  })
+  const edit = mockEdit({ notes: [] })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText('contains a semicolon'))
+  await userEvent.click(await screen.findByRole('button', { name: /use this/i }))
+  // The quote is a substring of the BODY, never of the wire text - what
+  // is saved is the body with those characters replaced, and nothing
+  // else touched.
+  await waitFor(() => expect(edit).toHaveBeenCalledWith(
+    1, expect.objectContaining({ body: 'One thing. another thing.' }),
+  ))
+})
+
+it('a failed rewrite call leaves the checks exactly where they were', async () => {
+  mockQueue([item(MARKED)])
+  checkFindsASemicolon()
+  mockSuggestFailure()
+  render(<ReviewQueue />)
+  // The highlight and the note are both still there; only the rewrite is
+  // missing, and the hover card says so.
+  const mark = await screen.findByLabelText('contains a semicolon')
+  await userEvent.hover(mark)
+  expect(await screen.findByText(/no rewrite for this one/i)).toBeInTheDocument()
+})
+
+
+// --- the generic company line (operator request 2026-09-23) ---------------
+//
+// "give option for this to make a generic if i am not able to find good
+// for this specifically line". The realistic alternative to a generic
+// line is not a better specific one - it is a fabricated one.
+
+// 2026-09-23: these used to press a button under the letter. It was
+// removed at the operator's request - the paragraph's own hover card is
+// the one home for both replacements now, which is also the only place
+// that can say "this letter is already using it".
+
+const WITH_PARAGRAPH = {
+  wire_text: ['Hi Akash,', '', 'You built a voice layer.', '', 'Suryansh'].join('\n'),
+  body: 'You built a voice layer.',
+  insight_text: 'You built a voice layer.',
+}
+
+async function openGenericTab() {
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('tab', { name: /generic/i }))
+}
+
+it('offers a way to swap in a generic company line', async () => {
+  mockQueue([item(WITH_PARAGRAPH)])
+  const generic = mockGenericLine({ notes: [] })
+  render(<ReviewQueue />)
+  await openGenericTab()
+  await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
+  await waitFor(() => expect(generic).toHaveBeenCalledWith(1))
+})
+
+it('shows what the checks made of the generic line', async () => {
+  // It is an edit, so its result is the checks' verdict on the new text
+  // - shown exactly where a save's would be.
+  mockQueue([item(WITH_PARAGRAPH)])
+  mockGenericLine({ notes: ['hook shares no distinctive term with the cited source'] })
+  render(<ReviewQueue />)
+  await openGenericTab()
+  await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
+  expect(
+    await screen.findByText('hook shares no distinctive term with the cited source'),
+  ).toBeInTheDocument()
+})
+
+it('says so when the swap is refused', async () => {
+  mockQueue([item(WITH_PARAGRAPH)])
+  mockGenericLineFailure('this letter does not have the assembled shape - edit it by hand')
+  render(<ReviewQueue />)
+  await openGenericTab()
+  await userEvent.click(await screen.findByRole('button', { name: /use a generic line/i }))
+  expect(await screen.findByText(/edit it by hand/i)).toBeInTheDocument()
+})
+
+it('shows the generic line before it is swapped in', async () => {
+  // "also give the hover effect for generic line also" - the same read-
+  // before-you-commit the amber highlights give.
+  mockQueue([item(WITH_PARAGRAPH)])
+  const generic = mockGenericLine({ notes: [] })
+  render(<ReviewQueue />)
+  await openGenericTab()
+  expect(screen.getByText(/yours is one I kept reading about/)).toBeInTheDocument()
+  // Reading is a read: nothing is written until the button is pressed.
+  expect(generic).not.toHaveBeenCalled()
+})
+
+it('offers nothing to swap for a letter that has no company paragraph', async () => {
+  // The backend refuses the swap for a letter without the assembled
+  // shape, and says so by sending no line - so there is no mark to hover
+  // and nothing promising what the backend would decline.
+  mockQueue([item({ generic_line: null, insight_text: null })])
+  render(<ReviewQueue />)
+  await screen.findByText('Review queue')
+  expect(screen.queryByLabelText(/paragraph about them/i)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /use a generic line/i })).not.toBeInTheDocument()
+})
+
+it('marks the company paragraph in the letter, so the swap shows its work', async () => {
+  // "no highlight that section to" - the text that would disappear is on
+  // screen next to the text that would take its place.
+  mockQueue([item({
+    wire_text: ['Hi Akash,', '', 'You built a voice layer.', '', 'Suryansh'].join('\n'),
+    body: 'You built a voice layer.',
+    insight_text: 'You built a voice layer.',
+  })])
+  render(<ReviewQueue />)
+  const mark = await screen.findByLabelText(/paragraph about them/i)
+  expect(mark).toHaveAttribute('data-kind', 'insight')
+})
+
+it('swaps the generic line in from the paragraph itself', async () => {
+  mockQueue([item({
+    wire_text: ['Hi Akash,', '', 'You built a voice layer.', '', 'Suryansh'].join('\n'),
+    body: 'You built a voice layer.',
+    insight_text: 'You built a voice layer.',
+  })])
+  const generic = mockGenericLine({ notes: [] })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  const buttons = await screen.findAllByRole('button', { name: /use a generic line/i })
+  await userEvent.click(buttons[buttons.length - 1])
+  await waitFor(() => expect(generic).toHaveBeenCalledWith(1))
+})
+
+it('leaves the letter unmarked when there is no company paragraph to point at', async () => {
+  mockQueue([item({ insight_text: null })])
+  render(<ReviewQueue />)
+  await screen.findByText('Review queue')
+  expect(screen.queryByLabelText(/paragraph about them/i)).not.toBeInTheDocument()
+})
+
+it('keeps the generic option on a check mark that covers the company paragraph', async () => {
+  // The check wins the overlap, so without this the generic line would
+  // vanish from exactly the letters most likely to need it - the ones a
+  // hook check has flagged.
+  const paragraph = 'You built a voice layer.'
+  mockQueue([item({
+    wire_text: ['Hi Akash,', '', paragraph, '', 'Suryansh'].join('\n'),
+    body: paragraph,
+    insight_text: paragraph,
+  })])
+  mockCheckDraft({
+    notes: ['hook overlaps more than 60% with one_liner'],
+    highlights: [{ message: 'hook overlaps more than 60% with one_liner', quote: paragraph }],
+  })
+  const generic = mockGenericLine({ notes: [] })
+  render(<ReviewQueue />)
+  // One mark, and it is the check's (amber) - but it carries both tabs.
+  const mark = await screen.findByLabelText(/hook overlaps more than 60%/i)
+  expect(mark).toHaveAttribute('data-kind', 'check')
+  await userEvent.hover(mark)
+  await userEvent.click(await screen.findByRole('tab', { name: /generic/i }))
+  // Two on screen: the one under the letter and the one in the card.
+  // The card's is the one this test is about, and it is rendered last.
+  const buttons = await screen.findAllByRole('button', { name: /use a generic line/i })
+  await userEvent.click(buttons[buttons.length - 1])
+  await waitFor(() => expect(generic).toHaveBeenCalledWith(1))
 })

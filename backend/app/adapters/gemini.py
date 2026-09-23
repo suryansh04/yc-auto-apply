@@ -191,10 +191,16 @@ startup founder. The rest of the email is already written by the sender
 himself and you will never see or change it: how he introduces himself,
 what he has built, and what he is asking for.
 
-Your paragraph sits directly under the line "Now Here's the Important
-Part:". It is the part that proves a real person looked at this specific
-company. Everything before it was about the sender; your paragraph is the
-turn to the founder.
+Your paragraph sits directly after the list of things the sender has
+built, and directly BEFORE this line, which he wrote and you must not
+repeat:
+
+  "That's the kind of problem I'd genuinely like to work on."
+
+So your paragraph has to end on a PROBLEM or a CHOICE - something
+"that's the kind of problem" can point back at. It is the part that
+proves a real person looked at this specific company. Everything before
+it was about the sender; your paragraph is the turn to the founder.
 
 WHAT TO WRITE - one or two short paragraphs, nothing else:
 
@@ -202,6 +208,11 @@ Name the CHOICE they made that you can see from outside, and why it is
 not the obvious one. Not what the company does - the founder knows that -
 but the decision underneath it. The strongest version contrasts what they
 did NOT do with what they did:
+
+  "I came across Loop Health and what caught my attention was that you
+  weren't just building another generic employee benefits product. You
+  were thinking specifically about what India's workforce actually
+  needs."
 
   "the thing that stuck with me is that you didn't try to build another
   shopping app. You built a layer that sits on top of where people
@@ -239,7 +250,8 @@ HARD RULES:
   nobody asked for.
 - No praise. Interest is shown by what you noticed, never stated. Never
   "impressive", "excited", "resonates", "aligns", "fascinating",
-  "passionate about", "I came across".
+  "passionate about". ("I came across X and what caught my attention
+  was..." is fine - it is how you found them, not praise.)
 - Never restate the company's one-liner back to them.
 - Name the company once.
 - No semicolons. At most two em dashes. Contractions are good.
@@ -948,3 +960,135 @@ class GeminiCritic:
             "concerns": data["concerns"],
             "overall_note": str(data["overall_note"]),
         }
+
+
+# --- GeminiReviser (the hover-card rewrite) -------------------------------------
+
+REVISION_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "revisions": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "index": {"type": "INTEGER"},
+                    "replacement": {"type": "STRING"},
+                    "why": {"type": "STRING"},
+                },
+                "required": ["index", "replacement", "why"],
+            },
+        },
+    },
+    "required": ["revisions"],
+}
+
+_REVISER_SYSTEM = """A student is about to send a cold email to a startup founder asking for a
+software engineering internship. A mechanical checker has flagged some
+exact spans of that email. Your only job is to rewrite the flagged spans.
+
+You are given the whole email for context and a numbered list of flagged
+spans. For each span you can genuinely improve, return the replacement
+text for THAT SPAN ALONE - not the paragraph around it, not the whole
+email. The replacement is pasted in where the span was, so it has to read
+correctly in place: match the span's punctuation and capitalisation, and
+do not wrap it in quotes.
+
+Hard rules:
+- Never invent a fact. You may only rearrange, cut or plainly restate
+  what the span already says. If fixing the note would require knowing
+  something the email does not contain, skip that span.
+- Never add praise, and never summarise the company back to the founder
+  who built it.
+- Write the way the rest of the email is written: plain words, short
+  sentences, first person, no corporate register. No em dashes, no
+  semicolons, no "leverage", "passionate", "excited to", "reach out".
+- Shorter is better. If the honest fix is to delete the span, return an
+  empty replacement for it - but only ever for a short phrase. Never
+  answer with an empty replacement for a span longer than one sentence:
+  deleting a whole paragraph is not a rewrite, and the student would be
+  left with a letter that says nothing about the company.
+- Skip any span you cannot improve. A list with fewer entries than you
+  were given is a correct answer, and so is an empty list. Never return a
+  replacement that is the flagged text again.
+
+Return a JSON object with "revisions": a list of objects, each with
+"index" (the number of the span you are rewriting, exactly as given),
+"replacement" (the new text for that span), and "why" (at most 15 words,
+addressed to the student, saying what the rewrite fixes).
+"""
+
+
+def build_revise_prompt(context: dict) -> str:
+    """The email plus the numbered flagged spans, for `Reviser.revise`."""
+    spans = context.get("spans") or []
+    lines = [
+        "COMPANY",
+        str(context.get("company_name") or "unknown"),
+        "",
+        "EMAIL",
+        str(context.get("body") or ""),
+        "",
+        "FLAGGED SPANS",
+    ]
+    for span in spans:
+        lines.append(f"[{span.get('index')}] {span.get('quote')!r}")
+        lines.append(f"    the checker says: {span.get('note')}")
+    return "\n".join(lines) + "\n"
+
+
+def _revisions(data: Any, stage: str) -> list[dict]:
+    """The `revisions` list out of a response, whatever shape it arrived
+    in. Shared by both providers - strict JSON-schema mode requires a
+    top-level object, so the list is always wrapped, but a model that
+    answers with a bare list is still understood rather than being turned
+    into a failed suggestion nobody can see."""
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        items = data.get("revisions")
+        if not isinstance(items, list):
+            items = next((v for v in data.values() if isinstance(v, list)), [])
+    else:
+        raise ValueError(f"{stage}: expected a JSON object")
+    out = []
+    for item in items:
+        if not isinstance(item, dict) or "index" not in item or "replacement" not in item:
+            continue
+        try:
+            index = int(item["index"])
+        except (TypeError, ValueError):
+            continue
+        out.append({
+            "index": index,
+            "replacement": str(item["replacement"]),
+            "why": str(item.get("why") or ""),
+        })
+    return out
+
+
+class GeminiReviser:
+    """Real `Reviser` port. Rewrites the spans the checks flagged; decides
+    nothing about the draft. Whether a rewrite is worth showing - and
+    whether it is even a rewrite rather than the flagged text again - is
+    `app.application.suggest_fixes`'s call, the same division of
+    responsibility as `GeminiCritic` above."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def revise(self, context: dict) -> list[dict]:
+        response = _generate_with_retry(
+            self._client, self._sleep, "reviser",
+            model=self._model,
+            contents=build_revise_prompt(context),
+            config=types.GenerateContentConfig(
+                system_instruction=_REVISER_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=REVISION_SCHEMA,
+                temperature=0.3,
+            ),
+        )
+        return _revisions(_decode_json(response.text, "reviser"), "reviser")

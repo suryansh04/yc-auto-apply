@@ -14,6 +14,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import { useContacts } from '../api/hooks'
 import { outreachStateLabel } from '../labels'
 import { useSortedRows } from '@/lib/sort'
+import { useIncrementalRows } from '@/lib/paging'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -116,6 +117,13 @@ export default function Contacts() {
     rows: contacts,
     getRowKey: (row) => row.outreach_id,
     defaultSortKey: 'company_name',
+  })
+  // 284 founders is 63 KB over the wire and two thousand table cells in
+  // the DOM. Rendered a page at a time; a new filter or a new sort order
+  // goes back to the top rather than leaving you deep in a list you have
+  // not seen.
+  const page = useIncrementalRows(sorted.rows, {
+    resetKey: `${state}|${hiring}|${batch}|${emailStatus}|${sorted.sortKey}|${sorted.sortDir}`,
   })
 
   return (
@@ -245,7 +253,7 @@ export default function Contacts() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sorted.rows.map((row) => (
+                  {page.visible.map((row) => (
                     <TableRow key={row.outreach_id}>
                       <TableCell className="font-medium">{row.company_name ?? ''}</TableCell>
                       <TableCell>
@@ -272,6 +280,21 @@ export default function Contacts() {
             </CardContent>
           </Card>
         ))}
+
+      {contacts.length > 0 && (
+        <div className="flex items-center justify-center gap-3 pb-2">
+          <span className="text-muted-foreground text-sm">
+            Showing {page.shown} of {page.total}
+          </span>
+          {page.hasMore && (
+            <Button variant="outline" size="sm" onClick={page.loadMore}>
+              Load more
+            </Button>
+          )}
+          {/* Scrolled into view, this presses the button for you. */}
+          <span ref={page.sentinelRef} aria-hidden="true" />
+        </div>
+      )}
     </>
   )
 }

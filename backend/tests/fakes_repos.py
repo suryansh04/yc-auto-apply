@@ -135,6 +135,8 @@ class FakeOutreachRow:
     last_error: str | None = None
     sequence_step: int = 0
     next_action_at: object = None  # Task 15: stamped via the injected Clock port
+    # 2026-09-22: when the operator last passed over this draft in review.
+    skipped_at: object = None
 
     def __setattr__(self, name, value):
         # Task 5: every use case assigns `state` as a plain `str` (e.g.
@@ -573,6 +575,9 @@ class FakeCredentialRepo:
 
     def get_by_account_email(self, account_email: str) -> FakeCredentialRow | None:
         return self.rows.get(account_email)
+
+    def delete_by_account_email(self, account_email: str) -> bool:
+        return self.rows.pop(account_email, None) is not None
 
     def set_history_id(self, account_email: str, history_id: str) -> None:
         if account_email not in self.rows:

@@ -11,7 +11,18 @@ from fastapi.responses import JSONResponse
 
 from app.api import jobs as jobs_module
 from app.api.deps import get_repos, real_repos
-from app.api.routers import contacts, gmail, jobs, manual, queue, send, stats, thread
+from app.api.routers import (
+    applications,
+    contacts,
+    gmail,
+    jobs,
+    manual,
+    queue,
+    resume,
+    send,
+    stats,
+    thread,
+)
 
 ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
@@ -79,6 +90,8 @@ def create_app(repos_factory=None, job_session_factory=None, job_runner_factory=
     app.include_router(jobs.router, prefix="/api")
     app.include_router(thread.router, prefix="/api")
     app.include_router(gmail.router, prefix="/api")
+    app.include_router(resume.router, prefix="/api")
+    app.include_router(applications.router, prefix="/api")
 
     @app.exception_handler(Exception)
     async def _unhandled_exception(request: Request, exc: Exception) -> JSONResponse:

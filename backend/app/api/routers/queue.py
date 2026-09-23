@@ -23,14 +23,38 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.api.deps import Repos, get_repos
-from app.api.schemas import EditIn, OkOut, QueueItemOut
+from app.api.deps import Repos, build_reviser, get_repos
+from app.api.schemas import (
+    CheckIn,
+    CheckOut,
+    EditIn,
+    HighlightOut,
+    OkOut,
+    QueueItemOut,
+    SuggestOut,
+    SuggestionOut,
+)
 from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
+from app.application.suggest_fixes import run_reviser
+from app.domain import letter
 from app.domain.compose import compose_wire_text, first_name
+from app.domain.highlight import highlights_for
 from app.domain.states import IllegalTransition
-from app.config import get_operator_settings
+from app.config import get_operator_settings, get_settings
 
 router = APIRouter(tags=["queue"])
+
+# What the reviser is told about the company paragraph. Every other span
+# it is given carries a complaint ("a sentence exceeds 45 words"); this
+# one carries an invitation, because there is nothing wrong with the
+# paragraph - it is simply the one part of the letter worth a second
+# attempt. Saying "skip it" outright is what stops the model rewriting a
+# good line for the sake of answering.
+INSIGHT_NOTE = (
+    "this is the paragraph about the company, and the only researched part "
+    "of the letter - offer a sharper version ONLY if you can name their "
+    "choice more precisely than this does, and skip it otherwise"
+)
 
 
 class _UTCClock:
@@ -80,9 +104,17 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
     message = item.message
     body = getattr(message, "body", None) or ""
     source = item.source
+    company_name = getattr(item.company, "name", None) if item.company is not None else None
+    # Only offered when there is actually a company paragraph to replace:
+    # a letter that does not have the assembled shape would have the
+    # generic line put in the wrong place, and `use_generic_line` refuses
+    # it. Saying so by omission here is what keeps the button from
+    # promising something the backend will decline.
+    insight = letter.insight_region(body)
+    generic = letter.generic_insight(company_name or "") if company_name and insight else None
     return QueueItemOut(
         outreach_id=item.outreach.id,
-        company_name=getattr(item.company, "name", None) if item.company is not None else None,
+        company_name=company_name,
         company_one_liner=getattr(item.company, "one_liner", None) if item.company is not None else None,
         founder_name=item.founder.full_name,
         founder_title=getattr(item.founder, "title", None),
@@ -99,12 +131,24 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
         critic_note=getattr(message, "critic_overall_note", None),
         sequence_step=int(getattr(item.outreach, "sequence_step", 0) or 0),
         attachment_name=attachment_name,
+        generic_line=generic,
+        insight_text=insight if generic else None,
     )
 
 
 @router.get("/queue", response_model=list[QueueItemOut])
 def list_queue(repos: Repos = Depends(get_repos)) -> list[QueueItemOut]:
     return [_to_out(item) for item in _use_case(repos).pending()]
+
+
+@router.get("/approved", response_model=list[QueueItemOut])
+def list_approved(repos: Repos = Depends(get_repos)) -> list[QueueItemOut]:
+    """The letters approved and not yet sent, as whole letters.
+
+    Same shape as `/queue` because it is the same thing at a later
+    moment - the operator reads the composed wire text, not a row.
+    """
+    return [_to_out(item) for item in _use_case(repos).approved()]
 
 
 @router.get("/queue/{outreach_id}", response_model=QueueItemOut)
@@ -122,10 +166,146 @@ def get_queue_item(outreach_id: int, repos: Repos = Depends(get_repos)) -> Queue
     return _to_out(item)
 
 
+def _checked(repos: Repos, outreach_id: int, notes: list[str], body: str | None) -> CheckOut:
+    """Pair each note with the words it is about, against the body the
+    notes were produced from - the text just supplied, or the stored one."""
+    text = body
+    if text is None:
+        item = _use_case(repos).load(outreach_id)
+        text = getattr(item.message, "body", "") or ""
+    return CheckOut(
+        notes=notes,
+        highlights=[HighlightOut(**h) for h in highlights_for(notes, text)],
+    )
+
+
+@router.post("/outreach/{outreach_id}/check", response_model=CheckOut)
+def check(outreach_id: int, payload: CheckIn | None = None,
+          repos: Repos = Depends(get_repos)) -> CheckOut:
+    """Re-run the checks and say what they found. Writes nothing.
+
+    Operator decision (2026-09-22): these are suggestions, so asking for
+    them is a read, never a refusal - a draft the checks dislike still
+    returns 200 with the notes in the body.
+    """
+    try:
+        notes = _use_case(repos).check(
+            outreach_id,
+            subject=payload.subject if payload else None,
+            body=payload.body if payload else None,
+        )
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except ValueError as exc:
+        raise _action_error(exc)
+    return _checked(repos, outreach_id, notes, payload.body if payload else None)
+
+
+@router.post("/outreach/{outreach_id}/suggest", response_model=SuggestOut)
+def suggest(outreach_id: int, payload: CheckIn | None = None,
+            repos: Repos = Depends(get_repos)) -> SuggestOut:
+    """What to write instead, for each span `/check` highlighted.
+
+    Operator request (2026-09-22): "when i hover over it, it shows
+    suggestion just like grammarly use sarvam for suggestion". `/check` is
+    deterministic and instant; this is the LLM call, deliberately a second
+    request so the highlights appear immediately and the rewrites fill in
+    behind them.
+
+    Advice on top of advice, so it cannot fail loudly: an unconfigured or
+    failing provider answers 200 with no suggestions (and, for a missing
+    key, the NAME of the setting), never an error that would take the
+    checks off the screen with it. Writes nothing - there is no commit
+    here, and the operator's text is only ever changed by `edit`.
+    """
+    try:
+        item = _use_case(repos).load(outreach_id)
+    except (OutreachNotFound, ValueError):
+        raise HTTPException(404, "no such outreach")
+
+    body = (payload.body if payload and payload.body is not None else None)
+    if body is None:
+        body = getattr(item.message, "body", "") or ""
+    notes = _use_case(repos).check(
+        outreach_id,
+        subject=payload.subject if payload else None,
+        body=payload.body if payload else None,
+    )
+    highlights = highlights_for(notes, body)
+
+    # The company paragraph is ALWAYS worth a rewrite, whether or not a
+    # check complained about it (operator request 2026-09-23: an AI
+    # suggestion and the generic line, side by side, on the one paragraph
+    # the letter researches). It is appended LAST, so its index is
+    # `len(check highlights)` - exactly the index the review screen gives
+    # the same paragraph's mark, which is what pairs the two without
+    # either side matching on text.
+    insight = letter.insight_region(body)
+    if insight:
+        highlights = highlights + [{"message": INSIGHT_NOTE, "quote": insight}]
+
+    # `getattr`, not `repos.reviser`: the offline `FakeRepos` carries the
+    # attribute only when a test injected one, and a test that did not
+    # inject one must take the unavailable path rather than crash.
+    reviser = getattr(repos, "reviser", None)
+    if reviser is None:
+        try:
+            reviser = build_reviser(get_settings())
+        except RuntimeError as exc:
+            # The message is a setting NAME ("SARVAM_API_KEY is not set"),
+            # never a key or a response body - `build_reviser` raises
+            # nothing else.
+            return SuggestOut(suggestions=[], unavailable=str(exc))
+
+    company_name = getattr(item.company, "name", None) or ""
+    return SuggestOut(suggestions=[
+        SuggestionOut(
+            index=s.index,
+            quote=highlights[s.index]["quote"],
+            message=highlights[s.index]["message"],
+            replacement=s.replacement,
+            why=s.why,
+        )
+        for s in run_reviser(reviser, body, highlights, company_name)
+    ])
+
+
 @router.post("/outreach/{outreach_id}/approve", response_model=OkOut)
 def approve(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     try:
         _use_case(repos).approve(outreach_id, _UTCClock().now())
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except (ValueError, IllegalTransition) as exc:
+        raise _action_error(exc)
+    repos.session.commit()
+    return OkOut()
+
+
+@router.post("/outreach/{outreach_id}/skip", response_model=OkOut)
+def skip(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
+    """Record that this draft was passed over.
+
+    Skipping is still not a decision - the state does not change. What
+    changes is that a letter the operator has read and moved on from is
+    now distinguishable from one he has never reached, which is what the
+    Applications screen's "skipped" filter is.
+    """
+    try:
+        _use_case(repos).skip(outreach_id, _UTCClock().now())
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except (ValueError, IllegalTransition) as exc:
+        raise _action_error(exc)
+    repos.session.commit()
+    return OkOut()
+
+
+@router.post("/outreach/{outreach_id}/unapprove", response_model=OkOut)
+def unapprove(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
+    """Send an approved letter back to the review queue."""
+    try:
+        _use_case(repos).unapprove(outreach_id)
     except OutreachNotFound:
         raise HTTPException(404, "no such outreach")
     except (ValueError, IllegalTransition) as exc:
@@ -158,19 +338,44 @@ def redraft(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
     return OkOut()
 
 
-@router.post("/outreach/{outreach_id}/edit")
-def edit(outreach_id: int, payload: EditIn, repos: Repos = Depends(get_repos)):
+@router.post("/outreach/{outreach_id}/generic-line", response_model=CheckOut)
+def generic_line(outreach_id: int, repos: Repos = Depends(get_repos)) -> CheckOut:
+    """Swap the company paragraph for the written generic one.
+
+    Operator request (2026-09-23): a way out for the companies where no
+    good specific line can be found, because the realistic alternative to
+    a generic line is a fabricated one. It is an edit like any other -
+    saved, validated, never refused - so it answers with the checks'
+    notes exactly as `edit` does.
+    """
     try:
-        errors = _use_case(repos).edit(outreach_id, payload.subject, payload.body)
+        notes = _use_case(repos).use_generic_line(outreach_id, now=_UTCClock().now())
     except OutreachNotFound:
         raise HTTPException(404, "no such outreach")
     except (ValueError, IllegalTransition) as exc:
         raise _action_error(exc)
-    if errors:
-        # 422 with the validator's own messages, verbatim (global
-        # constraint) - the browser reviewer must see exactly what the CLI
-        # reviewer sees in `_review_loop`'s "edit rejected by the
-        # validator" branch. Nothing was persisted; no commit.
-        return JSONResponse(status_code=422, content={"errors": errors})
     repos.session.commit()
-    return {"ok": True}
+    return _checked(repos, outreach_id, notes, None)
+
+
+@router.post("/outreach/{outreach_id}/edit", response_model=CheckOut)
+def edit(outreach_id: int, payload: EditIn, repos: Repos = Depends(get_repos)) -> CheckOut:
+    """Save the operator's text, and say what the checks made of it.
+
+    Operator decision (2026-09-22): this used to answer 422 and persist
+    NOTHING when the checks complained, which made them a gate on his own
+    typing - the same mistake `approve` was making. The save now always
+    happens (a 4xx is reserved for "there is nothing to save" and "no such
+    row"), and the notes come back in the body as advice.
+    """
+    try:
+        # The clock matters only for an APPROVED letter, whose approval
+        # is re-stamped onto the text the operator just wrote.
+        notes = _use_case(repos).edit(outreach_id, payload.subject, payload.body,
+                                      now=_UTCClock().now())
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except (ValueError, IllegalTransition) as exc:
+        raise _action_error(exc)
+    repos.session.commit()
+    return _checked(repos, outreach_id, notes, payload.body)

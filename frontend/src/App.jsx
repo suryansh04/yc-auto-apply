@@ -1,12 +1,28 @@
+import { useState } from 'react'
 import { NavLink, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
-import { CircleDot, Inbox, LayoutDashboard, MailQuestion, Users } from 'lucide-react'
+import {
+  ChevronsUpDown,
+  Inbox,
+  LogOut,
+  LayoutDashboard,
+  MailQuestion,
+  FileUser,
+  ListChecks,
+  MailCheck,
+  SendHorizontal,
+  Users,
+} from 'lucide-react'
 import Pipeline from './screens/Pipeline'
 import ReviewQueue from './screens/ReviewQueue'
 import Contacts from './screens/Contacts'
 import Thread from './screens/Thread'
 import ManualEmail from './screens/ManualEmail'
+import Approved from './screens/Approved'
+import Resume from './screens/Resume'
+import Applications from './screens/Applications'
+import Sent from './screens/Sent'
 import ConnectGmail from './screens/ConnectGmail'
-import { useGmailStatus } from './api/hooks'
+import { useDisconnectGmail, useGmailStatus } from './api/hooks'
 import {
   Sidebar,
   SidebarContent,
@@ -33,6 +49,22 @@ import { Separator } from '@/components/ui/separator'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 // Router shell. Spec §16's four screens plus the manual-email screen:
 //   Pipeline     -> GET /api/stats, /api/jobs, POST /api/jobs/{kind} (Task 15)
@@ -50,8 +82,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 const NAV = [
   { to: '/', end: true, label: 'Pipeline', icon: LayoutDashboard },
   { to: '/queue', label: 'Review', icon: Inbox },
+  { to: '/approved', label: 'Approved', icon: SendHorizontal },
+  { to: '/sent', label: 'Sent', icon: MailCheck },
+  { to: '/applications', label: 'Applications', icon: ListChecks },
   { to: '/contacts', label: 'Founders', icon: Users },
   { to: '/manual', label: 'Missing addresses', icon: MailQuestion },
+  { to: '/resume', label: 'My resume', icon: FileUser },
 ]
 
 // The heading shown in the bar beside the sidebar trigger. Derived from
@@ -60,8 +96,12 @@ const NAV = [
 const TITLES = {
   '/': 'Pipeline',
   '/queue': 'Review queue',
+  '/approved': 'Approved',
+  '/sent': 'Sent',
+  '/applications': 'Applications',
   '/contacts': 'Founders',
   '/manual': 'Missing addresses',
+  '/resume': 'My resume',
 }
 
 function currentTitle(pathname) {
@@ -72,6 +112,11 @@ function currentTitle(pathname) {
 
 function App() {
   const gmail = useGmailStatus()
+  const disconnect = useDisconnectGmail()
+  // Confirmed, not one click: disconnecting costs a trip through
+  // Google's consent screen to undo, and the account line is a place the
+  // operator's cursor passes on the way to the nav.
+  const [confirmLogout, setConfirmLogout] = useState(false)
   const [params] = useSearchParams()
   const location = useLocation()
   const outcome = params.get('gmail')
@@ -86,9 +131,30 @@ function App() {
               <SidebarMenuItem>
                 <SidebarMenuButton size="lg" asChild>
                   <NavLink to="/">
-                    <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                      <CircleDot className="size-4" />
-                    </div>
+                    {/* The operator's logo (public/logo(2).png), with the
+                        black tile taken off: logo-mark.png is the glyph
+                        alone, as a transparent stencil.
+
+                        It is drawn as a MASK rather than an <img> so the
+                        glyph takes `--sidebar-foreground` - dark on the
+                        light sidebar, light in dark mode - from one file.
+                        A plain white PNG would have been invisible on
+                        the light sidebar, and shipping two tinted copies
+                        means two files to keep in step. */}
+                    <span
+                      aria-hidden="true"
+                      className="bg-sidebar-foreground size-8 shrink-0"
+                      style={{
+                        maskImage: 'url(/logo-mark.png)',
+                        WebkitMaskImage: 'url(/logo-mark.png)',
+                        maskSize: 'contain',
+                        WebkitMaskSize: 'contain',
+                        maskRepeat: 'no-repeat',
+                        WebkitMaskRepeat: 'no-repeat',
+                        maskPosition: 'center',
+                        WebkitMaskPosition: 'center',
+                      }}
+                    />
                     <div className="grid flex-1 text-left text-sm leading-tight">
                       <span className="truncate font-medium">Outreach desk</span>
                       <span className="text-muted-foreground truncate text-xs">
@@ -133,9 +199,13 @@ function App() {
             <SidebarFooter>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <SidebarMenuButton size="lg" className="cursor-default">
+                  {/* Operator request (2026-09-23): "give option here for
+                      logout too". The account line was the only place in
+                      the app that named the connected account, and the
+                      only way out of it was to stop using the app. */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <SidebarMenuButton size="lg">
                         <span
                           aria-hidden="true"
                           className="flex size-8 shrink-0 items-center justify-center"
@@ -146,12 +216,19 @@ function App() {
                           <span className="text-muted-foreground text-xs">Sending as</span>
                           <span className="truncate text-sm">{gmail.data.account}</span>
                         </span>
+                        <ChevronsUpDown className="ml-auto size-4 opacity-60" />
                       </SidebarMenuButton>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      Letters are sent from this account
-                    </TooltipContent>
-                  </Tooltip>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="right" align="end" className="w-64">
+                      <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">
+                        Letters are sent from this account
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem variant="destructive" onSelect={() => setConfirmLogout(true)}>
+                        <LogOut />
+                        Disconnect Gmail
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarFooter>
@@ -180,6 +257,56 @@ function App() {
             <GatedRoutes gmail={gmail} outcome={outcome} />
           </main>
         </SidebarInset>
+
+        <Dialog open={confirmLogout} onOpenChange={setConfirmLogout}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Disconnect {gmail.data?.account}?</DialogTitle>
+              <DialogDescription>
+                This app forgets the token, so nothing here can send or read mail as that
+                account until you connect it again. Your drafts, approvals and everything
+                already sent are untouched.
+              </DialogDescription>
+            </DialogHeader>
+            {/* Said plainly rather than implied: "disconnect" here means
+                this machine forgets the token, not that Google withdraws
+                the grant. Only the operator can do the second, and the
+                app already tells him the same thing when a token turns
+                out to be dead (`NoRefreshToken`). */}
+            <p className="text-muted-foreground text-sm">
+              Google still lists this app until you remove it at{' '}
+              <a
+                className="underline underline-offset-4"
+                href="https://myaccount.google.com/permissions"
+                target="_blank"
+                rel="noreferrer"
+              >
+                myaccount.google.com/permissions
+              </a>
+              .
+            </p>
+            {disconnect.isError && (
+              <p className="text-destructive text-sm" role="alert">
+                Could not disconnect: {disconnect.error.message}
+              </p>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmLogout(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={disconnect.isPending}
+                onClick={() =>
+                  disconnect.mutate(undefined, { onSuccess: () => setConfirmLogout(false) })
+                }
+              >
+                {disconnect.isPending ? <Spinner /> : null}
+                Disconnect
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </SidebarProvider>
     </TooltipProvider>
   )
@@ -227,9 +354,13 @@ function GatedRoutes({ gmail, outcome }) {
     <Routes>
       <Route path="/" element={<Pipeline />} />
       <Route path="/queue" element={<ReviewQueue />} />
+      <Route path="/approved" element={<Approved />} />
+      <Route path="/sent" element={<Sent />} />
+      <Route path="/applications" element={<Applications />} />
       <Route path="/contacts" element={<Contacts />} />
       <Route path="/thread/:id" element={<Thread />} />
       <Route path="/manual" element={<ManualEmail />} />
+      <Route path="/resume" element={<Resume />} />
     </Routes>
   )
 }

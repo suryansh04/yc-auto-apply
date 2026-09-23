@@ -26,14 +26,26 @@
 // the *rendered* list immediately (optimistically, before the network
 // call even resolves), so a stale, already-acted-on draft can never be
 // shown as current again, regardless of how slow the refetch is.
-import { useState } from 'react'
-import { useApprove, useEdit, useQueue, useRedraft, useReject } from '../api/hooks'
+import { useEffect, useState } from 'react'
+import {
+  useApprove,
+  useCheckDraft,
+  useGenericLine,
+  useEdit,
+  useQueue,
+  useRedraft,
+  useSuggestFixes,
+  useReject,
+} from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
+import { markUp } from '@/lib/marks'
+import { Lightbulb, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -47,6 +59,7 @@ import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 
 // app/domain/letter.py's USER_FIT_MARKER, mirrored by hand - there is no
@@ -92,12 +105,65 @@ function idAfter(list, id) {
   return null
 }
 
+/** `/suggest`'s list, keyed by the note it answers. */
+function byIndex(suggestions) {
+  const out = {}
+  for (const suggestion of suggestions ?? []) out[suggestion.index] = suggestion
+  return out
+}
+
 export default function ReviewQueue() {
   const queueQuery = useQueue()
   const approve = useApprove()
   const edit = useEdit()
   const reject = useReject()
   const redraft = useRedraft()
+  // The rewrite behind each highlight. A second request on purpose: the
+  // checks are instant and this one waits on Sarvam, so the amber marks
+  // appear immediately and the hover cards fill in behind them.
+  const suggestFixes = useSuggestFixes({
+    onSuccess: (data, { id }) => {
+      setRewrites(byIndex(data?.suggestions))
+      setSuggestedId(id)
+    },
+    // Advice on top of advice: a failure leaves the notes exactly where
+    // they are. The hover cards just say there is no rewrite.
+    onError: () => setRewrites({}),
+  })
+  // Swapping in the generic company line is an edit, so its result is
+  // the checks' verdict on the new text - shown exactly where a save's
+  // would be.
+  const genericLine = useGenericLine({
+    onSuccess: (data, id) => {
+      setCheckNotes(data?.notes ?? [])
+      setCheckHighlights(data?.highlights ?? [])
+      setCheckedId(id)
+      setActiveNote(null)
+      setRewrites({})
+      setSuggestedId(null)
+    },
+  })
+  const checkDraft = useCheckDraft({
+    onSuccess: (data, { id }) => {
+      setCheckNotes(data?.notes ?? [])
+      setCheckHighlights(data?.highlights ?? [])
+      setCheckedId(id)
+      setActiveNote(null)
+      // Rewrites are only worth asking for when something was flagged,
+      // and only for spans that resolved to real words - an LLM call per
+      // draft is the operator's money.
+      setRewrites({})
+      setSuggestedId(null)
+      // Asked unconditionally now that the company paragraph is always a
+      // candidate for a rewrite, not only the spans a check complained
+      // about. A letter with nothing to rewrite costs no model call -
+      // `run_reviser` returns before touching the provider when it is
+      // handed no spans - so the guard that used to live here was
+      // deciding something the backend already decides, with less to go
+      // on.
+      suggestFixes.mutate({ id })
+    },
+  })
 
   const items = queueQuery.data ?? []
 
@@ -114,6 +180,19 @@ export default function ReviewQueue() {
   // screen has acted, so the same filter is correct for all three
   // actions). A failed action removes its id again immediately.
   const [settledIds, setSettledIds] = useState(() => new Set())
+  // The result of the operator pressing "Re-check", and which draft it
+  // belongs to.
+  const [checkNotes, setCheckNotes] = useState([])
+  const [checkedId, setCheckedId] = useState(null)
+  // The notes paired with the words they are about, and which one the
+  // operator last clicked on - in the letter or in the panel.
+  const [checkHighlights, setCheckHighlights] = useState([])
+  const [activeNote, setActiveNote] = useState(null)
+  // What the model would write instead, keyed by position in
+  // `checkHighlights` - never matched on text, so a rewrite cannot land
+  // on the wrong note - and which draft it was asked about.
+  const [rewrites, setRewrites] = useState({})
+  const [suggestedId, setSuggestedId] = useState(null)
 
   // Prune settled ids the backend has already confirmed (no longer in
   // `items` at all) - once gone, holding onto the id serves no purpose.
@@ -245,13 +324,19 @@ export default function ReviewQueue() {
     edit.mutate(
       { id: current.outreach_id, subject, body },
       {
-        onSuccess: () => {
+        // 2026-09-22: a save always saves. The checks come back as notes
+        // about what was just written, so the editor closes and the
+        // suggestions panel shows them - it no longer refuses.
+        onSuccess: (data) => {
           setIsEditing(false)
           setEditErrors([])
+          setCheckNotes(data?.notes ?? [])
+          setCheckHighlights(data?.highlights ?? [])
+          setCheckedId(current.outreach_id)
+          setActiveNote(null)
         },
-        // 422 {errors: [...]} - the validator's own messages, verbatim.
-        // Nothing was persisted on the backend, and the editor keeps
-        // whatever the operator typed (it owns its own local state).
+        // A real failure (the row vanished, the API is down). The editor
+        // stays open holding whatever the operator typed.
         onError: (err) => {
           setEditErrors(err.errors ?? [err.message])
         },
@@ -263,6 +348,22 @@ export default function ReviewQueue() {
     if (!current) return
     setDismissedIds((prev) => new Set(prev).add(current.outreach_id))
   }
+
+  // The checks run as soon as a draft is shown, so the letter is marked
+  // up on arrival rather than after pressing a button - which is what
+  // "like grammarly" means. It is a cheap call: pure computation over
+  // text the server already has, no model involved.
+  //
+  // Keyed on the id alone, so moving to the next letter re-runs it and
+  // staying put does not. The mutation object is deliberately NOT a
+  // dependency: it changes identity on every state transition of its own,
+  // which would loop.
+  const currentIdForCheck = current?.outreach_id ?? null
+  useEffect(() => {
+    if (currentIdForCheck == null) return
+    checkDraft.mutate({ id: currentIdForCheck })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIdForCheck])
 
   // T16-3/F3: ALL review-queue action keys are suspended while the
   // editor is open - not merely inert inside its own text fields.
@@ -351,6 +452,74 @@ export default function ReviewQueue() {
   const needsYourParagraph = (current.wire_text ?? '').includes(USER_FIT_MARKER)
   const critic = criticCheck(current.critic_verdict)
   const showCriticNote = Boolean(current.critic_note) && !dismissedIds.has(current.outreach_id)
+  // A fresh re-check wins over the note stored at draft time, but only
+  // for the draft it was run on - otherwise moving to the next letter
+  // would show it the previous one's verdict.
+  const suggestions =
+    checkedId === current.outreach_id
+      ? checkNotes
+      : (current.last_error ? [current.last_error] : [])
+  // The critic's note counts as a suggestion: it is one more thing the
+  // machine noticed, and the panel is tinted when there is anything at
+  // all to read.
+  // Only a fresh check knows WHERE each note applies; the note stored at
+  // draft time is just a sentence. So the letter is marked up after a
+  // re-check or a save, and reads plainly before that.
+  function useGenericNow() {
+    setActionError(null)
+    genericLine.mutate(current.outreach_id, {
+      onError: (err) => setActionError(err.message),
+    })
+  }
+  const rawCheckMarks = checkedId === current.outreach_id ? checkHighlights : []
+  // A check mark that landed on the company paragraph carries the
+  // generic line too. It wins the overlap with the paragraph's own mark,
+  // so without this the generic option would vanish from precisely the
+  // letters that need it most - the ones a hook check has flagged.
+  const coversInsight = (quote) =>
+    Boolean(current.insight_text && quote &&
+      (quote.includes(current.insight_text) || current.insight_text.includes(quote)))
+  const checkMarks = rawCheckMarks.map((mark) =>
+    coversInsight(mark.quote)
+      ? { ...mark, generic: current.generic_line, busy: genericLine.isPending,
+          onUseGeneric: useGenericNow }
+      : mark,
+  )
+  // The company paragraph, marked as itself. Appended after the checks so
+  // it keeps the highest index - `activeIndex` and the suggestions panel
+  // are keyed by position, and shifting the checks' indices to make room
+  // would point every rewrite at the wrong note.
+  const highlights = current.insight_text
+    ? [
+        ...checkMarks,
+        {
+          kind: 'insight',
+          message: 'This is the paragraph about them - the only part the letter researches.',
+          quote: current.insight_text,
+          generic: current.generic_line,
+          busy: genericLine.isPending,
+          onUseGeneric: useGenericNow,
+        },
+      ]
+    : checkMarks
+  const shownRewrites = suggestedId === current.outreach_id ? rewrites : {}
+  // "Still thinking" is only honest while the call is in flight for THIS
+  // draft and something was actually flagged.
+  const suggestionsPending =
+    suggestFixes.isPending && (rawCheckMarks.some((h) => h.quote) || Boolean(current.insight_text))
+
+  // Accept a rewrite: paste it in where the flagged words were, and save.
+  // The quote came back as a verbatim substring of the BODY (never the
+  // wire text), so this is a plain replacement - and `edit` re-runs the
+  // checks, so the letter re-marks itself around what just changed.
+  function applySuggestion(index) {
+    const suggestion = shownRewrites[index]
+    const body = current.body ?? ''
+    if (!suggestion || !body.includes(suggestion.quote)) return
+    saveEdit(current.subject ?? '', body.replace(suggestion.quote, suggestion.replacement))
+  }
+  const hasSuggestions = suggestions.length > 0 || showCriticNote
+  const suggestionCount = suggestions.length + (showCriticNote ? 1 : 0)
 
   return (
     <>
@@ -414,7 +583,15 @@ export default function ReviewQueue() {
             <Separator />
             <CardContent>
               <pre className="font-sans text-[15px] leading-relaxed whitespace-pre-wrap">
-                {current.wire_text}
+                {highlights.length > 0
+                  ? markUp(current.wire_text, highlights, {
+                      onSelect: setActiveNote,
+                      activeIndex: activeNote,
+                      suggestions: shownRewrites,
+                      pending: suggestionsPending,
+                      onApply: applySuggestion,
+                    })
+                  : current.wire_text}
               </pre>
             </CardContent>
             <CardFooter>
@@ -443,6 +620,123 @@ export default function ReviewQueue() {
             className="grid gap-4 lg:sticky lg:top-4"
             aria-label="Company, source and checks"
           >
+            {/* Operator decision (2026-09-22): these are SUGGESTIONS, not
+                a gate. They used to shout "Needs a fix before approving"
+                in red, which read as a refusal - nothing actually stops
+                the approve, and it is his letter and his name.
+
+                But quiet is not the same as advisory: the first version
+                of this card was so recessive it went unread at the
+                bottom of the docket. It sits FIRST now, and when there
+                is something to say it is tinted amber and carries the
+                count. Amber, not red: red is for the failures elsewhere
+                in this app, and this is the one panel that is neither a
+                failure nor a refusal. With nothing flagged it fades back
+                to an ordinary card, so the colour means "there is
+                something here" rather than being permanent decoration. */}
+            <Card
+              className={
+                hasSuggestions
+                  ? 'border-amber-400/70 bg-amber-50/80 dark:border-amber-500/40 dark:bg-amber-950/25'
+                  : undefined
+              }
+            >
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Lightbulb
+                    className={hasSuggestions ? 'size-4 text-amber-600 dark:text-amber-400' : 'size-4'}
+                  />
+                  AI suggestions
+                  {hasSuggestions && (
+                    <Badge
+                      variant="secondary"
+                      className="bg-amber-200/70 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100"
+                    >
+                      {suggestionCount}
+                    </Badge>
+                  )}
+                </CardTitle>
+                <CardDescription>
+                  What the checks noticed. Advice only &mdash; you can approve anyway.
+                </CardDescription>
+                <CardAction>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={checkDraft.isPending}
+                    onClick={() => checkDraft.mutate({ id: current.outreach_id })}
+                  >
+                    {checkDraft.isPending ? <Spinner /> : <RefreshCw />}
+                    Re-check
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent className="grid gap-3">
+                <Badge variant={critic.variant} className="w-fit">
+                  {critic.label}
+                </Badge>
+
+                {suggestions.length > 0 ? (
+                  <ul className="grid gap-1.5 text-sm">
+                    {suggestions.map((note, index) => {
+                      const marked = Boolean(rawCheckMarks[index]?.quote)
+                      return (
+                        <li key={note}>
+                          <button
+                            type="button"
+                            disabled={!marked}
+                            onClick={() => setActiveNote(index)}
+                            className={
+                              'w-full rounded px-1.5 py-1 text-left font-medium ' +
+                              (marked ? 'hover:bg-amber-200/60 dark:hover:bg-amber-900/40 ' : '') +
+                              (activeNote === index ? 'bg-amber-200/70 dark:bg-amber-900/50' : '')
+                            }
+                          >
+                            {note}
+                            {/* Says which notes point at actual words, so
+                                a note with nothing marked does not look
+                                like a broken highlight. */}
+                            {marked && (
+                              <span className="text-muted-foreground ml-1 text-xs">
+                                &mdash;{' '}
+                                {shownRewrites[index]
+                                  ? 'highlighted, hover it for a rewrite'
+                                  : 'highlighted'}
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <p className="text-muted-foreground text-sm">
+                    {checkedId === current.outreach_id
+                      ? 'Nothing flagged on the last check.'
+                      : 'Nothing flagged.'}
+                  </p>
+                )}
+
+                {showCriticNote && (
+                  <div className="grid gap-2 border-l-2 border-amber-400/70 pl-3 dark:border-amber-500/40">
+                    {/* Not muted: this is the second opinion on the
+                        letter, and unreadable advice is the same as no
+                        advice. */}
+                    <p className="text-sm">{current.critic_note}</p>
+                    <Button variant="ghost" size="sm" className="w-fit" onClick={dismissCritic}>
+                      Dismiss
+                    </Button>
+                  </div>
+                )}
+
+                {checkDraft.isError && (
+                  <p className="text-destructive text-xs" role="alert">
+                    Could not re-check: {checkDraft.error.message}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>{current.company_name ?? 'Unknown company'}</CardTitle>
@@ -488,29 +782,6 @@ export default function ReviewQueue() {
               </CardContent>
             </Card>
 
-            <div className="grid gap-2">
-              {current.last_error && (
-                <Alert variant="destructive" role="alert">
-                  <AlertTitle>Needs a fix before approving</AlertTitle>
-                  <AlertDescription>{current.last_error}</AlertDescription>
-                </Alert>
-              )}
-
-              <Badge variant={critic.variant} className="w-fit">
-                {critic.label}
-              </Badge>
-
-              {showCriticNote && (
-                <Alert>
-                  <AlertDescription className="grid gap-2">
-                    <span>{current.critic_note}</span>
-                    <Button variant="outline" size="sm" className="w-fit" onClick={dismissCritic}>
-                      Dismiss
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              )}
-            </div>
           </aside>
         </div>
       )}

@@ -101,6 +101,45 @@ def test_fail_records_only_the_exception_type_name():
     assert "sk_live_secret" not in (job.error or "")
 
 
+def test_an_operator_facing_message_is_shown_in_full():
+    """2026-09-23: a stage that has decided its message is FOR the
+    operator gets to say it. Showing `failed: ValueError` while the
+    sentence telling him what to do sat in a terminal was the thing that
+    made a brand-new user's first Draft a dead end."""
+    from app.application.errors import OperatorError
+
+    r = _runner()
+    job_id = r.start("draft")
+    r.fail(job_id, OperatorError("no resume claims yet - open My resume and press Re-read"))
+    assert r.repo.get(job_id).error == (
+        "no resume claims yet - open My resume and press Re-read"
+    )
+
+
+def test_a_subclass_of_ValueError_is_not_enough_to_be_shown():
+    """The rule is "written to be shown", not "looks harmless". A plain
+    ValueError carrying a provider's response is still type-name only,
+    and `OperatorError` subclassing ValueError must not weaken that."""
+    r = _runner()
+    job_id = r.start("draft")
+    r.fail(job_id, ValueError("401 from provider: key sk_live_secret is bad"))
+    job = r.repo.get(job_id)
+    assert job.error == "ValueError"
+    assert "sk_live_secret" not in (job.error or "")
+
+
+def test_the_gmail_auth_marker_is_still_a_type_name():
+    """The Pipeline screen matches `job.error === 'GmailAuthRequired'` to
+    offer a reconnect. Turning that one into a sentence would break the
+    only place a job error is acted on rather than read."""
+    from app.ports import GmailAuthRequired
+
+    r = _runner()
+    job_id = r.start("poll-replies")
+    r.fail(job_id, GmailAuthRequired("gmail", reason="whatever"))
+    assert r.repo.get(job_id).error == "GmailAuthRequired"
+
+
 def test_recover_stale_fails_jobs_left_running_by_a_crash():
     r = _runner()
     job_id = r.start("scrape")

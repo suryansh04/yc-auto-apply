@@ -37,6 +37,40 @@ const DEFAULT_QUOTA = { provider: 'email-verifier', configured: false, daily_lim
  * list. Returns the response body's spy (vi.fn) wrapping the handler, so a
  * test can assert call counts if it cares.
  */
+/** GET /api/gmail/status - what the shell gates on. */
+export function mockGmailStatus(over = {}) {
+  const body = {
+    configured: true,
+    missing_config: [],
+    connected: true,
+    account: 'suryanshsingh0987@gmail.com',
+    can_read_replies: true,
+    ...over,
+  }
+  const spy = vi.fn(() => HttpResponse.json(body))
+  server.use(http.get('/api/gmail/status', spy))
+  return spy
+}
+
+/** POST /api/gmail/disconnect - forget the stored token. Idempotent, so
+ *  it answers the same either way. */
+export function mockDisconnectGmail() {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/gmail/disconnect', () => {
+      spy()
+      return HttpResponse.json({ ok: true })
+    }),
+  )
+  return spy
+}
+
+export function mockDisconnectFailure(detail = 'could not disconnect') {
+  server.use(
+    http.post('/api/gmail/disconnect', () => HttpResponse.json({ detail }, { status: 500 })),
+  )
+}
+
 export function mockStats({ counts = {}, quota = DEFAULT_QUOTA, jobs = [] } = {}) {
   const fullCounts = Object.fromEntries(ALL_OUTREACH_STATES.map((s) => [s, counts[s] ?? 0]))
   const body = { counts: fullCounts, quota, jobs }
@@ -103,6 +137,16 @@ export function item(overrides = {}) {
     critic_note: null,
     sequence_step: 0,
     attachment_name: 'resume.pdf',
+    // The generic company line as the backend would render it for this
+    // company. Null means this letter has no company paragraph to swap,
+    // and the screen offers no button.
+    generic_line:
+      'I came across Vahan while looking for teams working on problems worth the years ' +
+      'it takes to solve them, and yours is one I kept reading about instead of scrolling past.',
+    // The company paragraph as it stands, a verbatim substring of the
+    // body. Null by default because this fixture's `wire_text` is not an
+    // assembled letter - a test that wants the paragraph marked says so.
+    insight_text: null,
     ...overrides,
   }
 }
@@ -190,6 +234,80 @@ export function mockRedraft({ delayMs = 0 } = {}) {
  * (app/application/review_outreach.py's `approve`), whose message the
  * screen must show verbatim.
  */
+/** POST /api/outreach/:id/check - the re-run checks. Advice, never a
+ *  refusal, so this always answers 200 with the notes in the body. */
+export function mockCheckDraft({ notes = [], highlights = null } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/check', async ({ params }) => {
+      spy(Number(params.id))
+      // Each note paired with the words it is about; by default nothing
+      // resolves, which is the shape a note about the whole letter has.
+      return HttpResponse.json({
+        notes,
+        highlights: highlights ?? notes.map((message) => ({ message, quote: null })),
+      })
+    }),
+  )
+  return spy
+}
+
+/**
+ * POST /api/outreach/:id/suggest - what Sarvam would write instead, for
+ * the spans `/check` highlighted. Advice on top of advice: 200 always,
+ * and `index` is a position in the check's `highlights`, never a match on
+ * text.
+ */
+/**
+ * POST /api/outreach/:id/generic-line - swap the company paragraph for
+ * the written generic one. An edit, so it answers with the checks'
+ * notes, never a refusal.
+ */
+export function mockGenericLine({ notes = [], highlights = null } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/generic-line', ({ params }) => {
+      spy(Number(params.id))
+      return HttpResponse.json({
+        notes,
+        highlights: highlights ?? notes.map((message) => ({ message, quote: null })),
+      })
+    }),
+  )
+  return spy
+}
+
+/** POST /api/outreach/:id/generic-line refused - a letter that does not
+ *  have the assembled shape, so there is no paragraph to swap. */
+export function mockGenericLineFailure(detail = 'edit it by hand') {
+  server.use(
+    http.post('/api/outreach/:id/generic-line', () =>
+      HttpResponse.json({ detail }, { status: 409 }),
+    ),
+  )
+}
+
+export function mockSuggestFixes({ suggestions = [], unavailable = null } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/suggest', async ({ params, request }) => {
+      spy(Number(params.id), await request.json())
+      return HttpResponse.json({ suggestions, unavailable })
+    }),
+  )
+  return spy
+}
+
+/** POST /api/outreach/:id/suggest that fails outright - the hover cards
+ *  must fall back to the note alone, and the checks must stay put. */
+export function mockSuggestFailure(status = 500) {
+  server.use(
+    http.post('/api/outreach/:id/suggest', () =>
+      HttpResponse.json({ detail: 'nope' }, { status }),
+    ),
+  )
+}
+
 export function mockApproveFailure(status = 500, detail = 'could not approve') {
   server.use(
     http.post('/api/outreach/:id/approve', () => HttpResponse.json({ detail }, { status })),
@@ -197,13 +315,15 @@ export function mockApproveFailure(status = 500, detail = 'could not approve') {
 }
 
 /** Mocks a successful POST /api/outreach/:id/edit. */
-export function mockEdit() {
+export function mockEdit({ notes = [] } = {}) {
   const spy = vi.fn()
   server.use(
+    // 2026-09-22: an edit always saves and answers 200 with what the
+    // checks made of the new text. A 4xx now means a real failure.
     http.post('/api/outreach/:id/edit', async ({ params, request }) => {
       const body = await request.json()
       spy(Number(params.id), body)
-      return HttpResponse.json({ ok: true })
+      return HttpResponse.json({ notes })
     }),
   )
   return spy
@@ -416,4 +536,105 @@ export function mockSetEmailFailure(errors) {
   server.use(
     http.post('/api/outreach/:id/email', () => HttpResponse.json({ errors }, { status: 422 })),
   )
+}
+
+
+/** POST /api/send - the one irreversible action. Answers with the five
+ *  counts `SendResultOut` carries. */
+export function mockSend(result = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/send', async ({ request }) => {
+      spy(await request.json().catch(() => ({})))
+      return HttpResponse.json({
+        sent: 0, skipped_cap: 0, skipped_not_reservable: 0,
+        needs_manual_check: 0, errors: 0, ...result,
+      })
+    }),
+  )
+  return spy
+}
+
+
+/** GET /api/approved - the letters approved and not yet sent. Same shape
+ *  as the queue, because it is the same thing at a later moment. */
+export function mockApproved(items = []) {
+  server.use(http.get('/api/approved', () => HttpResponse.json(items)))
+}
+
+
+/** POST /api/outreach/:id/unapprove - back to the review queue. */
+export function mockUnapprove() {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/unapprove', ({ params }) => {
+      spy(Number(params.id))
+      return HttpResponse.json({ ok: true })
+    }),
+  )
+  return spy
+}
+
+
+/** GET /api/resume/status - the attached PDF, and how many parsed claims
+ *  the drafter is held to (the two can disagree). */
+export function mockResumeStatus(over = {}) {
+  server.use(
+    http.get('/api/resume/status', () =>
+      HttpResponse.json({
+        configured: true, filename: 'resume.pdf', size_bytes: 164089,
+        modified_at: '2026-09-13T02:23:00Z', claims: 12, ...over,
+      }),
+    ),
+  )
+}
+
+/** POST /api/resume - replace the attached PDF. */
+/** POST /api/resume/parse - read the resume into citable claims. */
+export function mockParseResume({ claims = 1, unverified = 0, dropped = 0, status = {} } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/resume/parse', () => {
+      spy()
+      return HttpResponse.json({
+        claims,
+        unverified,
+        dropped,
+        status: { configured: true, filename: 'resume.pdf', size_bytes: 1024,
+                  modified_at: '2026-09-23T00:00:00Z', claims, ...status },
+      })
+    }),
+  )
+  return spy
+}
+
+export function mockParseResumeFailure(status = 422, detail = 'resume text is empty') {
+  server.use(
+    http.post('/api/resume/parse', () => HttpResponse.json({ detail }, { status })),
+  )
+}
+
+export function mockReplaceResume({ status = 200, detail = null, ...over } = {}) {
+  const spy = vi.fn()
+  server.use(
+    // The raw multipart body, not `request.formData()`: undici's parser
+    // asserts on jsdom's File objects and throws inside the handler.
+    // The filename and the bytes are both in the raw text anyway.
+    http.post('/api/resume', async ({ request }) => {
+      spy(await request.text())
+      if (status !== 200) return HttpResponse.json({ detail }, { status })
+      return HttpResponse.json({
+        configured: true, filename: 'resume.pdf', size_bytes: 1024,
+        modified_at: '2026-09-22T00:00:00Z', claims: 12, ...over,
+      })
+    }),
+  )
+  return spy
+}
+
+
+/** GET /api/applications - every application with the OUTCOME it ended
+ *  in (`sent` / `rejected` / `skipped` / `waiting` / `not_started`). */
+export function mockApplications(items = []) {
+  server.use(http.get('/api/applications', () => HttpResponse.json(items)))
 }

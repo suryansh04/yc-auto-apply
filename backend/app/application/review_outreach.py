@@ -59,6 +59,7 @@ from datetime import datetime
 from typing import Protocol
 
 from app.application.draft_outreach import build_sources, load_resume_claims
+from app.domain import letter
 from app.domain.entities import Draft
 from app.domain.ranking import rank_key
 from app.domain.states import OutreachState, assert_transition
@@ -133,8 +134,22 @@ class ReviewOutreach:
     # -- listing ---------------------------------------------------------------
 
     def pending(self) -> list[ReviewItem]:
+        return self._in_state(OutreachState.PENDING_APPROVAL)
+
+    def approved(self) -> list[ReviewItem]:
+        """The letters the operator has approved and not yet sent.
+
+        Operator request (2026-09-22): a screen of its own. They are
+        neither in the review queue (already decided) nor visible anywhere
+        else as whole letters, and they are the ones about to leave, so
+        reading them one more time before pressing send is the last
+        moment anything can be caught.
+        """
+        return self._in_state(OutreachState.APPROVED)
+
+    def _in_state(self, state: OutreachState) -> list[ReviewItem]:
         items = []
-        for founder in self._repos.founder.list_by_state(state=OutreachState.PENDING_APPROVAL):
+        for founder in self._repos.founder.list_by_state(state=state):
             outreach = self._repos.outreach.get_by_founder_id(founder.id)
             if outreach is None:
                 continue
@@ -158,13 +173,42 @@ class ReviewOutreach:
         row = self._repos.message.get_outbound(outreach.id, outreach.sequence_step)
         if row is None:
             raise ValueError("refusing to approve: there is no draft yet - press [e] to edit (write) one first")
-        if outreach.last_error and not row.edited_by_user:
-            raise ValueError(
-                "refusing to approve: this draft is flagged NEEDS MANUAL WRITE "
-                f"({outreach.last_error}) - press [e] to edit it before approving"
-            )
+        # Operator decision (2026-09-22): `last_error` used to REFUSE the
+        # approve unless the draft had been hand-edited. It is advice -
+        # what the checks noticed - and the person pressing approve is the
+        # one whose name is on the letter and who has just read it. The
+        # note is still shown, and still stored; it no longer overrules
+        # him. (A draft with no row at all is a different thing and still
+        # refuses above: there is nothing to approve.)
         self._repos.message.upsert(id=row.id, approved_at=now)
-        self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.APPROVED))
+        # A decision clears the skip - it is the decision the skip deferred.
+        self._repos.outreach.upsert(founder_id=outreach.founder_id,
+                                    state=str(OutreachState.APPROVED), skipped_at=None)
+
+    def unapprove(self, outreach_id: int) -> None:
+        """Send an approved letter back to the review queue.
+
+        Operator request (2026-09-22): a way out of the Approved screen
+        that is neither "send it" nor "discard it". Reject throws the
+        founder away and redraft spends a model call; this just undoes the
+        decision.
+
+        `approved_at` is cleared with the state, because a PENDING_APPROVAL
+        row still carrying an approval is exactly the inconsistency
+        `send`'s own guard exists to catch.
+        """
+        outreach = self._outreach(outreach_id)
+        state = OutreachState(outreach.state)
+        if state is not OutreachState.APPROVED:
+            raise ValueError(
+                f"only an APPROVED letter can be sent back to review (this one is {outreach.state})"
+            )
+        assert_transition(state, OutreachState.PENDING_APPROVAL)
+        row = self._repos.message.get_outbound(outreach.id, outreach.sequence_step)
+        if row is not None:
+            self._repos.message.upsert(id=row.id, approved_at=None)
+        self._repos.outreach.upsert(founder_id=outreach.founder_id,
+                                    state=str(OutreachState.PENDING_APPROVAL))
 
     def redraft(self, outreach_id: int) -> None:
         outreach = self._outreach(outreach_id)
@@ -175,17 +219,84 @@ class ReviewOutreach:
         if OutreachState(outreach.state) is not OutreachState.PENDING_APPROVAL:
             raise ValueError(f"only a PENDING_APPROVAL draft can be sent back for redraft (this one is {outreach.state})")
         assert_transition(OutreachState(outreach.state), OutreachState.READY_TO_DRAFT)
-        self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.READY_TO_DRAFT))
+        self._repos.outreach.upsert(founder_id=outreach.founder_id,
+                                    state=str(OutreachState.READY_TO_DRAFT), skipped_at=None)
 
     def reject(self, outreach_id: int) -> None:
         outreach = self._outreach(outreach_id)
         assert_transition(OutreachState(outreach.state), OutreachState.DISCARDED)
-        self._repos.outreach.upsert(founder_id=outreach.founder_id, state=str(OutreachState.DISCARDED))
+        self._repos.outreach.upsert(founder_id=outreach.founder_id,
+                                    state=str(OutreachState.DISCARDED), skipped_at=None)
 
-    def edit(self, outreach_id: int, subject: str, body: str) -> list[str]:
+    def check(self, outreach_id: int, subject: str | None = None,
+              body: str | None = None) -> list[str]:
+        """Run the checks over a draft and return what they say - writing
+        nothing.
+
+        Operator request (2026-09-22): the checks are advice, not a gate.
+        He wants to re-run them on demand, see what they say, and decide
+        for himself. `edit` already validates, but only as a condition of
+        saving; this is the same verdict without the save, so asking "is
+        this any good?" costs nothing and changes nothing.
+
+        With `subject`/`body` omitted it judges the stored draft. Passing
+        them judges text the operator is still typing.
+        """
         outreach = self._outreach(outreach_id)
-        if OutreachState(outreach.state) is not OutreachState.PENDING_APPROVAL:
-            raise ValueError(f"only a PENDING_APPROVAL draft can be edited (this one is {outreach.state})")
+        founder = self._repos.founder.get(outreach.founder_id)
+        company = self._repos.company.get(founder.company_id) if founder is not None else None
+        if founder is None or company is None:
+            raise ValueError(f"outreach {outreach_id} has no founder/company")
+        step = int(getattr(outreach, "sequence_step", 0) or 0)
+        row = self._repos.message.get_outbound(outreach.id, step)
+        if row is None and (subject is None or body is None):
+            return ["there is no draft to check yet"]
+        source_type = getattr(row, "research_source_type", None) if row is not None else None
+        source_id = getattr(row, "research_source_id", None) if row is not None else None
+        sources = self._sources(company)
+        source = sources.resolvable.get((source_type, source_id)) if source_type and source_id is not None else None
+        draft = Draft(
+            subject=(subject if subject is not None else getattr(row, "subject", "")) or "",
+            body=(body if body is not None else getattr(row, "body", "")) or "",
+            research_source_type=source_type or "",
+            research_source_id=source_id,
+            sequence_step=step,
+        )
+        return self._validate(draft, source, company, founder,
+                              self._previous_body(outreach, step),
+                              all_publications=sources.publications)
+
+    _EDITABLE = (OutreachState.PENDING_APPROVAL, OutreachState.APPROVED)
+
+    def edit(self, outreach_id: int, subject: str, body: str,
+             now: datetime | None = None) -> list[str]:
+        """Replace a draft's text.
+
+        Operator request (2026-09-22): an APPROVED letter is editable too,
+        from the Approved screen. Waiting to send is exactly when a typo
+        gets noticed, and bouncing it back through the review queue to fix
+        one word is busywork.
+
+        An edit is still never an approval. For a PENDING_APPROVAL row
+        `approved_at` is cleared, as before. For an APPROVED one it is
+        re-stamped with `now`: the operator is looking at the letter on
+        the send screen and changing it deliberately, so that edit IS the
+        approval of the new text - but the stamp must move, because the
+        old one approved words that no longer exist. Editing an APPROVED
+        row therefore REQUIRES a clock: there is no sensible third
+        behaviour (leaving the old stamp would send text nobody approved,
+        and clearing it would leave the row APPROVED with nothing
+        `reserve_for_send` can act on - and the state machine has no edge
+        back to PENDING_APPROVAL).
+        """
+        outreach = self._outreach(outreach_id)
+        state = OutreachState(outreach.state)
+        if state not in self._EDITABLE:
+            raise ValueError(
+                f"only a PENDING_APPROVAL or APPROVED draft can be edited (this one is {outreach.state})"
+            )
+        if state is OutreachState.APPROVED and now is None:
+            raise ValueError("editing an approved letter needs a clock: the approval is re-stamped")
         founder = self._repos.founder.get(outreach.founder_id)
         company = self._repos.company.get(founder.company_id) if founder is not None else None
         if founder is None or company is None:
@@ -207,14 +318,19 @@ class ReviewOutreach:
             return errors
         draft = Draft(subject=subject, body=body, research_source_type=source_type or "",
                       research_source_id=source_id, sequence_step=step)
-        errors = self._validate(draft, source, company, founder, self._previous_body(outreach, step),
-                                all_publications=sources.publications)
-        if errors:
-            return errors
+        # Operator decision (2026-09-22): the checks do not refuse a save.
+        # They used to - a 422, nothing persisted - which made them a gate
+        # on the operator's OWN typing, for the same reason approve was
+        # wrong to refuse. These are his words and his name; the notes are
+        # returned so the screen can show them, and the text is saved
+        # either way.
+        notes = self._validate(draft, source, company, founder, self._previous_body(outreach, step),
+                               all_publications=sources.publications)
 
+        approved_at = now if state is OutreachState.APPROVED else None
         fields = dict(
             outreach_id=outreach.id, sequence_step=step, direction="outbound",
-            subject=subject, body=body, edited_by_user=True, approved_at=None,
+            subject=subject, body=body, edited_by_user=True, approved_at=approved_at,
         )
         if row is not None:
             fields["id"] = row.id
@@ -223,11 +339,67 @@ class ReviewOutreach:
             # must not keep claiming one (a stale `news/9999`, say).
             fields.update(research_source_type=None, research_source_id=None)
         self._repos.message.upsert(**fields)
+        # `last_error` is the note from DRAFT time and no longer describes
+        # this text. Whatever the checks say about what he just wrote is
+        # returned to the caller instead of being stored as a flag.
         self._repos.outreach.upsert(founder_id=outreach.founder_id, last_error=None)
-        return []
+        return notes
 
-    def skip(self, outreach_id: int) -> None:
-        """Leave the row exactly as it is."""
+    def use_generic_line(self, outreach_id: int, now: datetime | None = None) -> list[str]:
+        """Swap this letter's company paragraph for the written generic one.
+
+        Operator request (2026-09-23): "give option for this to make a
+        generic if i am not able to find good for this specifically
+        line". Some companies have nothing public worth a specific
+        sentence about them, and the realistic alternative to a generic
+        line is not a better specific line - it is a fabricated one,
+        which is the failure `app.domain.letter` exists to prevent.
+
+        Only the company paragraph changes (`letter.with_insight` works
+        from the letter's own anchors), so an edit the operator made
+        anywhere else in the letter survives. The save then goes through
+        `edit`, which means it is validated, never refused, and re-stamps
+        an APPROVED letter's approval exactly as any other edit does.
+
+        Returns the checks' notes, like `edit`. Raises only when there is
+        nothing to swap: no draft, or a letter that does not have this
+        shape (one written before the blocks were rewritten, or
+        restructured by hand) - guessing which paragraph is the company
+        one would put the generic line in the wrong place.
+        """
+        outreach = self._outreach(outreach_id)
+        founder = self._repos.founder.get(outreach.founder_id)
+        company = self._repos.company.get(founder.company_id) if founder is not None else None
+        if founder is None or company is None:
+            raise ValueError(f"outreach {outreach_id} has no founder/company")
+        step = int(getattr(outreach, "sequence_step", 0) or 0)
+        row = self._repos.message.get_outbound(outreach.id, step)
+        if row is None or not getattr(row, "body", None):
+            raise ValueError("there is no draft to rewrite yet")
+        company_name = getattr(company, "name", None) or ""
+        swapped = letter.with_insight(row.body, [letter.generic_insight(company_name)])
+        if swapped is None:
+            raise ValueError(
+                "this letter does not have the assembled shape, so there is no "
+                "company paragraph to swap - edit it by hand"
+            )
+        return self.edit(outreach_id, row.subject or "", swapped, now=now)
+
+    def skip(self, outreach_id: int, now: datetime | None = None) -> None:
+        """Pass over this draft without deciding anything.
+
+        Until 2026-09-22 this left the row untouched, which meant a letter
+        the operator had read and moved on from looked exactly like one he
+        had never reached. `skipped_at` records that he saw it. The state
+        does not change: skipping is still not a decision.
+
+        Callers with no clock (older ones, and anything that genuinely
+        just wants a no-op) keep the old behaviour.
+        """
+        if now is None:
+            return
+        outreach = self._outreach(outreach_id)
+        self._repos.outreach.upsert(founder_id=outreach.founder_id, skipped_at=now)
 
     # -- helpers ---------------------------------------------------------------
 

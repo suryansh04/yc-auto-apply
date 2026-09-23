@@ -39,6 +39,24 @@ def test_get_resume_serves_the_file_send_actually_attaches(client, resume_file):
     assert "inline" in r.headers["content-disposition"]
 
 
+def test_get_resume_is_never_cached(client, resume_file):
+    """Live finding (2026-09-23): the operator replaced the resume and the
+    page kept showing the old one. One URL serves whatever file is at
+    RESUME_PATH, so without a directive the browser may guess a freshness
+    lifetime from Last-Modified and answer from its own copy."""
+    r = client.get("/api/resume")
+    assert "no-store" in r.headers["cache-control"]
+
+
+def test_get_resume_ignores_a_query_string(client, resume_file):
+    """The page stamps the URL with the file's mtime to defeat that cache.
+    Nothing about the response may depend on it - this route serves
+    RESUME_PATH and nothing else, whatever is asked for."""
+    r = client.get("/api/resume?v=2026-09-23T00%3A00%3A00Z")
+    assert r.status_code == 200
+    assert r.content == PDF
+
+
 def test_get_resume_is_404_when_there_is_no_file(client, no_resume_file):
     assert client.get("/api/resume").status_code == 404
 

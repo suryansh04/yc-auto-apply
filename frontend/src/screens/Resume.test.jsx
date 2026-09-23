@@ -21,7 +21,20 @@ it('shows the file itself, not a link to it', async () => {
   mockResumeStatus({ filename: 'My_Resume.pdf', size_bytes: 164089 })
   render()
   const frame = await screen.findByTitle('My resume')
-  expect(frame).toHaveAttribute('src', '/api/resume')
+  expect(frame.getAttribute('src')).toMatch(/^\/api\/resume\?/)
+})
+
+it('asks for the resume by the time it last changed', async () => {
+  // Live finding (2026-09-23): the operator replaced the resume and kept
+  // seeing the old one. One URL serves whatever is at RESUME_PATH, and
+  // remounting an iframe on that same URL lets the browser answer from
+  // its cache. The timestamp makes a replacement a different URL.
+  mockResumeStatus({ modified_at: '2026-09-23T10:11:12Z' })
+  render()
+  const frame = await screen.findByTitle('My resume')
+  expect(frame).toHaveAttribute('src', '/api/resume?v=2026-09-23T10%3A11%3A12Z')
+  expect(screen.getByRole('link', { name: /open in a tab/i }))
+    .toHaveAttribute('href', '/api/resume?v=2026-09-23T10%3A11%3A12Z')
 })
 
 it('reports the file and when it last changed', async () => {
@@ -45,7 +58,7 @@ it('still offers a tab for anyone who would rather have one', async () => {
   mockResumeStatus()
   render()
   const link = await screen.findByRole('link', { name: /open in a tab/i })
-  expect(link).toHaveAttribute('href', '/api/resume')
+  expect(link.getAttribute('href')).toMatch(/^\/api\/resume\?/)
   expect(link).toHaveAttribute('target', '_blank')
 })
 

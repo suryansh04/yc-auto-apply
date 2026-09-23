@@ -108,6 +108,13 @@ def get_resume() -> FileResponse:
 
     `inline` so the browser opens it in a tab rather than downloading it -
     the point is to look at it before sending.
+
+    Live finding (2026-09-23): the operator replaced the resume and kept
+    seeing the old one. One URL always serves whatever file is at
+    RESUME_PATH, so without a cache directive the browser is free to guess
+    a freshness lifetime from Last-Modified and re-show the PDF it already
+    had - and Chrome's PDF viewer does. `no-store` makes every look at
+    this route a look at the current file.
     """
     path = _resume_path()
     if path is None or not path.is_file():
@@ -115,7 +122,10 @@ def get_resume() -> FileResponse:
     return FileResponse(
         path,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{path.name}"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{path.name}"',
+            "Cache-Control": "no-store, must-revalidate",
+        },
     )
 
 

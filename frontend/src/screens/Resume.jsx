@@ -30,6 +30,12 @@ function kilobytes(bytes) {
   return `${Math.round((bytes ?? 0) / 1024)} KB`
 }
 
+// The one resume route, stamped with when the file last changed, so a
+// replacement is a different URL and cannot come back from the cache.
+function resumeUrl(modifiedAt) {
+  return modifiedAt ? `/api/resume?v=${encodeURIComponent(modifiedAt)}` : '/api/resume'
+}
+
 function when(iso) {
   if (!iso) return 'unknown'
   const date = new Date(iso)
@@ -81,7 +87,7 @@ export default function Resume() {
         <div className="flex items-center gap-2">
           {data?.configured && (
             <Button asChild variant="outline">
-              <a href="/api/resume" target="_blank" rel="noreferrer">
+              <a href={resumeUrl(data.modified_at)} target="_blank" rel="noreferrer">
                 Open in a tab <ExternalLink />
               </a>
             </Button>
@@ -179,12 +185,18 @@ export default function Resume() {
           <Card className="overflow-hidden py-0">
             <CardContent className="px-0">
               {/* The file itself, and the only way to be sure what a
-                  founder opens is to look at what they open. `key` on the
-                  timestamp so a replacement re-fetches instead of showing
-                  the browser's cached copy of the old PDF. */}
+                  founder opens is to look at what they open.
+
+                  The timestamp is in the URL, not just in `key` (live
+                  finding, 2026-09-23): remounting an iframe on the same
+                  URL lets the browser answer from its cache, so the
+                  operator replaced the resume and went on seeing the old
+                  one. A changed URL cannot be answered from the old
+                  entry. The route ignores the query string - it only
+                  ever serves RESUME_PATH. */}
               <iframe
                 key={data.modified_at}
-                src="/api/resume"
+                src={resumeUrl(data.modified_at)}
                 title="My resume"
                 className="h-[42rem] w-full border-0"
               />

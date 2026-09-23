@@ -57,7 +57,8 @@ Keep this virtual environment active in every terminal where you run
 cp .env.example .env
 ```
 
-Open `backend/.env` and fill in:
+That copy already has every setting in it. Open `backend/.env` and change
+these eight lines:
 
 ```ini
 DATABASE_URL=postgresql+psycopg://yc:yc@localhost:5433/ycautoapply
@@ -65,14 +66,22 @@ EMAIL_VERIFIER_API_KEY=your-myemailverifier-key
 LLM_PROVIDER=sarvam
 SARVAM_API_KEY=your-sarvam-key
 SIGNATURE=Your Name
-RESUME_PATH=C:/full/path/to/your_resume.pdf
+RESUME_PATH=resume/resume.pdf
 GMAIL_SENDER_ADDRESS=you@gmail.com
 GMAIL_CLIENT_SECRETS_PATH=C:/full/path/to/client_secret.json
 ```
 
-The port is **5433**, not 5432 — that is the Docker database you just
-started. Leave the two `GMAIL_` lines blank for now; the app's own setup
-guide tells you what to put there.
+Notes:
+
+- The database port is **5433**, not the 5432 in the example file — 5433
+  is the Docker database you just started.
+- `RESUME_PATH` can be relative to `backend/`, like above, or a full
+  path. The folder `backend/resume/` is already git-ignored.
+- The two `GMAIL_` lines can stay blank for now. The app's own setup
+  guide tells you what goes there.
+- Leave the rest alone. `SARVAM_MODEL`, `DAILY_SEND_CAP` and the
+  `GEMINI_` lines already have working defaults, and you only need a
+  Gemini key if you set `LLM_PROVIDER=gemini`.
 
 **4. Create the tables and run the API**
 

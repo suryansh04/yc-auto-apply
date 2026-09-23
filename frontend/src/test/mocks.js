@@ -277,6 +277,19 @@ export function mockGenericLine({ notes = [], highlights = null } = {}) {
   return spy
 }
 
+/** POST /api/outreach/:id/insight - the company paragraph written from
+ *  the company's own YC description (operator request 2026-09-23). */
+export function mockWriteInsight({ paragraph = null, why = '', unavailable = null } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/insight', ({ params }) => {
+      spy(Number(params.id))
+      return HttpResponse.json({ paragraph, why, unavailable })
+    }),
+  )
+  return spy
+}
+
 /** POST /api/outreach/:id/generic-line refused - a letter that does not
  *  have the assembled shape, so there is no paragraph to swap. */
 export function mockGenericLineFailure(detail = 'edit it by hand') {

@@ -35,6 +35,7 @@ import {
   useQueue,
   useRedraft,
   useSuggestFixes,
+  useWriteInsight,
   useReject,
 } from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -130,6 +131,20 @@ export default function ReviewQueue() {
     // they are. The hover cards just say there is no rewrite.
     onError: () => setRewrites({}),
   })
+  // The company paragraph, written from the company's own YC page
+  // (operator request 2026-09-23). Asked for only when the operator opens
+  // the AI suggestion tab on that paragraph - it costs a model call, and
+  // most letters are approved without anyone opening it.
+  const writeInsight = useWriteInsight({
+    onSuccess: (data, id) => {
+      setInsight(data)
+      setInsightId(id)
+    },
+    onError: (err, id) => {
+      setInsight({ paragraph: null, unavailable: err.message })
+      setInsightId(id)
+    },
+  })
   // Swapping in the generic company line is an edit, so its result is
   // the checks' verdict on the new text - shown exactly where a save's
   // would be.
@@ -141,6 +156,8 @@ export default function ReviewQueue() {
       setActiveNote(null)
       setRewrites({})
       setSuggestedId(null)
+      setInsight(null)
+      setInsightId(null)
     },
   })
   const checkDraft = useCheckDraft({
@@ -192,6 +209,8 @@ export default function ReviewQueue() {
   // `checkHighlights` - never matched on text, so a rewrite cannot land
   // on the wrong note - and which draft it was asked about.
   const [rewrites, setRewrites] = useState({})
+  const [insight, setInsight] = useState(null)
+  const [insightId, setInsightId] = useState(null)
   const [suggestedId, setSuggestedId] = useState(null)
 
   // Prune settled ids the backend has already confirmed (no longer in
@@ -471,6 +490,19 @@ export default function ReviewQueue() {
       onError: (err) => setActionError(err.message),
     })
   }
+  // Asked for on demand: it costs a model call, so only opening the AI
+  // suggestion tab on that paragraph pays for one. Asking twice is how
+  // the operator gets a second angle, so a repeat is never suppressed.
+  function askForInsight() {
+    if (!writeInsight.isPending) writeInsight.mutate(current.outreach_id)
+  }
+  // Accept it: the paragraph the API wrote goes in where the current one
+  // is, and `edit` re-runs the checks over the result.
+  function useInsightNow(paragraph) {
+    const body = current.body ?? ''
+    if (!paragraph || !current.insight_text || !body.includes(current.insight_text)) return
+    saveEdit(current.subject ?? '', body.replace(current.insight_text, paragraph))
+  }
   const rawCheckMarks = checkedId === current.outreach_id ? checkHighlights : []
   // A check mark that landed on the company paragraph carries the
   // generic line too. It wins the overlap with the paragraph's own mark,
@@ -479,11 +511,19 @@ export default function ReviewQueue() {
   const coversInsight = (quote) =>
     Boolean(current.insight_text && quote &&
       (quote.includes(current.insight_text) || current.insight_text.includes(quote)))
+  // Everything the company paragraph's card offers, wherever it appears:
+  // on its own sky mark, or on a check mark that swallowed it.
+  const insightOffer = {
+    generic: current.generic_line,
+    busy: genericLine.isPending,
+    onUseGeneric: useGenericNow,
+    insight: insightId === current.outreach_id ? insight : null,
+    insightPending: writeInsight.isPending,
+    onAskInsight: askForInsight,
+    onUseInsight: useInsightNow,
+  }
   const checkMarks = rawCheckMarks.map((mark) =>
-    coversInsight(mark.quote)
-      ? { ...mark, generic: current.generic_line, busy: genericLine.isPending,
-          onUseGeneric: useGenericNow }
-      : mark,
+    coversInsight(mark.quote) ? { ...mark, ...insightOffer } : mark,
   )
   // The company paragraph, marked as itself. Appended after the checks so
   // it keeps the highest index - `activeIndex` and the suggestions panel
@@ -496,9 +536,7 @@ export default function ReviewQueue() {
           kind: 'insight',
           message: 'This is the paragraph about them - the only part the letter researches.',
           quote: current.insight_text,
-          generic: current.generic_line,
-          busy: genericLine.isPending,
-          onUseGeneric: useGenericNow,
+          ...insightOffer,
         },
       ]
     : checkMarks

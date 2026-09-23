@@ -1,6 +1,6 @@
 // Wrapping the words a check objects to (operator request 2026-09-22).
 import { expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { markUp } from './marks'
 
@@ -179,6 +179,7 @@ it('marks the company paragraph in its own colour, not the checks\u2019', async 
 it('hovering the company paragraph offers the generic line', async () => {
   show('One thing. You built a voice layer. Another.', [INSIGHT])
   await hover(screen.getByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('tab', { name: /generic/i }))
   expect(await screen.findByText('I came across Vahan while looking for teams.')).toBeInTheDocument()
 })
 
@@ -232,10 +233,54 @@ it('the company paragraph offers an AI rewrite and the generic line as two tabs'
   expect(await screen.findByText('I came across Vahan while looking for teams.')).toBeInTheDocument()
 })
 
-it('opens on the generic tab when there is no AI rewrite yet', async () => {
-  show('One thing. You built a voice layer. Another.', [INSIGHT])
+// --- writing the paragraph from the company's own YC page ----------------
+//
+// Operator request (2026-09-23): "when i am clicking ai suggestion there
+// is no ai suggestion coming ... extract the product description of the
+// particular yc company, pass it to sarvam and make a similar line".
+
+const WRITTEN = 'I like how Loop puts doctors and insurers on the same side.'
+
+it('asks for a paragraph when the AI tab is opened, and not before', async () => {
+  // It costs a model call, and most letters are approved without anyone
+  // opening this card.
+  const onAskInsight = vi.fn()
+  show('One thing. You built a voice layer. Another.', [{ ...INSIGHT, onAskInsight }])
+  expect(onAskInsight).not.toHaveBeenCalled()
   await hover(screen.getByLabelText(/paragraph about them/i))
-  expect(await screen.findByText('I came across Vahan while looking for teams.')).toBeInTheDocument()
+  await waitFor(() => expect(onAskInsight).toHaveBeenCalledTimes(1))
+})
+
+it('shows the paragraph it wrote, and puts it in on request', async () => {
+  const onUseInsight = vi.fn()
+  show('One thing. You built a voice layer. Another.', [
+    { ...INSIGHT, onUseInsight, onAskInsight: vi.fn(),
+      insight: { paragraph: WRITTEN, why: 'the choice inside the product' } },
+  ])
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  expect(await screen.findByText(WRITTEN)).toBeInTheDocument()
+  expect(screen.getByText(/the choice inside the product/i)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: /^use this$/i }))
+  expect(onUseInsight).toHaveBeenCalledWith(WRITTEN)
+})
+
+it('says why there is nothing rather than looking broken', async () => {
+  // "nothing to offer" and "the key is missing" must not look the same.
+  show('One thing. You built a voice layer. Another.', [
+    { ...INSIGHT, onAskInsight: vi.fn(),
+      insight: { paragraph: null, unavailable: 'SARVAM_API_KEY is not set' } },
+  ])
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  expect(await screen.findByText(/SARVAM_API_KEY is not set/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument()
+})
+
+it('says it is reading while the call is in flight', async () => {
+  show('One thing. You built a voice layer. Another.', [
+    { ...INSIGHT, onAskInsight: vi.fn(), insightPending: true },
+  ])
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  expect(await screen.findByText(/what they wrote about themselves/i)).toBeInTheDocument()
 })
 
 it('says so instead of offering a swap that would change nothing', async () => {
@@ -245,6 +290,7 @@ it('says so instead of offering a swap that would change nothing', async () => {
     { ...INSIGHT, quote: 'I came across Vahan while looking for teams.' },
   ], {})
   await hover(screen.getByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('tab', { name: /generic/i }))
   expect(await screen.findByText(/already using it/i)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /use a generic line/i })).not.toBeInTheDocument()
 })

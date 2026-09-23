@@ -193,6 +193,33 @@ class Reviser(Protocol):
 
 
 @runtime_checkable
+class InsightWriter(Protocol):
+    """Operator request (2026-09-23): the company paragraph, written from
+    the company's own YC description.
+
+    `Reviser` above only ever REWRITES a span a check flagged, so on the
+    one paragraph that is about the founder's company it had nothing to
+    say - that paragraph is usually fine as English, and what is wrong
+    with it is that it could be about any company. This asks a different
+    question: `write(context)` takes
+    `{company_name, one_liner, description}` - the text the founders
+    wrote for their own YC page - and answers
+    `{paragraph, why}`, the paragraph to put in the letter and one short
+    line for the hover card.
+
+    Advisory, like `Reviser` and `Critic`: the operator reads it and
+    decides. Nothing here writes to a draft, and a `write` that raises
+    must leave the letter exactly as it was - see
+    `app.application.write_insight.run_insight_writer`. An EMPTY
+    paragraph is a legitimate answer, and the prompt asks for one when
+    the description is too thin to say anything true: a generic line
+    already exists for that case, and inventing a detail about a
+    stranger's company is worse than having nothing to add."""
+
+    def write(self, context: dict) -> dict: ...  # {paragraph, why}
+
+
+@runtime_checkable
 class ResumeParser(Protocol):
     def parse(self, raw_text: str) -> list[dict]: ...  # [{kind, text, source_span}]
 

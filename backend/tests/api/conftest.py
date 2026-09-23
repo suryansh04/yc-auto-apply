@@ -86,6 +86,42 @@ def _no_real_parser(repos):
     return repos.parser
 
 
+class _OfflineInsightWriter:
+    """Stands in for a real `InsightWriter`, for the same reason
+    `_OfflineReviser` and `_OfflineParser` exist: `POST
+    /api/outreach/{id}/insight` builds a real adapter when
+    `Repos.insight_writer` is None, and `backend/.env` is read even under
+    `env -i`."""
+
+    def write(self, context):
+        raise AssertionError("an offline test reached the insight-writer seam")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_insight_writer(repos):
+    repos.insight_writer = _OfflineInsightWriter()
+    return repos.insight_writer
+
+
+@pytest.fixture
+def fake_insight_writer(repos):
+    """An `InsightWriter` that answers with whatever the test sets on
+    `.answer`, and records the context it was handed."""
+
+    class FakeInsightWriter:
+        def __init__(self):
+            self.answer = {"paragraph": "", "why": ""}
+            self.context = None
+
+        def write(self, context):
+            self.context = context
+            return self.answer
+
+    writer = FakeInsightWriter()
+    repos.insight_writer = writer
+    return writer
+
+
 @pytest.fixture
 def fake_parser(repos):
     """A `ResumeParser` that answers with whatever the test sets on

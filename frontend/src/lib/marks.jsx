@@ -18,7 +18,7 @@
 // may never arrive at all - an unconfigured key, a model with nothing
 // better to offer - so the card is built to read correctly with just the
 // note in it.
-import { Fragment } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -73,26 +73,83 @@ function Card({ hit, suggestion, pending, onApply }) {
  * be said better?" and "can this be said at all?" - so they are two
  * tabs, not one stacked card that made the choice look like a sequence.
  *
- * The AI tab is the only one that can be empty: the rewrite arrives
- * after the mark, and a model with nothing sharper to offer is supposed
- * to say nothing. The generic tab always has its line, because that line
- * is written down.
+ * The AI tab writes the paragraph again from the company's own YC
+ * description (operator request 2026-09-23). It used to show the
+ * reviser's rewrite, which had nothing to offer here: the reviser only
+ * answers spans a mechanical check flagged, and what is wrong with this
+ * paragraph is never its English - it is that it could be about any
+ * company. The call is made when the tab is opened, never before, because
+ * it costs a model call and most letters are approved without anyone
+ * opening it. The generic tab always has its line, because that line is
+ * written down.
  */
 function InsightCard({ hit, suggestion, pending, onApply }) {
   // `hit.quote` IS the paragraph as it currently stands, so this is the
   // honest answer to "would pressing this change anything?".
   const alreadyGeneric = hit.generic != null && hit.quote?.trim() === hit.generic.trim()
+  const [tab, setTab] = useState('ai')
+  const written = hit.insight?.paragraph
+  // Opening the tab is the request. Asked once per card unless the
+  // operator presses for another - `onAskInsight` guards the repeat.
+  useEffect(() => {
+    if (tab === 'ai' && hit.onAskInsight && !hit.insight && !hit.insightPending) {
+      hit.onAskInsight()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab])
   return (
     <div className="grid gap-2 font-sans">
       <p className="text-sm leading-snug font-medium">{hit.message}</p>
-      <Tabs defaultValue={suggestion ? 'ai' : 'generic'}>
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="w-full">
           <TabsTrigger value="ai">AI suggestion</TabsTrigger>
           <TabsTrigger value="generic">Generic</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ai" className="grid gap-2">
-          {suggestion ? (
+          {written ? (
+            <>
+              <div className="rounded-md border border-amber-400/70 bg-amber-50 p-2 text-sm dark:border-amber-500/40 dark:bg-amber-950/40">
+                {written}
+              </div>
+              {hit.insight.why && (
+                <p className="text-muted-foreground text-xs leading-snug">{hit.insight.why}</p>
+              )}
+              <div className="flex items-center gap-2">
+                {hit.onUseInsight && (
+                  <Button size="sm" className="w-fit" disabled={hit.busy}
+                          onClick={() => hit.onUseInsight(written)}>
+                    Use this
+                  </Button>
+                )}
+                {hit.onAskInsight && (
+                  <Button size="sm" variant="ghost" className="w-fit"
+                          disabled={hit.insightPending} onClick={hit.onAskInsight}>
+                    Another
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : hit.insightPending ? (
+            <p className="text-muted-foreground flex items-center gap-2 text-xs">
+              <Spinner className="size-3" />
+              Reading what they wrote about themselves&hellip;
+            </p>
+          ) : hit.insight ? (
+            <>
+              {/* Never silence: "nothing to offer" and "the key is
+                  missing" must not look the same. */}
+              <p className="text-muted-foreground text-xs leading-snug">
+                {hit.insight.unavailable || 'Nothing specific enough to offer.'}
+              </p>
+              {hit.onAskInsight && (
+                <Button size="sm" variant="outline" className="w-fit"
+                        onClick={hit.onAskInsight}>
+                  Try again
+                </Button>
+              )}
+            </>
+          ) : suggestion ? (
             <>
               <div className="rounded-md border border-amber-400/70 bg-amber-50 p-2 text-sm dark:border-amber-500/40 dark:bg-amber-950/40">
                 {suggestion.replacement}
@@ -113,8 +170,7 @@ function InsightCard({ hit, suggestion, pending, onApply }) {
             </p>
           ) : (
             <p className="text-muted-foreground text-xs leading-snug">
-              Nothing sharper to offer &mdash; it was asked, and it had nothing better
-              than what is already there.
+              Nothing to offer yet.
             </p>
           )}
         </TabsContent>

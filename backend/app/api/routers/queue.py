@@ -23,12 +23,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.api.deps import Repos, build_reviser, get_repos
+from app.api.deps import Repos, build_insight_writer, build_reviser, get_repos
 from app.api.schemas import (
     CheckIn,
     CheckOut,
     EditIn,
     HighlightOut,
+    InsightOut,
     OkOut,
     QueueItemOut,
     SuggestOut,
@@ -36,6 +37,7 @@ from app.api.schemas import (
 )
 from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
 from app.application.suggest_fixes import run_reviser
+from app.application.write_insight import run_insight_writer
 from app.domain import letter
 from app.domain.compose import compose_wire_text, first_name
 from app.domain.highlight import highlights_for
@@ -275,6 +277,56 @@ def suggest(outreach_id: int, payload: CheckIn | None = None,
         )
         for s in run_reviser(reviser, body, highlights, company_name)
     ])
+
+
+@router.post("/outreach/{outreach_id}/insight", response_model=InsightOut)
+def write_insight(outreach_id: int, repos: Repos = Depends(get_repos)) -> InsightOut:
+    """A company paragraph written from the company's own YC description.
+
+    Operator request (2026-09-23): the **AI suggestion** tab on that
+    paragraph was asking the reviser, which only rewrites what a check
+    flagged - so on a paragraph that is fine as English it had nothing to
+    offer. This asks the other question: read what the founders wrote
+    about their own company (`companies.long_description`, synced from
+    the YC dataset) and write the paragraph again.
+
+    Advice, like `/suggest`: writes nothing, refuses nothing. Every way of
+    having nothing to offer - no key, no description, an unusable answer -
+    answers 200 with a null paragraph and a line saying why, never an
+    error that would take the letter off the screen with it.
+    """
+    try:
+        item = _use_case(repos).load(outreach_id)
+    except (OutreachNotFound, ValueError):
+        raise HTTPException(404, "no such outreach")
+
+    company = item.company
+    description = (getattr(company, "long_description", None) or "").strip()
+    if not description:
+        return InsightOut(unavailable="this company has no description on its YC page to write from")
+
+    # `getattr`, not `repos.insight_writer`: the offline `FakeRepos`
+    # carries the attribute only when a test injected one, and a test that
+    # did not inject one must take the unavailable path rather than crash.
+    writer = getattr(repos, "insight_writer", None)
+    if writer is None:
+        try:
+            writer = build_insight_writer(get_settings())
+        except RuntimeError as exc:
+            # A setting NAME ("SARVAM_API_KEY is not set"), never a key.
+            return InsightOut(unavailable=str(exc))
+
+    answer = run_insight_writer(
+        writer,
+        company_name=getattr(company, "name", None) or "",
+        one_liner=getattr(company, "one_liner", None) or "",
+        description=description,
+    )
+    if answer is None:
+        return InsightOut(
+            unavailable="nothing specific enough to offer from what they wrote about themselves"
+        )
+    return InsightOut(paragraph=answer["paragraph"], why=answer["why"])
 
 
 @router.post("/outreach/{outreach_id}/approve", response_model=OkOut)

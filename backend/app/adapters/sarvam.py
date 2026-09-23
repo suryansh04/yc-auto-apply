@@ -42,13 +42,16 @@ from app.adapters.gemini import (
     _CRITIC_SYSTEM,
     _DRAFTER_SYSTEM,
     _FIRST_EMAIL_SYSTEM,
+    _INSIGHT_SYSTEM,
     _PARSER_PROMPT,
     _REVISER_SYSTEM,
     _decode_json,
+    _insight,
     _revisions,
     build_classify_prompt,
     build_critic_prompt,
     build_draft_prompt,
+    build_insight_prompt,
     build_revise_prompt,
     first_email_source,
 )
@@ -187,6 +190,16 @@ REVISION_JSON_SCHEMA: dict[str, Any] = {
         },
     },
     "required": ["revisions"],
+    "additionalProperties": False,
+}
+
+INSIGHT_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "paragraph": {"type": "string"},
+        "why": {"type": "string"},
+    },
+    "required": ["paragraph", "why"],
     "additionalProperties": False,
 }
 
@@ -444,3 +457,28 @@ class SarvamReviser:
             temperature=0.3,
         )
         return _revisions(_decode_json(content, "reviser"), "reviser")
+
+
+class SarvamInsightWriter:
+    """Real `InsightWriter` port over Sarvam - the provider that actually
+    runs (`LLM_PROVIDER=sarvam`). Same contract as `GeminiInsightWriter`,
+    sharing the same prompt (`_INSIGHT_SYSTEM`/`build_insight_prompt`,
+    imported from `app.adapters.gemini`) so both providers write the
+    company paragraph under exactly the same rules. Advisory only:
+    nothing here changes a draft."""
+
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, **chat_kwargs):
+        self._chat = _SarvamChat(api_key, model, **chat_kwargs)
+
+    def write(self, context: dict) -> dict:
+        content = self._chat.complete(
+            "insight",
+            [
+                {"role": "system", "content": _INSIGHT_SYSTEM},
+                {"role": "user", "content": build_insight_prompt(context)},
+            ],
+            INSIGHT_JSON_SCHEMA,
+            "insight",
+            temperature=0.7,
+        )
+        return _insight(_decode_json(content, "insight"), "insight")

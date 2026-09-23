@@ -21,6 +21,7 @@ import {
   mockApproveFailure,
   mockEdit,
   mockEditFailure,
+  mockWriteInsight,
   mockQueue,
   mockQueueSequence,
   mockRedraft,
@@ -876,6 +877,9 @@ it('swaps the generic line in from the paragraph itself', async () => {
   const generic = mockGenericLine({ notes: [] })
   render(<ReviewQueue />)
   await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  // The card opens on the AI tab now (2026-09-23), which writes the
+  // paragraph from the company's YC page; the generic line is the other tab.
+  await userEvent.click(await screen.findByRole('tab', { name: /generic/i }))
   const buttons = await screen.findAllByRole('button', { name: /use a generic line/i })
   await userEvent.click(buttons[buttons.length - 1])
   await waitFor(() => expect(generic).toHaveBeenCalledWith(1))
@@ -914,4 +918,50 @@ it('keeps the generic option on a check mark that covers the company paragraph',
   const buttons = await screen.findAllByRole('button', { name: /use a generic line/i })
   await userEvent.click(buttons[buttons.length - 1])
   await waitFor(() => expect(generic).toHaveBeenCalledWith(1))
+})
+
+
+// --- the company paragraph, written from their YC page --------------------
+//
+// Operator request (2026-09-23): "when i am clicking ai suggestion there
+// is no ai suggestion coming ... extract the product description of the
+// particular yc company, pass it to sarvam and make a similar line". The
+// AI tab was asking the reviser, which only rewrites spans a check
+// flagged - so on a paragraph that is fine as English it had nothing.
+
+const INSIGHT_LETTER = {
+  wire_text: ['Hi Akash,', '', 'You built a voice layer.', '', 'Suryansh'].join('\n'),
+  body: 'You built a voice layer.',
+  insight_text: 'You built a voice layer.',
+}
+const WRITTEN = 'I like how you put the job and the worker in the same phone call.'
+
+it('writes the company paragraph from their YC page when the AI tab is opened', async () => {
+  mockQueue([item(INSIGHT_LETTER)])
+  const write = mockWriteInsight({ paragraph: WRITTEN, why: 'the choice inside the product' })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  await waitFor(() => expect(write).toHaveBeenCalledWith(1))
+  expect(await screen.findByText(WRITTEN)).toBeInTheDocument()
+})
+
+it('puts the written paragraph into the letter on Use this', async () => {
+  mockQueue([item(INSIGHT_LETTER)])
+  mockWriteInsight({ paragraph: WRITTEN })
+  const edit = mockEdit()
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('button', { name: /^use this$/i }))
+  await waitFor(() => expect(edit).toHaveBeenCalled())
+  // The body it saves is the letter with that paragraph swapped in - the
+  // wire text's greeting and signature are never sent back.
+  expect(edit.mock.calls[0][1].body).toBe(WRITTEN)
+})
+
+it('says why there is nothing instead of looking broken', async () => {
+  mockQueue([item(INSIGHT_LETTER)])
+  mockWriteInsight({ unavailable: 'this company has no description on its YC page to write from' })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  expect(await screen.findByText(/no description on its YC page/i)).toBeInTheDocument()
 })

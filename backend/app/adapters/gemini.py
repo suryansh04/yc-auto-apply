@@ -1092,3 +1092,188 @@ class GeminiReviser:
             ),
         )
         return _revisions(_decode_json(response.text, "reviser"), "reviser")
+
+
+# --- the company paragraph, written from the YC description --------------
+#
+# Operator request (2026-09-23): the AI suggestion tab on the company
+# paragraph had nothing to offer, because the reviser only ever REWRITES a
+# flagged span and this span is usually fine as English. What the operator
+# actually wants there is a fresh paragraph written from the company's own
+# YC description - the block of text the founders wrote themselves, which
+# is already synced into `companies.long_description` (148 companies, 139
+# of them non-empty, 542 characters on average).
+#
+# The gold-standard example below is the operator's own, quoted verbatim
+# from the request, and the two after it are invented companies - a real
+# one would teach the model to reach for that company's facts.
+
+INSIGHT_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "paragraph": {"type": "STRING"},
+        "why": {"type": "STRING"},
+    },
+    "required": ["paragraph"],
+}
+
+_INSIGHT_SYSTEM = """A student is sending a cold email to the founder of a startup, asking for a
+software engineering internship. Every other paragraph of that email is
+already written and is about the student. You write ONE paragraph: the
+only part of the letter that is about the founder's company.
+
+Your one source is the description the founders wrote for their own Y
+Combinator page, which you are given below along with the company name and
+its one-line summary. You know nothing else about this company, and you
+must not pretend to.
+
+THE SHAPE, in three sentences:
+
+1. What you noticed about the way they built it. Not what the product is -
+   the CHOICE inside it. Start from the structure: who they put on the same
+   side, what they refused to charge for, what they made unlimited, what
+   they moved from one party to another.
+2. How that problem normally works, and why the ordinary version is bad for
+   the actual person living with it. Plain language, the way you would
+   explain it to a friend.
+3. What they did instead, and one short clause on why that is the kind of
+   thing you want to build.
+
+THE STANDARD. This is the paragraph to match, for a health insurance
+company whose description says they combine primary care with insurance and
+give employees unlimited clinic visits:
+
+  I like how Loop puts doctors and insurers on the same side. Most health
+  insurance in India only kicks in when you land in a hospital, so people
+  pay for it every year and barely use it. You turned it into something
+  people actually use day to day, and that's the kind of thing I want to
+  build.
+
+Notice what it does: one structural observation, one sentence about the
+ordinary world, one about what they changed. It quotes no numbers. It
+praises nothing. It reads like a person thinking out loud.
+
+TWO MORE, for companies that are not health insurance:
+
+  Company: Halt (invented), a tool that reviews infrastructure changes
+  before they are applied.
+  I like that Halt reads the change before it runs rather than paging
+  someone after it breaks. Most teams find out their config was wrong from
+  an outage in the middle of the night, which means the person who has to
+  fix it is the person least able to think. Catching it while someone is still awake and looking
+  at the diff is a much better place to put the work.
+
+  Company: Kirana Books (invented), bookkeeping for small shop owners over
+  WhatsApp.
+  I like that you let shop owners keep their books in the app they already
+  have open all day. Every other option asks a shopkeeper to learn
+  accounting software in a language that is not theirs, so the ledger ends
+  up back in a paper notebook. Meeting people inside the habit they already
+  have is the harder engineering problem and the right one.
+
+HARD RULES:
+
+- Three sentences. Four only if the third would otherwise run long. One
+  paragraph, 45 to 85 words.
+- Plain text. No markdown, no bold, no bullets, no headings, no em dashes,
+  no smart quotes, no semicolons.
+- Address them as "you" and "your". Name the company at most twice, and
+  never as "your company".
+- Every fact comes from the description. If it does not say how something
+  works, do not guess. Never invent a feature, a customer, a launch, a
+  competitor, a funding round or a person.
+- NO NUMBERS from the description. No revenue, growth rate, customer count,
+  member count, market size, CAGR, pricing, margins, headcount or funding.
+  Those are facts for investors, and repeating them reads as reciting their
+  fundraising page back at them.
+- Never mention Y Combinator, the YC page, their website, an article, a
+  post, or how the student found them. No "I came across", "I saw", "I
+  read", "while looking".
+- Never claim to have used, signed up for, tested, bought or been a
+  customer of the product.
+- No praise words and no hype: impressive, amazing, incredible, exciting,
+  excited, passionate, love what you are doing, game-changing,
+  revolutionary, disrupting, cutting edge, best-in-class, "the X space",
+  leverage, synergy, resonates, aligns, "truly".
+- No questions. No advice about what they should build next. No criticism
+  of their product, and no telling them what their own market is.
+- Do not mention the internship, the student's skills, projects, resume or
+  availability. Other paragraphs do that, and repeating it wastes the only
+  paragraph that is about them.
+- The last clause names what YOU would want to work on, and it has to be
+  about THIS company. "which is the sort of problem I want to work on" and
+  "that's the kind of thing I want to build" are formulas that fit any
+  company, so they are worth nothing - end on the specific thing instead
+  (the interface, the routing, the fact that the boring half is now a
+  machine's job). Never copy the example's closing words.
+- Write like a smart twenty-year-old talking, not like a brochure. Short
+  words. Contractions are fine.
+
+If the description is too thin to say anything true and specific - a single
+marketing line with no mechanism in it - return an EMPTY paragraph rather
+than something vague. A generic line is already written for that case, and
+inventing a detail is far worse than having nothing to add.
+
+Return JSON: {"paragraph": "...", "why": "one short line naming what you
+latched onto"}. `why` is for the student, not the founder, and never
+appears in the email."""
+
+
+def build_insight_prompt(context: dict) -> str:
+    """The company's own words, for `InsightWriter.write`."""
+    description = str(context.get("description") or "").strip()
+    lines = [
+        "COMPANY",
+        str(context.get("company_name") or "unknown"),
+        "",
+        "ONE-LINE SUMMARY",
+        str(context.get("one_liner") or "(none given)"),
+        "",
+        "WHAT THE FOUNDERS WROTE ABOUT IT",
+        description or "(nothing given)",
+        "",
+        "Write the paragraph.",
+    ]
+    return "\n".join(lines)
+
+
+def _insight(data: Any, stage: str) -> dict:
+    """The paragraph out of a response, whatever shape it arrived in.
+    Shared by both providers, like `_revisions` above."""
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{stage}: expected a JSON object")
+    for key in ("paragraph", "insight", "text"):
+        if key in data:
+            return {"paragraph": str(data[key] or ""), "why": str(data.get("why") or "")}
+    raise ValueError(f"{stage}: response has no paragraph")
+
+
+class GeminiInsightWriter:
+    """Real `InsightWriter` port. Writes the company paragraph from the
+    company's own YC description; decides nothing about the letter.
+    Whether the answer is usable is `app.application.write_insight`'s
+    call, the same division as `GeminiReviser` above."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def write(self, context: dict) -> dict:
+        response = _generate_with_retry(
+            self._client, self._sleep, "insight",
+            model=self._model,
+            contents=build_insight_prompt(context),
+            config=types.GenerateContentConfig(
+                system_instruction=_INSIGHT_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=INSIGHT_SCHEMA,
+                # Higher than the reviser's 0.3: this is writing, not
+                # correcting, and the same company asked twice should be
+                # able to come back with a different angle.
+                temperature=0.7,
+            ),
+        )
+        return _insight(_decode_json(response.text, "insight"), "insight")

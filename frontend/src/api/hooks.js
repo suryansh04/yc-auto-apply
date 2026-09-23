@@ -340,6 +340,23 @@ export function useGenericLine(options = {}) {
   })
 }
 
+/**
+ * POST /api/outreach/{id}/insight - a company paragraph written from the
+ * company's own YC description.
+ *
+ * Operator request (2026-09-23): the AI suggestion tab on that paragraph
+ * was asking the reviser, which only rewrites what a check flagged, so it
+ * had nothing to offer. This asks the other question. Advice like
+ * `useSuggestFixes`: it never writes, and "nothing to offer" comes back
+ * as a 200 with a reason rather than an error.
+ */
+export function useWriteInsight(options = {}) {
+  return useMutation({
+    mutationFn: (id) => apiPost(`/outreach/${id}/insight`),
+    ...options,
+  })
+}
+
 export function useSuggestFixes(options = {}) {
   return useMutation({
     mutationFn: ({ id, subject, body }) =>

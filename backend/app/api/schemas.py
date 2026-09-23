@@ -193,6 +193,24 @@ class SuggestOut(BaseModel):
     unavailable: str | None = None
 
 
+class InsightOut(BaseModel):
+    """A company paragraph written from the company's own YC description.
+
+    Operator request (2026-09-23). Advice like `SuggestOut` above: the
+    route writes nothing, and every way of having nothing to offer
+    answers 200 with `paragraph` null rather than an error - the letter
+    is already on screen and must stay there.
+
+    `unavailable` says why there is nothing, in words the operator can
+    act on: a missing SETTING name (never its value), a company with no
+    description on its YC page, or a model that answered with something
+    unusable."""
+
+    paragraph: str | None = None
+    why: str = ""
+    unavailable: str | None = None
+
+
 class CheckOut(BaseModel):
     """What the checks say about a draft. Advice, not a gate (operator
     decision, 2026-09-22): the route writes nothing and refuses nothing -

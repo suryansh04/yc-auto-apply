@@ -66,6 +66,10 @@ class Repos:
     # Same seam and same reason as `sender`/`reviser` above: nothing in
     # the offline suite can reach a real provider.
     parser: Any = None
+    # Same seam and same reason as `reviser`/`parser` above: None in
+    # production, injected by tests, so no offline test can reach a
+    # provider by forgetting to inject one.
+    insight_writer: Any = None
 
 
 def _session() -> Session:
@@ -281,6 +285,29 @@ def build_reviser(settings: Settings):
         raise RuntimeError("GEMINI_API_KEY is not set")
     client = genai.Client(api_key=settings.gemini_api_key)
     return GeminiReviser(client, model=settings.gemini_model)
+
+
+def build_insight_writer(settings: Settings):
+    """The same LLM-provider switch as `build_reviser` above, for an
+    `InsightWriter` adapter - the company paragraph written from the
+    company's own YC description. Advisory in the same way: a caller that
+    cannot build one (missing key) shows the letter without an offer
+    rather than failing the request."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamInsightWriter(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiInsightWriter
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiInsightWriter(client, model=settings.gemini_model)
 
 
 def require_send_config(settings: Settings) -> list[str]:

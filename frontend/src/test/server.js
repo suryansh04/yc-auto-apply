@@ -14,4 +14,10 @@ export const server = setupServer(
   http.post('/api/outreach/:id/suggest', () =>
     HttpResponse.json({ suggestions: [], unavailable: null }),
   ),
+  // Same reason: opening the company paragraph's card asks for a
+  // paragraph written from the company's YC page. `mockWriteInsight`
+  // overrides this where a test is about that offer.
+  http.post('/api/outreach/:id/insight', () =>
+    HttpResponse.json({ paragraph: null, why: '', unavailable: null }),
+  ),
 )

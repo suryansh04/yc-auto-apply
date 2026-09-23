@@ -23,10 +23,10 @@ DESCRIPTION = (
 # what a template answer looks like (see `_FORMULA_TELLS`), and a test
 # fixture that trips the check it is testing teaches nothing.
 GOOD = (
-    "You could have sold another policy and left the clinic out of it, and you did not. "
-    "Health cover in India usually pays out only when someone is admitted, so the years "
-    "where nothing goes badly wrong are years of paying for nothing. Putting the everyday "
-    "visits inside the cover changes what the person actually gets for it."
+    "I really like how you're not just selling a policy and leaving the clinic out of it. "
+    "Health cover here usually pays out only when someone is admitted, so the years where "
+    "nothing goes badly wrong are years of paying for nothing. Putting the everyday visits "
+    "inside the cover changes what a person actually gets for it."
 )
 TEMPLATE = (
     "I like that you put doctors and insurers on the same side. Most health insurance in "
@@ -96,7 +96,7 @@ def test_an_empty_paragraph_is_a_legitimate_answer_and_is_dropped():
 
 def test_a_number_from_their_yc_page_is_refused():
     assert "number" in unusable_reason(GOOD.replace("the years", "the 22 years"))
-    assert "number" in unusable_reason(GOOD.replace("usually", "70% of the time"))
+    assert "number" in unusable_reason(GOOD.replace("usually", "70 percent of the time"))
 
 
 def test_a_company_name_with_a_digit_is_not_a_number():
@@ -114,7 +114,7 @@ def test_the_tells_the_letter_bans_everywhere_else_are_banned_here():
 
 def test_markdown_is_refused_because_the_letter_is_plain_text():
     assert unusable_reason("**Loop** " + GOOD) == "not plain text"
-    assert unusable_reason(GOOD.replace("and you did not.", "and you did not —")) == "not plain text"
+    assert unusable_reason(GOOD.replace("the clinic", "the clinic —")) == "not plain text"
 
 
 def test_it_has_to_be_one_paragraph():
@@ -127,10 +127,30 @@ def test_length_is_bounded_at_both_ends():
     assert MIN_WORDS < len(GOOD.split()) < MAX_WORDS
 
 
-def test_the_operators_own_example_passes():
-    """The paragraph he asked for is the standard. If the rules here
-    would drop it, the rules are wrong."""
+def test_the_voice_the_operator_asked_for_passes():
+    """"I really like how you are not dumping every route into a messy
+    list and instead actually built a dedicated platform" - his words for
+    what this should sound like. If the rules here would drop it, the
+    rules are wrong."""
     assert unusable_reason(GOOD) is None
+    assert unusable_reason(
+        "I really like how you're not dumping every route into one messy list and instead "
+        "actually built a dedicated platform for intercity buses. Most aggregators are happy "
+        "being a search box, so nobody owns whether the bus runs on time. Running the "
+        "schedule yourself means the person waiting at the pickup point has someone who cares."
+    ) is None
+
+
+def test_the_case_study_symmetry_is_refused():
+    """Live finding (2026-09-23): "no this looks properly ai generated" -
+    a formal setup, "Usually ...", then "Instead you ...". The symmetry
+    is the tell, not the vocabulary."""
+    assert "template" in unusable_reason(
+        "You could have just listed operators without touching their schedules, and you did "
+        "not. Usually an aggregator dumps every route into one messy list and leaves the "
+        "operator to figure out timing alone. Instead you built a dedicated platform that "
+        "sets schedules for them."
+    )
 
 
 # --- the same paragraph for every company ---------------------------------
@@ -175,7 +195,7 @@ def test_it_gives_up_after_the_second_template():
 def test_other_rejections_are_not_retried():
     # A model that quoted a number or invented a detail is not more
     # trustworthy on the second ask; only the template is worth another.
-    writer = TwoAnswers(GOOD.replace("years", "40 years"), GOOD)
+    writer = TwoAnswers(GOOD.replace("the years", "the 40 years"), GOOD)
     assert _run(writer) is None
     assert len(writer.contexts) == 1
 

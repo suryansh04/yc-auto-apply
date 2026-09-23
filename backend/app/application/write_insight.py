@@ -91,7 +91,17 @@ _DISCOVERY_TELLS = (
 # own Loop Health line uses "on the same side" and is not affected: that
 # line is already written into his letter, and what is banned here is a
 # MODEL reaching for it again on a company it does not fit.
+# Round two (2026-09-23), same complaint about a different template: the
+# operator read "You could have just listed operators without touching
+# their schedules. Usually an aggregator dumps ... Instead you built ..."
+# and said "no this looks properly ai generated". It is the symmetry that
+# gives it away - a formal setup, "usually", then "instead you". What he
+# wants is the contrast inside one spoken sentence: "I really like how
+# you're not dumping every route into a messy list and instead actually
+# built a dedicated platform."
 _FORMULA_TELLS = (
+    "and you did not",
+    "and you didn't",
     "on the same side",
     "kind of thing i want to build",
     "kind of thing i want to work on",

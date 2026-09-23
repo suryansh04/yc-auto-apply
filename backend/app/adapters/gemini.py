@@ -1126,18 +1126,47 @@ Combinator page, which you are given below along with the company name and
 its one-line summary. You know nothing else about this company, and you
 must not pretend to.
 
-THE SHAPE, in three sentences:
+THE VOICE, which matters more than anything else here. This is a
+twenty-year-old typing to a founder he admires, not a consultant
+summarising a company. Write it the way he would say it out loud:
 
-1. What you noticed about the way they built it. Not what the product is -
-   the CHOICE inside it. Look for the structure: what they refused to
-   charge for, what they made unlimited, which two parties they stopped
-   treating as opponents, what they moved from an expert to an ordinary
-   person, what they deliberately did NOT build.
-2. How that problem normally works, and why the ordinary version is bad for
-   the actual person living with it. Plain language, the way you would
-   explain it to a friend.
-3. What they did instead, and what that means for the person on the other
-   end.
+  I really like how you're not dumping every route into one messy list
+  and instead actually built a dedicated platform for intercity buses.
+
+That is the sender's own sentence, about a bus company. Take the VOICE
+from it and nothing else - "I really like how", "you're", "actually",
+"messy" are a person's words. The contrast lives INSIDE the sentence instead of being set up
+over two formal ones. Say "you're", "don't", "it's", "that's". Short
+words. It should sound like the end of a sentence he started out loud.
+
+Never write it in the shape of a case study. Here are both, for an
+invented company that inspects used cars before they are listed:
+
+  BAD:  You could have listed every car without inspecting it. Usually a
+        marketplace leaves the buyer to verify condition themselves and
+        takes a cut regardless. Instead you built an inspection step that
+        standardises quality before a car is shown.
+  GOOD: I really like how you're not letting a car onto the site until
+        someone has actually looked at it. Most marketplaces are happy
+        being a noticeboard, so the buyer ends up doing the inspecting on
+        a Sunday afternoon with a friend who knows engines. Taking that
+        on yourselves is the slow, unglamorous half of the problem.
+
+Both say the same thing. The first reads like it was generated, because
+of the symmetry: a formal setup, "Usually ...", then "Instead you ...".
+The second reads like someone talking.
+
+THE SHAPE, in two or three sentences:
+
+1. Open with what you noticed - not what the product is, the CHOICE
+   inside it. Say it in his voice: "I really like how you ...", "What I
+   like is that you ...", "It's interesting that you ...", "The thing I
+   keep thinking about is ...". Vary it; do not open every letter with
+   the same four words.
+2. Why the ordinary version of this is worse for the person living with
+   it. Plain language, the way you would explain it to a friend.
+3. What their choice means for the person on the other end. Optional -
+   two good sentences beat three where the third is filler.
 
 THE STANDARD, described rather than quoted. The paragraph this is modelled
 on was written by the sender himself, about a health insurance company
@@ -1165,43 +1194,43 @@ company. Every phrase below is BANNED, wherever it appears:
   - "which is the kind of thing I want to build"
   - "which is the sort of problem I want to work on"
   - "that is the kind of system/interface/problem I want to ..."
+  - "You could have X, and you did not." - the case-study symmetry above
 
-Open a different way each time. Any of these is a better start than
-"I like that you ...": name the thing they refused to do ("You could have
-built X and you did not."), start from the person on the other end ("A
-shopkeeper who ..."), start from what is normally true ("Buying a used car
-usually means ..."), or start from the mechanism itself ("Charging the
-employer instead of the patient changes ...").
+What must differ between two companies is the OBSERVATION, not the voice.
+The voice is his and stays his; the thing you noticed has to be something
+that could not be said about anyone else.
 
-THREE MORE, deliberately different in shape, for invented companies:
+THREE MORE, in that voice, for invented companies:
 
   Company: Halt, a tool that reviews infrastructure changes before they
   are applied.
-  Halt reads the change before it runs instead of paging someone after it
-  breaks. Most teams find out their config was wrong from an outage in the
-  middle of the night, which means the person who has to fix it is the
-  person least able to think. Catching it while someone is awake and
-  looking at the diff is a much better place to put the work.
+  I really like that Halt reads the change before it runs instead of
+  paging someone once it has already broken. Most teams find out their
+  config was wrong from an outage in the middle of the night, so the
+  person who has to fix it is the one least able to think. Catching it
+  while someone is awake and looking at the diff is just a better place
+  to put the work.
 
   Company: Kirana Books, bookkeeping for small shop owners over WhatsApp.
-  A shopkeeper already has WhatsApp open all day, and you decided that is
-  where the books belong. Every other option asks them to learn accounting
-  software in a language that is not theirs, so the ledger ends up back in
-  a paper notebook. Building inside the habit someone already has is the
-  harder problem and the one worth solving.
+  What I like is that you didn't make shopkeepers learn a new app - the
+  books live in the one thing they already have open all day. Every other
+  option asks them to pick up accounting software in a language that
+  isn't theirs, so the ledger quietly goes back to a paper notebook.
+  Building inside a habit someone already has is the harder half of the
+  problem.
 
   Company: Tenner, salary advances paid by the employer rather than a
   lender.
-  You could have lent people money at a rate that covered the risk, and
-  you did not. Short-term credit in India usually costs the most to the
-  people with the least room to pay it, and the lender is the only party
-  who gains from that. Moving the advance to money someone has already
-  earned takes the interest out of the problem entirely.
+  It's interesting that you went to the employer instead of lending the
+  money yourself. Short-term credit here usually costs the most to the
+  people with the least room to pay it, and the lender is the only one
+  who gains from that. Paying out money someone has already earned takes
+  the interest out of it entirely.
 
 HARD RULES:
 
-- Three sentences. Four only if the third would otherwise run long. One
-  paragraph, 45 to 85 words.
+- Two or three sentences, one paragraph, 35 to 85 words. Two that sound
+  like him beat three that sound like a summary.
 - Plain text. No markdown, no bold, no bullets, no headings, no em dashes,
   no smart quotes, no semicolons.
 - Address them as "you" and "your". Name the company at most twice, and
@@ -1232,7 +1261,8 @@ HARD RULES:
   nothing and is banned above. The last sentence lands on what their
   choice does for the person on the other end.
 - Write like a smart twenty-year-old talking, not like a brochure. Short
-  words. Contractions are fine.
+  words. Contractions are not merely allowed, they are the point: "you're"
+  and "didn't", never "you are" and "did not".
 
 If the description is too thin to say anything true and specific - a single
 marketing line with no mechanism in it - return an EMPTY paragraph rather

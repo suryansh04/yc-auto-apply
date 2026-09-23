@@ -59,7 +59,7 @@ from datetime import datetime
 from typing import Protocol
 
 from app.application.draft_outreach import build_sources, load_resume_claims
-from app.domain import letter
+from app.domain import letter, rich_text
 from app.domain.entities import Draft
 from app.domain.ranking import rank_key
 from app.domain.states import OutreachState, assert_transition
@@ -269,8 +269,17 @@ class ReviewOutreach:
     _EDITABLE = (OutreachState.PENDING_APPROVAL, OutreachState.APPROVED)
 
     def edit(self, outreach_id: int, subject: str, body: str,
-             now: datetime | None = None) -> list[str]:
+             now: datetime | None = None, body_html: str | None = None) -> list[str]:
         """Replace a draft's text.
+
+        `body_html` (2026-09-23) is the formatted letter from the editor.
+        When it is given, `body` is IGNORED and derived from it
+        (`rich_text.to_text`) - the plain text is what every check and
+        anchor reads, so it must be exactly what the formatting says, and
+        a client can never send the two out of step. When only `body` is
+        given - the generic-line swap, "Use this" on an AI paragraph - the
+        formatting of every paragraph that did not change is carried over
+        rather than thrown away (`rich_text.carry_formatting`).
 
         Operator request (2026-09-22): an APPROVED letter is editable too,
         from the Approved screen. Waiting to send is exactly when a typo
@@ -308,6 +317,13 @@ class ReviewOutreach:
         sources = self._sources(company)
         source = sources.resolvable.get((source_type, source_id)) if source_type and source_id is not None else None
 
+        if body_html is not None:
+            html = rich_text.sanitize(body_html)
+            body = rich_text.to_text(html)
+        else:
+            html = rich_text.carry_formatting(getattr(row, "body_html", None), body.strip())
+        if html is not None and not rich_text.has_formatting(html):
+            html = None
         subject, body = subject.strip(), body.strip()
         errors = []
         if not subject:
@@ -330,7 +346,8 @@ class ReviewOutreach:
         approved_at = now if state is OutreachState.APPROVED else None
         fields = dict(
             outreach_id=outreach.id, sequence_step=step, direction="outbound",
-            subject=subject, body=body, edited_by_user=True, approved_at=approved_at,
+            subject=subject, body=body, body_html=html, edited_by_user=True,
+            approved_at=approved_at,
         )
         if row is not None:
             fields["id"] = row.id

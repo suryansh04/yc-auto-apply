@@ -40,7 +40,9 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
-import { Textarea } from '@/components/ui/textarea'
+import { LETTER_HTML_CLASSES, renderLetterHtml } from '@/lib/letterHtml'
+import { textToHtml } from '@/lib/richText'
+import RichEditor from '@/components/RichEditor'
 
 // app/domain/letter.py's USER_FIT_MARKER. A letter still carrying it
 // cannot be sent (`send_approved` refuses), so saying so here is the
@@ -55,7 +57,8 @@ function blocked(item) {
 // resets it: a 422 from the validator must not wipe out what was typed.
 function EditLetter({ item, saving, errors, onSave, onCancel }) {
   const [subject, setSubject] = useState(item.subject ?? '')
-  const [body, setBody] = useState(item.body ?? '')
+  const initialHtml = item.body_html ?? textToHtml(item.body ?? '')
+  const [html, setHtml] = useState(initialHtml)
 
   return (
     <>
@@ -83,21 +86,16 @@ function EditLetter({ item, saving, errors, onSave, onCancel }) {
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor={`body-${item.outreach_id}`}>Body</Label>
+          <Label>Body</Label>
           {/* The body, not the wire text: the greeting, signature and
               opt-out line are added at send time and are not editable
-              here - editing them would change every letter. */}
-          <Textarea
-            id={`body-${item.outreach_id}`}
-            aria-label="Body"
-            rows={16}
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-          />
+              here - editing them would change every letter. Formatting
+              (2026-09-23) is kept by the server exactly as offered. */}
+          <RichEditor initialHtml={initialHtml} onChange={setHtml} label="Body" />
         </div>
       </CardContent>
       <CardFooter className="gap-2">
-        <Button disabled={saving} onClick={() => onSave(subject, body)}>
+        <Button disabled={saving} onClick={() => onSave(subject, html)}>
           {saving ? <Spinner /> : null}
           Save
         </Button>
@@ -119,9 +117,9 @@ function ApprovedLetter({ item, defaultOpen }) {
   const unapprove = useUnapprove()
   const needsYourParagraph = blocked(item)
 
-  function save(subject, body) {
+  function save(subject, bodyHtml) {
     edit.mutate(
-      { id: item.outreach_id, subject, body },
+      { id: item.outreach_id, subject, body_html: bodyHtml },
       {
         // 2026-09-22: a save always saves. What the checks made of the
         // new text comes back as notes, shown on the card afterwards.
@@ -271,9 +269,18 @@ function ApprovedLetter({ item, defaultOpen }) {
           <CollapsibleContent>
             <Separator />
             <CardContent className="pt-6">
-              <pre className="font-sans text-[15px] leading-relaxed whitespace-pre-wrap">
-                {item.wire_text}
-              </pre>
+              {/* A formatted letter is shown formatted (2026-09-23): this
+                  is the screen with the Send button on it, the last look
+                  before it goes. */}
+              {item.wire_html ? (
+                <div data-testid="formatted-letter" className={LETTER_HTML_CLASSES}>
+                  {renderLetterHtml(item.wire_html)}
+                </div>
+              ) : (
+                <pre className="font-sans text-[15px] leading-relaxed whitespace-pre-wrap">
+                  {item.wire_text}
+                </pre>
+              )}
             </CardContent>
           </CollapsibleContent>
         )}

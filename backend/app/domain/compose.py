@@ -33,6 +33,9 @@ send and preview time, never stored in a body.
 """
 
 import re
+from html import escape
+
+from app.domain.rich_text import sanitize, to_text
 
 OPT_OUT_LINE = ""
 
@@ -93,3 +96,31 @@ def compose_wire_text(
     greeting = "" if greets(body, first_name) else f"Hi {first_name},"
     parts = (greeting, body.strip(), signature.strip(), opt_out_line.strip())
     return "\n\n".join(p for p in parts if p)
+
+
+def compose_wire_html(
+    first_name: str, body_html: str, signature: str, opt_out_line: str = OPT_OUT_LINE
+) -> str:
+    """The HTML part of a formatted letter: the same greeting, signature
+    and opt-out as `compose_wire_text`, around the sanitised body.
+
+    Built from the same rules as the plain text, on purpose - the two
+    parts of one email must say the same thing, and a greeting added to
+    one and not the other would be exactly the kind of drift R2 exists to
+    prevent. Only ever called for a letter that HAS formatting; the rest
+    are sent as plain text alone, as before.
+    """
+    body = sanitize(body_html)
+
+    def paragraph(text: str) -> str:
+        lines = [escape(line, quote=False) for line in text.strip().split("\n")]
+        return "<p>" + "<br>".join(lines) + "</p>"
+
+    parts = []
+    if not greets(to_text(body), first_name):
+        parts.append(paragraph(f"Hi {first_name},"))
+    parts.append(body)
+    for extra in (signature, opt_out_line):
+        if extra.strip():
+            parts.append(paragraph(extra))
+    return "".join(parts)

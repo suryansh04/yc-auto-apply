@@ -394,6 +394,7 @@ class FakeMessageRow:
     direction: str
     body: str
     subject: str | None = None
+    body_html: str | None = None      # 2026-09-23: formatted letters
     research_source_type: str | None = None
     research_source_id: int | None = None
     approved_at: object = None

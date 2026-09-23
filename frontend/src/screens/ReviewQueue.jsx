@@ -40,6 +40,9 @@ import {
 } from '../api/hooks'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { markUp } from '@/lib/marks'
+import { LETTER_HTML_CLASSES, renderLetterHtml } from '@/lib/letterHtml'
+import { textToHtml } from '@/lib/richText'
+import RichEditor from '@/components/RichEditor'
 import { Lightbulb, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -357,10 +360,15 @@ export default function ReviewQueue() {
     setEditErrors([])
   }
 
-  function saveEdit(subject, body) {
+  // `bodyHtml` comes from the formatting editor; every other caller (the
+  // AI paragraph, a rewrite, the hand-written line) passes plain text,
+  // and the server carries the formatting of untouched paragraphs over.
+  function saveEdit(subject, body, bodyHtml) {
     if (!current) return
     edit.mutate(
-      { id: current.outreach_id, subject, body },
+      bodyHtml != null
+        ? { id: current.outreach_id, subject, body_html: bodyHtml }
+        : { id: current.outreach_id, subject, body },
       {
         // 2026-09-22: a save always saves. The checks come back as notes
         // about what was just written, so the editor closes and the
@@ -590,6 +598,13 @@ export default function ReviewQueue() {
     if (!suggestion || !body.includes(suggestion.quote)) return
     saveEdit(current.subject ?? '', body.replace(suggestion.quote, suggestion.replacement))
   }
+  const markOptions = {
+    onSelect: setActiveNote,
+    activeIndex: activeNote,
+    suggestions: shownRewrites,
+    pending: suggestionsPending,
+    onApply: applySuggestion,
+  }
   const hasSuggestions = suggestions.length > 0 || showCriticNote
   const suggestionCount = suggestions.length + (showCriticNote ? 1 : 0)
 
@@ -626,7 +641,7 @@ export default function ReviewQueue() {
         <EditDraft
           key={current.outreach_id}
           initialSubject={current.subject ?? ''}
-          initialBody={current.body ?? ''}
+          initialHtml={current.body_html ?? textToHtml(current.body ?? '')}
           errors={editErrors}
           saving={edit.isPending}
           onSave={saveEdit}
@@ -654,17 +669,20 @@ export default function ReviewQueue() {
             </CardHeader>
             <Separator />
             <CardContent>
-              <pre className="font-sans text-[15px] leading-relaxed whitespace-pre-wrap">
-                {highlights.length > 0
-                  ? markUp(current.wire_text, highlights, {
-                      onSelect: setActiveNote,
-                      activeIndex: activeNote,
-                      suggestions: shownRewrites,
-                      pending: suggestionsPending,
-                      onApply: applySuggestion,
-                    })
-                  : current.wire_text}
-              </pre>
+              {/* A formatted letter (2026-09-23) is shown formatted - the
+                  operator approves what the founder will see - with the
+                  same marks walked onto its text. */}
+              {current.wire_html ? (
+                <div data-testid="formatted-letter" className={LETTER_HTML_CLASSES}>
+                  {renderLetterHtml(current.wire_html, highlights, markOptions)}
+                </div>
+              ) : (
+                <pre className="font-sans text-[15px] leading-relaxed whitespace-pre-wrap">
+                  {highlights.length > 0
+                    ? markUp(current.wire_text, highlights, markOptions)
+                    : current.wire_text}
+                </pre>
+              )}
             </CardContent>
             <CardFooter>
               {/* Live finding (2026-09-16): the operator reviewed a draft
@@ -927,9 +945,9 @@ export default function ReviewQueue() {
 // `errors` changes, so a 422 from the validator never wipes out what the
 // operator typed. The parent closes this only on a successful save, and
 // re-mounts it (via `key`) only when a different draft is opened.
-function EditDraft({ initialSubject, initialBody, errors, saving, onSave, onCancel }) {
+function EditDraft({ initialSubject, initialHtml, errors, saving, onSave, onCancel }) {
   const [subject, setSubject] = useState(initialSubject ?? '')
-  const [body, setBody] = useState(initialBody ?? '')
+  const [html, setHtml] = useState(initialHtml ?? '')
 
   return (
     <Card aria-label="Edit draft">
@@ -961,18 +979,15 @@ function EditDraft({ initialSubject, initialBody, errors, saving, onSave, onCanc
         </div>
 
         <div className="grid gap-2">
-          <Label htmlFor="edit-body">Body</Label>
-          <Textarea
-            id="edit-body"
-            aria-label="Body"
-            rows={14}
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-          />
+          <Label>Body</Label>
+          {/* Formatting (2026-09-23): bold, italic, underline, size and
+              lists. The server keeps exactly these and derives the plain
+              text from them, so what the checks read is what this says. */}
+          <RichEditor initialHtml={initialHtml} onChange={setHtml} label="Body" />
         </div>
       </CardContent>
       <CardFooter className="gap-2">
-        <Button onClick={() => onSave(subject, body)} disabled={saving}>
+        <Button onClick={() => onSave(subject, '', html)} disabled={saving}>
           {saving ? 'Saving…' : 'Save'}
         </Button>
         <Button variant="outline" onClick={onCancel}>

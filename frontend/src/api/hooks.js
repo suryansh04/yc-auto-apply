@@ -174,7 +174,11 @@ export function useApprove() {
 export function useEdit() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, subject, body }) => apiPost(`/outreach/${id}/edit`, { subject, body }),
+    // `body_html` (2026-09-23) is the formatted letter from the editor.
+    // When it is sent, the server derives the plain text from it and
+    // ignores `body`, so the two can never be sent out of step.
+    mutationFn: ({ id, subject, body = '', body_html }) =>
+      apiPost(`/outreach/${id}/edit`, body_html != null ? { subject, body, body_html } : { subject, body }),
     onSuccess: (_data, { id }) => {
       queryClient.invalidateQueries({ queryKey: ['queue'] })
       queryClient.invalidateQueries({ queryKey: ['queue', id] })

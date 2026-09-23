@@ -547,3 +547,34 @@ def test_only_outreach_id_still_obeys_the_placeholder_guard(repos, one_approved)
     s = FakeSender()
     result = SendApproved(s, FrozenClock(), repos).run(cap=10, only_outreach_id=one_approved.id)
     assert s.sent == [] and result.errors == 1
+
+
+# --- formatted letters (2026-09-23) ------------------------------------------
+
+
+def _outbound_of(repos, outreach):
+    return next(r for r in repos.message.rows
+                if r.outreach_id == outreach.id and r.direction == "outbound")
+
+
+def test_a_plain_letter_is_sent_without_an_html_part(repos, one_approved):
+    # Every letter nobody formatted goes through exactly the call it
+    # always did.
+    s = FakeSender()
+    SendApproved(s, FrozenClock(), repos).run(cap=10)
+    assert s.sent[0]["html"] is None
+
+
+def test_a_formatted_letter_is_sent_with_its_formatting(repos, one_approved):
+    row = _outbound_of(repos, one_approved)
+    row.body_html = "<p>A <strong>bold</strong> claim.</p>"
+    row.body = "A bold claim."
+    s = FakeSender()
+    SendApproved(s, FrozenClock(), repos, signature="Suryansh").run(cap=10)
+    html = s.sent[0]["html"]
+    # Greeting, the formatted body and the signature - the same letter
+    # as the plain part, which is sent beside it.
+    assert "<strong>bold</strong>" in html
+    assert html.startswith("<p>Hi ")
+    assert html.endswith("<p>Suryansh</p>")
+    assert s.sent[0]["body"].endswith("A bold claim.\n\nSuryansh")

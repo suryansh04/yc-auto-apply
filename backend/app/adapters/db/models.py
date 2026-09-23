@@ -253,6 +253,10 @@ class Message(Base):
     direction: Mapped[str] = mapped_column(String(10))  # outbound | inbound
     subject: Mapped[str | None] = mapped_column(String(500))
     body: Mapped[str] = mapped_column(Text)
+    # The formatted version of `body` (2026-09-23), or null when the letter
+    # has no formatting. `body` is always derived from it, never the other
+    # way round (`app.domain.rich_text`), and stays what everything reads.
+    body_html: Mapped[str | None] = mapped_column(Text)
     research_source_type: Mapped[str | None] = mapped_column(String(30))
     # news | launch | job_posting | long_description; null for inbound
     research_source_id: Mapped[int | None]

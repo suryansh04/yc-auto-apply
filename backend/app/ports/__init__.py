@@ -226,8 +226,14 @@ class ResumeParser(Protocol):
 
 @runtime_checkable
 class MailSender(Protocol):
+    """`body` is the plain text and is always sent. `html` (2026-09-23)
+    is the same letter formatted, sent alongside it as the HTML
+    alternative - and only ever passed for a letter that HAS formatting,
+    so every plain letter goes through exactly the call it always did."""
+
     def send(
-        self, to: str, subject: str, body: str, attachment_path: str | None
+        self, to: str, subject: str, body: str, attachment_path: str | None,
+        html: str | None = None,
     ) -> tuple[str, str]: ...  # (message_id, thread_id)
 
 

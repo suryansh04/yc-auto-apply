@@ -85,6 +85,12 @@ class QueueItemOut(BaseModel):
     subject: str | None = None
     body: str
     wire_text: str
+    # Formatted letters only (2026-09-23): the stored HTML, and the whole
+    # email as HTML - greeting and signature included - for the preview.
+    # Both null for a letter with no formatting, which is still sent and
+    # shown as plain text exactly as before.
+    body_html: str | None = None
+    wire_html: str | None = None
     word_count: int
     source_kind: str | None = None
     source_text: str | None = None
@@ -117,7 +123,11 @@ class QueueItemOut(BaseModel):
 
 class EditIn(BaseModel):
     subject: str
-    body: str
+    body: str = ""
+    # The formatted letter from the editor (2026-09-23). When present,
+    # `body` is ignored and derived from it server-side, so a client can
+    # never send the plain text and the formatting out of step.
+    body_html: str | None = None
 
 
 class ApplicationOut(BaseModel):

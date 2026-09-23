@@ -86,3 +86,18 @@ if (!globalThis.IntersectionObserver) {
     }
   }
 }
+
+// ---- jsdom gaps ProseMirror relies on (the formatting editor) ----------
+//
+// jsdom does no layout, so the geometry calls ProseMirror makes to track
+// the cursor are missing. Empty rectangles are the honest answer from a
+// DOM that has no layout - enough for editing and commands to work, and
+// no test here asserts anything about pixel positions.
+const emptyRect = { x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0 }
+const rects = () => Object.assign([emptyRect], { item: () => emptyRect })
+if (!Range.prototype.getClientRects) Range.prototype.getClientRects = rects
+if (!Range.prototype.getBoundingClientRect) Range.prototype.getBoundingClientRect = () => emptyRect
+if (!Element.prototype.getClientRects || Element.prototype.getClientRects.length === undefined) {
+  Element.prototype.getClientRects = rects
+}
+if (!document.elementFromPoint) document.elementFromPoint = () => null

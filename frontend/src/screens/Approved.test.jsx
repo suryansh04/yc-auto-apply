@@ -128,15 +128,16 @@ it('edits a letter in place and saves it', async () => {
   const edit = mockEdit()
   render()
   await userEvent.click(await screen.findByRole('button', { name: /edit/i }))
-  const body = screen.getByLabelText('Body')
-  expect(body).toHaveValue('You put the whole thing on a voice call.')
-  await userEvent.clear(body)
-  await userEvent.type(body, 'A better sentence.')
+  const body = await screen.findByRole('textbox', { name: 'Body' })
+  expect(body).toHaveTextContent('You put the whole thing on a voice call.')
+  await userEvent.click(body)
+  await userEvent.keyboard('{Control>}a{/Control}A better sentence.')
   await userEvent.click(screen.getByRole('button', { name: /save/i }))
   await waitFor(() => expect(edit).toHaveBeenCalled())
-  // mockEdit spies as (id, body)
+  // mockEdit spies as (id, payload). The editor sends HTML; the server
+  // derives the plain text from it (2026-09-23).
   expect(edit.mock.calls[0][0]).toBe(1)
-  expect(edit.mock.calls[0][1].body).toBe('A better sentence.')
+  expect(edit.mock.calls[0][1].body_html).toBe('<p>A better sentence.</p>')
 })
 
 it('keeps the typed text when the API refuses the save outright', async () => {
@@ -146,13 +147,13 @@ it('keeps the typed text when the API refuses the save outright', async () => {
   mockEditFailure(['contains a semicolon'])
   render()
   await userEvent.click(await screen.findByRole('button', { name: /edit/i }))
-  const body = screen.getByLabelText('Body')
-  await userEvent.clear(body)
-  await userEvent.type(body, 'Text with a semicolon; in it.')
+  const body = await screen.findByRole('textbox', { name: 'Body' })
+  await userEvent.click(body)
+  await userEvent.keyboard('{Control>}a{/Control}Text with a semicolon; in it.')
   await userEvent.click(screen.getByRole('button', { name: /save/i }))
   expect(await screen.findByText('contains a semicolon')).toBeInTheDocument()
   // Still open, still holding what was typed.
-  expect(screen.getByLabelText('Body')).toHaveValue('Text with a semicolon; in it.')
+  expect(screen.getByRole('textbox', { name: 'Body' })).toHaveTextContent('Text with a semicolon; in it.')
 })
 
 it('cancelling an edit changes nothing', async () => {
@@ -201,4 +202,26 @@ it('saves an edit the checks dislike, and shows what they said', async () => {
   await waitFor(() => expect(screen.queryByLabelText('Body')).not.toBeInTheDocument())
   expect(await screen.findByText(/saved\. what the checks noticed/i)).toBeInTheDocument()
   expect(screen.getByText('implies seniority: my team')).toBeInTheDocument()
+})
+
+
+// --- formatted letters (2026-09-23) --------------------------------------
+
+
+it('shows a formatted letter formatted, on the screen with the Send button', async () => {
+  mockApproved([letter({
+    body_html: '<p>You put the <strong>whole thing</strong> on a voice call.</p>',
+    wire_html: '<p>Hi Madhav,</p><p>You put the <strong>whole thing</strong> on a voice call.</p><p>Suryansh</p>',
+  })])
+  render()
+  const shown = await screen.findByTestId('formatted-letter')
+  expect(shown.querySelector('strong')).toHaveTextContent('whole thing')
+})
+
+it('opens the editor on the formatting it was saved with', async () => {
+  mockApproved([letter({ body_html: '<p>A <em>careful</em> sentence.</p>' })])
+  render()
+  await userEvent.click(await screen.findByRole('button', { name: /edit/i }))
+  const body = await screen.findByRole('textbox', { name: 'Body' })
+  expect(body.querySelector('em')).toHaveTextContent('careful')
 })

@@ -80,7 +80,7 @@ from typing import Callable, Protocol
 from pathlib import Path
 
 from app.application.errors import OperatorError
-from app.domain.compose import compose_wire_text, first_name
+from app.domain.compose import compose_wire_html, compose_wire_text, first_name
 from app.domain.letter import contains_stub
 from app.domain.states import OutreachState, assert_transition
 
@@ -172,6 +172,17 @@ class SendApproved:
             return configured if configured is not None else self._followup_day_1
         configured = getattr(settings_row, "followup_day_2", None)
         return configured if configured is not None else self._followup_day_2
+
+    def _html_part(self, founder, row) -> dict:
+        """`{"html": ...}` for a formatted letter, `{}` for every other.
+
+        Empty rather than `html=None` on purpose: a plain letter goes
+        through exactly the `send` call it always did, so nothing about
+        sending changes for the letters nobody formatted (2026-09-23)."""
+        body_html = getattr(row, "body_html", None)
+        if not body_html:
+            return {}
+        return {"html": compose_wire_html(first_name(founder.full_name), body_html, self._signature)}
 
     def _require_attachment(self) -> None:
         """Raise if the resume is not readable, BEFORE a row is reserved.
@@ -296,7 +307,8 @@ class SendApproved:
             wire_text = compose_wire_text(first_name(founder.full_name), row.body, self._signature)
             try:
                 gmail_message_id, gmail_thread_id = self._sender.send(
-                    outreach.resolved_email, row.subject or "", wire_text, self._attachment_path
+                    outreach.resolved_email, row.subject or "", wire_text, self._attachment_path,
+                    **self._html_part(founder, row),
                 )
             except Exception as exc:  # noqa: BLE001 — any sender failure pauses the run
                 reason = type(exc).__name__
@@ -340,6 +352,7 @@ class SendApproved:
             if row is None:
                 continue
             wire_text = compose_wire_text(first_name(founder.full_name), row.body, self._signature)
-            self._sender.send(address, row.subject or "", wire_text, self._attachment_path)
+            self._sender.send(address, row.subject or "", wire_text, self._attachment_path,
+                              **self._html_part(founder, row))
             sent += 1
         return sent

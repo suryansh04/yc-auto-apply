@@ -332,3 +332,38 @@ def test_a_transient_refresh_failure_is_a_plain_gmail_error_not_auth_required(re
         with pytest.raises(GmailError) as exc:
             make_sender().send("a@b.com", "s", BODY, str(resume))
     assert not isinstance(exc.value, GmailAuthRequired)
+
+
+# --- formatted letters (2026-09-23) -----------------------------------------
+
+
+def _parse(raw: bytes):
+    return email.message_from_bytes(raw, policy=policy.default)
+
+
+def test_a_plain_letter_is_still_plain_text_alone(tmp_path):
+    msg = _parse(build_mime("me@x.com", "you@y.com", "S", "Hi.\n\nBody.", None))
+    assert msg.get_content_type() == "text/plain"
+
+
+def test_a_formatted_letter_sends_both_the_plain_text_and_the_html(tmp_path):
+    """multipart/alternative: plain first, HTML second - a client that
+    renders HTML shows the formatting, one that does not shows the same
+    words."""
+    msg = _parse(build_mime("me@x.com", "you@y.com", "S", "A bold claim.", None,
+                            html="<p>A <strong>bold</strong> claim.</p>"))
+    assert msg.get_content_type() == "multipart/alternative"
+    parts = [p.get_content_type() for p in msg.iter_parts()]
+    assert parts == ["text/plain", "text/html"]
+    assert "<strong>bold</strong>" in msg.get_body(("html",)).get_content()
+    assert "A bold claim." in msg.get_body(("plain",)).get_content()
+
+
+def test_a_formatted_letter_still_carries_the_resume(tmp_path):
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4")
+    msg = _parse(build_mime("me@x.com", "you@y.com", "S", "A bold claim.", str(resume),
+                            html="<p>A <strong>bold</strong> claim.</p>"))
+    assert msg.get_content_type() == "multipart/mixed"
+    assert [a.get_filename() for a in msg.iter_attachments()] == ["resume.pdf"]
+    assert "<strong>" in msg.get_body(("html",)).get_content()

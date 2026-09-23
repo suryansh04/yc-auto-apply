@@ -88,7 +88,10 @@ it('keeps the typed text when an edit is rejected', async () => {
   await userEvent.clear(box)
   await userEvent.type(box, 'my own words')
   await userEvent.click(screen.getByRole('button', { name: /^save/i }))
-  expect(await screen.findByDisplayValue(/my own words/)).toBeInTheDocument()
+  // Still open, still holding what was typed (a rich-text box since
+  // 2026-09-23, so its text rather than a form value).
+  await screen.findByText('contains a semicolon')
+  expect(screen.getByRole('textbox', { name: /body/i })).toHaveTextContent('my own words')
 })
 
 it('shows what the checks noticed as advice, not as a refusal', async () => {
@@ -1014,4 +1017,49 @@ it('an empty hand-written paragraph changes nothing', async () => {
   await userEvent.clear(await screen.findByLabelText(/your line about the company/i))
   expect(screen.getByRole('button', { name: /put it in the letter/i })).toBeDisabled()
   expect(edit).not.toHaveBeenCalled()
+})
+
+
+// --- formatted letters (operator request 2026-09-23) -----------------------
+//
+// "give option such as bolding, italic, increasing size of a particular
+// text, numerical or bullet points". The letter is reviewed as it will be
+// received - formatted - and the marks still land on its words.
+
+it('shows a formatted letter formatted', async () => {
+  mockQueue([item({
+    wire_html: '<p>Hi Akash,</p><p>A <strong>bold</strong> claim.</p><ol><li>one</li></ol>',
+  })])
+  render(<ReviewQueue />)
+  const shown = await screen.findByTestId('formatted-letter')
+  expect(shown.querySelector('strong')).toHaveTextContent('bold')
+  expect(shown.querySelector('ol li')).toHaveTextContent('one')
+})
+
+it('keeps the company paragraph and its tabs on a formatted letter', async () => {
+  // The marks work on text, so they are walked onto each text node of
+  // the formatted letter - the hover card with AI / Generic / Write it
+  // must not disappear because someone bolded a word elsewhere.
+  mockQueue([item({
+    ...INSIGHT_LETTER,
+    wire_html: '<p>Hi Akash,</p><p><strong>Quick one.</strong></p><p>You built a voice layer.</p><p>Suryansh</p>',
+  })])
+  mockWriteInsight({ paragraph: WRITTEN })
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  expect(await screen.findByRole('tab', { name: /generic/i })).toBeInTheDocument()
+})
+
+it('saves the formatting from the editor', async () => {
+  mockQueue([item({})])
+  const edit = mockEdit()
+  render(<ReviewQueue />)
+  await userEvent.click(await screen.findByRole('button', { name: /^edit/i }))
+  const box = await screen.findByRole('textbox', { name: /body/i })
+  await userEvent.click(box)
+  await userEvent.keyboard('{Control>}a{/Control}')
+  await userEvent.click(screen.getByRole('button', { name: 'Bold' }))
+  await userEvent.click(screen.getByRole('button', { name: /^save/i }))
+  await waitFor(() => expect(edit).toHaveBeenCalled())
+  expect(edit.mock.calls[0][1].body_html).toContain('<strong>')
 })

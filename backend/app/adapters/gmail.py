@@ -65,16 +65,25 @@ _TIMEOUT_SECONDS = 30.0
 __all__ = ["GmailAuthRequired", "GmailError", "GmailSender", "build_mime", "encode_raw", "exchange_refresh_token"]
 
 
-def build_mime(sender: str, to: str, subject: str, body: str, attachment_path: str | None) -> bytes:
+def build_mime(sender: str, to: str, subject: str, body: str, attachment_path: str | None,
+               html: str | None = None) -> bytes:
     """RFC 2822 bytes: a `text/plain` body and, when `attachment_path` is
     given, that file as an attachment (PDF by default; the MIME type is
     guessed from the suffix). Raises `FileNotFoundError` for a missing
-    attachment — before any network call is made."""
+    attachment — before any network call is made.
+
+    With `html` (a formatted letter, 2026-09-23) the body becomes
+    `multipart/alternative`: the plain text first and the HTML second, so
+    a client that renders HTML shows the formatting and one that does not
+    shows the same words. The stdlib then wraps that and the attachment
+    in `multipart/mixed`."""
     msg = EmailMessage()
     msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body)  # text/plain; charset chosen by the stdlib (utf-8 when needed)
+    if html:
+        msg.add_alternative(html, subtype="html")
     if attachment_path is not None:
         path = Path(attachment_path)
         data = path.read_bytes()  # FileNotFoundError propagates
@@ -121,8 +130,9 @@ class GmailSender:
 
     # -- MailSender ----------------------------------------------------------
 
-    def send(self, to: str, subject: str, body: str, attachment_path: str | None) -> tuple[str, str]:
-        raw = encode_raw(build_mime(self.sender_address, to, subject, body, attachment_path))
+    def send(self, to: str, subject: str, body: str, attachment_path: str | None,
+             html: str | None = None) -> tuple[str, str]:
+        raw = encode_raw(build_mime(self.sender_address, to, subject, body, attachment_path, html))
         response = self._post_send(raw)
         if response.status_code == 401:
             # Access token rejected despite looking fresh: refresh once, retry once.

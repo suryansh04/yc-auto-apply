@@ -40,7 +40,7 @@ from app.application.review_outreach import OutreachNotFound, ReviewItem, Review
 from app.application.suggest_fixes import run_reviser
 from app.application.write_insight import run_insight_writer
 from app.domain import letter
-from app.domain.compose import compose_wire_text, first_name
+from app.domain.compose import compose_wire_html, compose_wire_text, first_name
 from app.domain.highlight import highlights_for
 from app.domain.states import IllegalTransition
 from app.config import get_operator_settings, get_settings
@@ -122,6 +122,7 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
     # promising something the backend will decline.
     insight = letter.insight_region(body)
     generic = letter.generic_insight(company_name or "") if company_name and insight else None
+    body_html = getattr(message, "body_html", None) or None
     return QueueItemOut(
         outreach_id=item.outreach.id,
         company_name=company_name,
@@ -132,6 +133,9 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
         subject=getattr(message, "subject", None),
         body=body,
         wire_text=compose_wire_text(first_name(item.founder.full_name), body, signature),
+        body_html=body_html,
+        wire_html=(compose_wire_html(first_name(item.founder.full_name), body_html, signature)
+                   if body_html else None),
         word_count=len(body.split()),
         source_kind=source.kind if source is not None else None,
         source_text=source.text if source is not None else None,
@@ -440,10 +444,13 @@ def edit(outreach_id: int, payload: EditIn, repos: Repos = Depends(get_repos)) -
         # The clock matters only for an APPROVED letter, whose approval
         # is re-stamped onto the text the operator just wrote.
         notes = _use_case(repos).edit(outreach_id, payload.subject, payload.body,
-                                      now=_UTCClock().now())
+                                      now=_UTCClock().now(), body_html=payload.body_html)
     except OutreachNotFound:
         raise HTTPException(404, "no such outreach")
     except (ValueError, IllegalTransition) as exc:
         raise _action_error(exc)
     repos.session.commit()
-    return _checked(repos, outreach_id, notes, payload.body)
+    # A formatted save derived its plain text server-side, so the notes
+    # were produced from the STORED body, not from anything in the request.
+    return _checked(repos, outreach_id, notes,
+                    None if payload.body_html is not None else payload.body)

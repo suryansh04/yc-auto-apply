@@ -32,9 +32,20 @@ It also takes effect on letters already drafted - this is composed at
 send and preview time, never stored in a body.
 """
 
+import re
+
 OPT_OUT_LINE = ""
 
 _FALLBACK_GREETING_NAME = "there"
+
+# A first line that is itself a greeting: "Hi Deepti," / "Hey," / "Dear
+# Ms. Rao," and nothing else on that line. Live finding (2026-09-23): the
+# operator pasted a complete letter, greeting included, into one draft by
+# hand, and the Approved screen showed "Hi Deepti," twice - once from his
+# own text and once from this module. The stored body is the operator's
+# and is never modified (ruling R2), so the fix belongs here: when the
+# letter already opens with a greeting, do not add a second one.
+_GREETING_LINE = re.compile(r"^\s*(?:hi|hey|hello|dear)\b([^,\n]*),\s*$", re.IGNORECASE)
 
 
 def first_name(full_name: str | None) -> str:
@@ -44,6 +55,24 @@ def first_name(full_name: str | None) -> str:
     left — a blank greeting ("Hi ,") is worse than a generic one."""
     tokens = [t for t in (full_name or "").split() if not t.endswith(".")]
     return tokens[0] if tokens else _FALLBACK_GREETING_NAME
+
+
+def greets(body: str, name: str) -> bool:
+    """Does `body` already open with a greeting to `name`?
+
+    The name has to match, or be absent as in "Hello," and "Hi there,". A
+    greeting naming somebody ELSE is deliberately NOT recognised: that is
+    a letter pasted from another founder's draft, and the doubled
+    greeting it produces is exactly how the operator catches it on the
+    review screen. Silently accepting it would send Deepti a letter
+    opening "Hi Rahul,".
+    """
+    first_line = (body or "").lstrip().split("\n", 1)[0]
+    match = _GREETING_LINE.match(first_line)
+    if match is None:
+        return False
+    greeted = match.group(1).strip().casefold()
+    return greeted in ("", _FALLBACK_GREETING_NAME, (name or "").strip().casefold())
 
 
 def compose_wire_text(
@@ -56,6 +85,11 @@ def compose_wire_text(
     in a newline nor an empty signature (fix round 1, F2 — Task 16's
     preview may call this before a signature is configured) can produce a
     triple blank line.
+
+    The greeting is skipped when the body already carries one to the same
+    person (`greets`), so a letter written by hand, greeting and all,
+    goes out reading the way it was written.
     """
-    parts = (f"Hi {first_name},", body.strip(), signature.strip(), opt_out_line.strip())
+    greeting = "" if greets(body, first_name) else f"Hi {first_name},"
+    parts = (greeting, body.strip(), signature.strip(), opt_out_line.strip())
     return "\n\n".join(p for p in parts if p)

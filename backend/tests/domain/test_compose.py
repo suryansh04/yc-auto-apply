@@ -94,3 +94,47 @@ def test_first_name_is_the_first_non_honorific_whitespace_token(full_name, expec
 @pytest.mark.parametrize("full_name", ["", "   ", None, "Dr.", "Mr. Dr."])
 def test_first_name_falls_back_to_there_for_a_blank_name(full_name):
     assert first_name(full_name) == "there"
+
+
+# --- a letter that already has a greeting (live finding 2026-09-23) -------
+#
+# The operator pasted a complete letter, greeting included, into one draft
+# by hand, and the Approved screen showed "Hi Deepti," twice - his own and
+# this module's. The stored body is never modified (R2), so the greeting
+# is what gives way.
+
+
+def test_a_body_that_greets_the_recipient_is_not_greeted_twice():
+    wire = compose_wire_text("Deepti", "Hi Deepti,\n\nThis takes 45 seconds.", "Suryansh")
+    assert wire.count("Hi Deepti,") == 1
+    assert wire.startswith("Hi Deepti,\n\nThis takes 45 seconds.")
+
+
+def test_a_greeting_to_somebody_else_is_left_visible():
+    """A letter pasted from another founder's draft. The doubled greeting
+    is how the operator catches it on the review screen - accepting it
+    silently would send Deepti a letter opening "Hi Rahul,"."""
+    wire = compose_wire_text("Deepti", "Hi Rahul,\n\nThis takes 45 seconds.", "Suryansh")
+    assert wire.startswith("Hi Deepti,")
+    assert "Hi Rahul," in wire
+
+
+def test_a_nameless_greeting_counts_as_a_greeting():
+    for opening in ("Hello,", "Hi there,", "Hey,"):
+        wire = compose_wire_text("Deepti", f"{opening}\n\nThis takes 45 seconds.", "S")
+        assert wire.startswith(opening), opening
+        assert "Hi Deepti," not in wire
+
+
+def test_an_ordinary_body_still_gets_its_greeting():
+    # Every drafted letter: the model writes no greeting, this adds it.
+    wire = compose_wire_text("Deepti", "This takes 45 seconds.", "Suryansh")
+    assert wire.startswith("Hi Deepti,\n\nThis takes 45 seconds.")
+
+
+def test_a_first_line_that_merely_starts_with_hi_is_not_a_greeting():
+    # "Hindsight...", "Hello World is what we shipped," - a word boundary,
+    # and the line has to END at the comma.
+    for body in ("Hindsight is what makes this obvious,\n\nx",
+                 "Hi Deepti, you built something worth reading about.\n\nx"):
+        assert compose_wire_text("Deepti", body, "S").startswith("Hi Deepti,\n\n")

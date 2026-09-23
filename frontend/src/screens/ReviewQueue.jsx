@@ -53,6 +53,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Item, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item'
@@ -216,6 +224,12 @@ export default function ReviewQueue() {
   const [insight, setInsight] = useState(null)
   const [insightId, setInsightId] = useState(null)
   const [insightSeen, setInsightSeen] = useState([])
+  // The company paragraph, written by hand. Operator decision
+  // (2026-09-23): two companies have nothing but a one-liner on their YC
+  // page, so neither the model nor the generic line can help - and
+  // inventing something about a stranger's company is the one outcome
+  // this app exists to prevent. `null` when the editor is closed.
+  const [ownDraft, setOwnDraft] = useState(null)
   const [suggestedId, setSuggestedId] = useState(null)
 
   // Prune settled ids the backend has already confirmed (no longer in
@@ -498,6 +512,17 @@ export default function ReviewQueue() {
   // Asked for on demand: it costs a model call, so only opening the AI
   // suggestion tab on that paragraph pays for one. Asking twice is how
   // the operator gets a second angle, so a repeat is never suppressed.
+  // The editor lives here rather than in the hover card: a hover card
+  // closes the moment the pointer leaves it, which makes typing into one
+  // impossible.
+  function openOwnEditor() {
+    setOwnDraft(current.insight_text ?? '')
+  }
+  function saveOwnLine() {
+    const text = (ownDraft ?? '').trim()
+    setOwnDraft(null)
+    if (text) useInsightNow(text)
+  }
   function askForInsight() {
     if (writeInsight.isPending) return
     const seen = insightId === current.outreach_id ? insightSeen : []
@@ -529,6 +554,7 @@ export default function ReviewQueue() {
     insightPending: writeInsight.isPending,
     onAskInsight: askForInsight,
     onUseInsight: useInsightNow,
+    onWriteOwn: openOwnEditor,
   }
   const checkMarks = rawCheckMarks.map((mark) =>
     coversInsight(mark.quote) ? { ...mark, ...insightOffer } : mark,
@@ -860,6 +886,38 @@ export default function ReviewQueue() {
           </Button>
         </div>
       )}
+
+      {/* Writing the company paragraph by hand. The one honest answer for
+          a company whose YC page is a single line: the model has nothing
+          true to say about them, and the generic line says nothing about
+          them by design. Saved the same way every other change to this
+          paragraph is - through `edit`, which re-runs the checks. */}
+      <Dialog open={ownDraft !== null} onOpenChange={(open) => !open && setOwnDraft(null)}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Your line about {current.company_name}</DialogTitle>
+            <DialogDescription>
+              This replaces the one paragraph that is about them. Nothing else in the letter
+              changes, and nothing here is checked against a source &mdash; it is yours.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            aria-label="Your line about the company"
+            rows={6}
+            autoFocus
+            value={ownDraft ?? ''}
+            onChange={(event) => setOwnDraft(event.target.value)}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOwnDraft(null)}>
+              Cancel
+            </Button>
+            <Button onClick={saveOwnLine} disabled={!(ownDraft ?? '').trim() || busy}>
+              Put it in the letter
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

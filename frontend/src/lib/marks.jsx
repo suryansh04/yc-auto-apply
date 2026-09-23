@@ -19,6 +19,7 @@
 // better to offer - so the card is built to read correctly with just the
 // note in it.
 import { Fragment, useEffect, useState } from 'react'
+import { PenLine } from 'lucide-react'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -104,6 +105,7 @@ function InsightCard({ hit, suggestion, pending, onApply }) {
         <TabsList className="w-full">
           <TabsTrigger value="ai">AI suggestion</TabsTrigger>
           <TabsTrigger value="generic">Generic</TabsTrigger>
+          {hit.onWriteOwn && <TabsTrigger value="own">Write it</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="ai" className="grid gap-2">
@@ -197,6 +199,30 @@ function InsightCard({ hit, suggestion, pending, onApply }) {
             </Button>
           )}
         </TabsContent>
+
+        {/* Operator decision (2026-09-23): for the two companies with
+            nothing but a one-liner on their YC page, neither tab above
+            can help - the model has nothing true to say, and the generic
+            line says nothing about them by design. Writing it yourself
+            is the honest third answer; the alternative is inventing
+            something about a stranger's company.
+
+            The editor is not in this card. A hover card closes when the
+            pointer leaves it, which makes typing into one impossible, so
+            the button hands off to a dialog the screen owns. */}
+        {hit.onWriteOwn && (
+          <TabsContent value="own" className="grid gap-2">
+            <p className="text-muted-foreground text-xs leading-snug">
+              What you actually know about them, in your own words. Nothing here is checked
+              against a source &mdash; which is exactly why it is the safest option when there
+              is nothing to check against.
+            </p>
+            <Button size="sm" variant="outline" className="w-fit" onClick={hit.onWriteOwn}>
+              <PenLine />
+              Write this paragraph
+            </Button>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

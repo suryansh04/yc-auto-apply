@@ -294,3 +294,26 @@ it('says so instead of offering a swap that would change nothing', async () => {
   expect(await screen.findByText(/already using it/i)).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /use a generic line/i })).not.toBeInTheDocument()
 })
+
+it('offers a third tab for writing the paragraph yourself', async () => {
+  // Operator decision (2026-09-23): two companies have nothing but a
+  // one-liner on their YC page. The model has nothing true to say and
+  // the generic line says nothing about them by design, so the honest
+  // third answer is to write it - the alternative is inventing
+  // something about a stranger's company.
+  const onWriteOwn = vi.fn()
+  show('One thing. You built a voice layer. Another.', [
+    { ...INSIGHT, onWriteOwn, onAskInsight: vi.fn() },
+  ])
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('tab', { name: /write it/i }))
+  await userEvent.click(screen.getByRole('button', { name: /write this paragraph/i }))
+  expect(onWriteOwn).toHaveBeenCalled()
+})
+
+it('does not offer the third tab where there is nowhere to write', async () => {
+  show('One thing. You built a voice layer. Another.', [INSIGHT])
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  await screen.findByRole('tab', { name: /generic/i })
+  expect(screen.queryByRole('tab', { name: /write it/i })).not.toBeInTheDocument()
+})

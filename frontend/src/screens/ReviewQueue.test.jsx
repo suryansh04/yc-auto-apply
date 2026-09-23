@@ -979,3 +979,39 @@ it('asks for a different angle when Another is pressed', async () => {
   await waitFor(() => expect(write).toHaveBeenCalledTimes(2))
   expect(write.mock.calls[1][1].avoid).toEqual([WRITTEN])
 })
+
+it('puts a hand-written paragraph into the letter', async () => {
+  // The honest answer for a company whose YC page is one line: the model
+  // has nothing true to say, and the generic line says nothing about
+  // them on purpose.
+  mockQueue([item(INSIGHT_LETTER)])
+  mockWriteInsight({ unavailable: 'this company has no description on its YC page to write from' })
+  const edit = mockEdit()
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('tab', { name: /write it/i }))
+  await userEvent.click(screen.getByRole('button', { name: /write this paragraph/i }))
+
+  const box = await screen.findByLabelText(/your line about the company/i)
+  // It opens on what the letter says now, so this is an edit, not a blank page.
+  expect(box).toHaveValue('You built a voice layer.')
+  await userEvent.clear(box)
+  await userEvent.type(box, 'I have watched three friends use this every morning.')
+  await userEvent.click(screen.getByRole('button', { name: /put it in the letter/i }))
+
+  await waitFor(() => expect(edit).toHaveBeenCalled())
+  expect(edit.mock.calls[0][1].body).toBe('I have watched three friends use this every morning.')
+})
+
+it('an empty hand-written paragraph changes nothing', async () => {
+  mockQueue([item(INSIGHT_LETTER)])
+  mockWriteInsight({ unavailable: 'nothing to offer' })
+  const edit = mockEdit()
+  render(<ReviewQueue />)
+  await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
+  await userEvent.click(await screen.findByRole('tab', { name: /write it/i }))
+  await userEvent.click(screen.getByRole('button', { name: /write this paragraph/i }))
+  await userEvent.clear(await screen.findByLabelText(/your line about the company/i))
+  expect(screen.getByRole('button', { name: /put it in the letter/i })).toBeDisabled()
+  expect(edit).not.toHaveBeenCalled()
+})

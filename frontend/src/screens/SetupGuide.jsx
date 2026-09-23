@@ -32,7 +32,7 @@
 //   support.google.com/cloud/answer/7454865
 // - A Gmail-scoped refresh token also dies when the account's password
 //   changes. Same source as the 7-day rule.
-import { ChevronDown, ExternalLink } from 'lucide-react'
+import { ChevronDown, ExternalLink, ListChecks } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -80,28 +80,43 @@ function Section({ title, children }) {
 
 export default function SetupGuide({ defaultOpen = false }) {
   return (
-    <Collapsible defaultOpen={defaultOpen} className="rounded-lg border">
+    // Operator request (2026-09-23): make this stand out. It sat in the
+    // same plain box as the two read-only facts under it, so the one
+    // thing a first-time operator has to ACT on looked like a caption.
+    // Tinted panel, an icon, and a ring, so it reads as the way in and
+    // not as another row of the card.
+    <Collapsible
+      defaultOpen={defaultOpen}
+      className="group/collapsible border-primary/25 bg-primary/5 ring-primary/10 rounded-lg border ring-1"
+    >
       <CollapsibleTrigger asChild>
         <Button
           variant="ghost"
-          className="h-auto w-full justify-between px-4 py-3 text-left whitespace-normal"
+          className="hover:bg-primary/10 h-auto w-full justify-between gap-3 px-4 py-3 text-left whitespace-normal"
         >
-          <span className="grid gap-0.5">
-            <span className="text-sm font-medium">
-              First time? Set up the Google side
+          <span className="flex items-start gap-3">
+            <span className="bg-primary/10 text-primary mt-0.5 grid size-8 shrink-0 place-items-center rounded-md">
+              <ListChecks className="size-4" />
             </span>
-            <span className="text-muted-foreground text-xs font-normal">
-              About 10 minutes, once. Google has to be told this app exists before it
-              will let it touch your mail.
+            <span className="grid gap-0.5">
+              <span className="text-sm font-semibold">
+                First time? Set up the Google side
+              </span>
+              <span className="text-muted-foreground text-xs font-normal">
+                About 10 minutes, once. Google has to be told this app exists before it
+                will let it touch your mail.
+              </span>
             </span>
           </span>
-          <ChevronDown className="size-4 shrink-0 opacity-60" />
+          <ChevronDown className="size-4 shrink-0 opacity-60 transition-transform group-data-[state=open]/collapsible:rotate-180" />
         </Button>
       </CollapsibleTrigger>
 
       <CollapsibleContent>
         <Separator />
-        <div className="grid gap-6 p-4">
+        {/* The steps themselves sit on the plain surface: the tint marks
+            the way in, it should not follow you through 14 steps. */}
+        <div className="bg-background grid gap-6 rounded-b-lg p-4">
           <Section title="1. Make a project and turn the Gmail API on">
             <Step n={1} title="Open the Google Cloud console">
               <p>

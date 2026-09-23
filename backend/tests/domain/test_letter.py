@@ -33,16 +33,27 @@ def test_the_senders_own_facts_appear_verbatim():
     assert "CodeClash 2.0 at the Google office, competing against 1,000+ teams" in body
 
 
-def test_the_company_paragraph_sits_between_what_he_built_and_the_bridge():
-    # 2026-09-23: the "Now Here's the Important Part:" hinge is gone; the
-    # company paragraph is now anchored by BUILT before it and BRIDGE
-    # after it, and BRIDGE's "That's the kind of problem" only reads
-    # correctly in that position.
+def test_the_company_paragraph_sits_between_what_he_built_and_the_ask():
+    # 2026-09-23: the "Now Here's the Important Part:" hinge went first,
+    # then the bridge line under it ("That's the kind of problem I'd
+    # genuinely like to work on") on the operator's say-so. The ask is
+    # the closing anchor now, and it can be: its first words are the same
+    # in every letter.
     body = letter.assemble_body("Zave", INSIGHT)
-    assert body.index(letter.BUILT) < body.index(INSIGHT[0]) < body.index(letter.BRIDGE)
-    # ...and all of it before the ask, so the letter still turns to the
-    # founder and then asks, rather than asking and then explaining why.
-    assert body.index(INSIGHT[0]) < body.index(letter.ASK.format(company="Zave"))
+    assert body.index(letter.BUILT) < body.index(INSIGHT[0]) < body.index(letter.ASK_ANCHOR)
+    assert letter.OLD_BRIDGE not in body
+
+
+def test_the_dropped_bridge_still_finds_the_paragraph_in_a_letter_that_has_it():
+    # Letters drafted before it was dropped still carry that line, and
+    # they are reviewable letters, not history - the swap and the hover
+    # card have to keep working on them.
+    old = letter.assemble_body("Zave", INSIGHT).replace(
+        INSIGHT[0], INSIGHT[0] + "\n\n" + letter.OLD_BRIDGE)
+    assert letter.insight_region(old) == INSIGHT[0]
+    swapped = letter.with_insight(old, ["A different line entirely."])
+    assert "A different line entirely." in swapped
+    assert letter.OLD_BRIDGE in swapped
 
 
 def test_the_ask_names_the_company():
@@ -138,7 +149,8 @@ def test_the_word_cap_leaves_room_for_the_model_and_the_operator():
     fixed = letter.fixed_word_count("Zave")
     assert fixed < MAX_WORDS, "the fixed blocks alone exceed the word cap"
     # Room for two company paragraphs and the operator's own paragraph on
-    # top. The blocks grew on 2026-09-23 (193 -> 237 words) and the cap
+    # top. The blocks grew on 2026-09-23 (193 -> 237, then 226 once the
+    # bridge line came out) and the cap
     # deliberately did NOT grow with them: the opener now promises 45
     # seconds, so a longer letter would be a promise the letter breaks.
     assert MAX_WORDS - fixed >= 140
@@ -181,3 +193,24 @@ def test_the_operators_own_blocks_are_not_policed_for_phrasing(phrase):
     assert letter.OPENER not in region
     assert letter.BUILT not in region
     assert phrase in region  # the model's own paragraph IS still checked
+
+
+# --- the subject line (operator request 2026-09-23) -----------------------
+
+
+def test_the_subject_is_the_operators_line_not_the_models():
+    # "change the subject to something like this 'Would love to build at
+    # Loop'". Written down for the same reason every other block here is:
+    # it is the same every time, so a model that rewrites it each morning
+    # can only get it wrong.
+    assert letter.subject("Loop Health") == "Would love to build at Loop Health"
+
+
+def test_the_subject_fits_the_checks_that_judge_a_subject():
+    # A subject the validator would reject is a draft that cannot be
+    # approved, so the two have to agree by construction.
+    from app.domain import validation
+
+    for name in ("Zave", "Loop Health", "Orangewood Labs"):
+        words = len(letter.subject(name).split())
+        assert validation.MIN_SUBJECT_WORDS <= words <= validation.MAX_SUBJECT_WORDS

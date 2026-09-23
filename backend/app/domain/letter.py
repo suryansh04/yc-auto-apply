@@ -20,8 +20,14 @@ Edit the blocks here and nowhere else - this module is the copy.
 Loop Health. What changed, and why it matters to the rest of the code:
 
 - There is no "Now Here's the Important Part:" hinge any more. The
-  company paragraph now sits between `BUILT` and `BRIDGE`, and those two
-  are the anchors everything else uses to find it (`insight_region`).
+  company paragraph sits between `BUILT` and the ask, and those two are
+  the anchors everything else uses to find it (`insight_region`). The
+  bridge line that used to close it went on the operator's say-so on
+  2026-09-23; `OLD_BRIDGE` records it, because letters drafted before
+  then still carry it.
+- The subject line is written here too (`SUBJECT`), for the same reason
+  every other block is: it is the same every time, so a model that
+  rewrites it every morning can only get it wrong.
 - `ASK` no longer says "I can see that you have great users and growth".
   That was the one fixed line that made a claim about the FOUNDER, and
   it was being sent to pre-launch companies.
@@ -76,11 +82,17 @@ BUILT = (
     "actually making it work."
 )
 
-# The hinge, and the reason the company paragraph can be found at all:
-# everything above it is about the sender, everything below is about the
-# ask. "That" is the company paragraph, so this line only reads correctly
-# directly after it - which is exactly what makes it a reliable anchor.
-BRIDGE = "That's the kind of problem I'd genuinely like to work on."
+# Operator request (2026-09-23): "That's the kind of problem I'd
+# genuinely like to work on." is GONE. It was a line about the company
+# paragraph rather than a line of its own, and the paragraph now ends on
+# what the sender wants to build anyway - so it said the same thing
+# twice, in the flatter of the two voices.
+#
+# It was also the letter's closing anchor: everything between `BUILT` and
+# it was the company paragraph. `ASK` takes over that job below, which it
+# can because its first words are the same in every letter (the company
+# name only appears in its last sentence).
+OLD_BRIDGE = "That's the kind of problem I'd genuinely like to work on."
 
 # `{company}` is the display name. 2026-09-23: this block used to open
 # "I can see that you have great users and growth" - a claim about the
@@ -97,6 +109,25 @@ CLOSE = (
     "I've attached my resume. If you think there could be a fit, I'd love to "
     "get 15 minutes with you and learn more about what you're building."
 )
+
+# Everything up to the company name, which is what makes this usable as
+# an anchor: `ASK` is the first fixed block after the company paragraph,
+# and this prefix is identical in every letter.
+ASK_ANCHOR = ASK.split("{company}")[0].rstrip()
+
+# Operator request (2026-09-23): "change the subject to something like
+# this 'Would love to build at Loop'". Written down here rather than
+# asked of the model, for the reason every other block here is: it is the
+# operator's own words, it is the same every time, and a model that
+# writes it again each morning is a model that can get it wrong. Three to
+# ten words either way (`validation.MIN/MAX_SUBJECT_WORDS`), so a company
+# whose display name runs long still passes.
+SUBJECT = "Would love to build at {company}"
+
+
+def subject(company_name: str) -> str:
+    """The subject line, naming the company and nothing else."""
+    return SUBJECT.format(company=company_name)
 
 # --- the one paragraph that is about THEM -------------------------------
 
@@ -169,7 +200,6 @@ def fixed_blocks(company_name: str) -> list[str]:
         INTRO,
         BACKGROUND,
         BUILT,
-        BRIDGE,
         ASK.format(company=company_name),
         CLOSE,
     ]
@@ -193,7 +223,7 @@ def assemble_body(
     parts = [OPENER, INTRO, BACKGROUND, BUILT, *insight]
     if include_user_fit_stub:
         parts.append(USER_FIT_STUB)
-    parts += [BRIDGE, ASK.format(company=company_name), CLOSE]
+    parts += [ASK.format(company=company_name), CLOSE]
     return "\n\n".join(parts)
 
 
@@ -201,20 +231,32 @@ def insight_region(body: str) -> str | None:
     """The company paragraph(s) as they currently stand in `body`, or None.
 
     Located by its anchors rather than by position: everything between the
-    end of `BUILT` and the start of `BRIDGE`. Returns None for a body that
+    end of `BUILT` and the start of the ask. Returns None for a body that
     was not assembled from these blocks (a letter drafted before this
     module was rewritten, or one the operator restructured by hand) -
     guessing at which paragraph is "the company one" in a letter that does
     not have this shape would put a rewrite in the wrong place.
+
+    `OLD_BRIDGE` is still accepted as the closing anchor (2026-09-23):
+    letters drafted before it was dropped still carry it, and they are
+    reviewable letters, not history.
     """
     text = body or ""
-    if BUILT not in text or BRIDGE not in text:
+    tail = _tail_anchor(text)
+    if BUILT not in text or tail is None:
         return None
     after = text.split(BUILT, 1)[1]
-    if BRIDGE not in after:
+    if tail not in after:
         return None
-    middle = after.split(BRIDGE, 1)[0]
+    middle = after.split(tail, 1)[0]
     return middle.strip() or None
+
+
+def _tail_anchor(text: str) -> str | None:
+    """Whichever block closes the company region in THIS letter."""
+    if OLD_BRIDGE in text:
+        return OLD_BRIDGE
+    return ASK_ANCHOR if ASK_ANCHOR in text else None
 
 
 def with_insight(body: str, paragraphs: list[str]) -> str | None:
@@ -227,8 +269,9 @@ def with_insight(body: str, paragraphs: list[str]) -> str | None:
     text = body or ""
     if insight_region(text) is None:
         return None
+    anchor = _tail_anchor(text)
     head = text.split(BUILT, 1)[0] + BUILT
-    tail = BRIDGE + text.split(BUILT, 1)[1].split(BRIDGE, 1)[1]
+    tail = anchor + text.split(BUILT, 1)[1].split(anchor, 1)[1]
     fresh = [p.strip() for p in paragraphs if p and p.strip()]
     return "\n\n".join([head.rstrip(), *fresh, tail.lstrip()])
 

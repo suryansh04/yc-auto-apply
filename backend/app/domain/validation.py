@@ -14,7 +14,7 @@ from app.domain.names import company_display_name, company_name_variants
 #
 # Raised again (2026-09-22) for the operator's assembled letter: the fixed
 # blocks in app/domain/letter.py are the bulk of the body before the model
-# writes a syllable - 237 words since the 2026-09-23 rewrite - and the
+# writes a syllable - 226 words since the 2026-09-23 rewrite - and the
 # example email the operator supplied is 318. The cap leaves room for two
 # company paragraphs and the operator's own user-fit paragraph on top of
 # that. `test_letter.py` pins the cap against the real block sizes, so

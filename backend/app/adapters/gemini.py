@@ -192,15 +192,14 @@ himself and you will never see or change it: how he introduces himself,
 what he has built, and what he is asking for.
 
 Your paragraph sits directly after the list of things the sender has
-built, and directly BEFORE this line, which he wrote and you must not
-repeat:
+built, and directly BEFORE the sentence where he asks for the internship,
+which he wrote and you must not repeat or anticipate.
 
-  "That's the kind of problem I'd genuinely like to work on."
-
-So your paragraph has to end on a PROBLEM or a CHOICE - something
-"that's the kind of problem" can point back at. It is the part that
-proves a real person looked at this specific company. Everything before
-it was about the sender; your paragraph is the turn to the founder.
+So your paragraph has to end on a PROBLEM or a CHOICE - the thing he
+would want to work on, left standing without being spelled out. It is
+the part that proves a real person looked at this specific company.
+Everything before it was about the sender; your paragraph is the turn to
+the founder.
 
 WHAT TO WRITE - one or two short paragraphs, nothing else:
 

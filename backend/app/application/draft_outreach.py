@@ -101,6 +101,7 @@ from app.domain.states import OutreachState, assert_transition
 from app.domain.targeting import OUT_OF_BAND_STATUS
 from app.domain.layout import normalise_paragraphs
 from app.domain.letter import assemble_body
+from app.domain.letter import subject as fixed_subject
 from app.domain.names import company_display_name
 from app.domain.validation import SourceRow, validate_draft
 
@@ -489,12 +490,21 @@ def _to_draft(raw: dict, step: int, company_name: str = "") -> Draft:
         source_id = int(source_id) if source_id is not None else None
     except (TypeError, ValueError):
         source_id = None
+    subject = str(raw.get("subject") or "")
     if step == 0 and "company_paragraphs" in raw:
+        display = company_display_name(company_name or "")
         body = assemble_body(
-            company_display_name(company_name or ""),
+            display,
             _paragraph_list(raw.get("company_paragraphs")),
             include_user_fit_stub=bool(raw.get("could_be_a_user")),
         )
+        # Operator request (2026-09-23): the subject is his, like every
+        # other fixed block - "Would love to build at {company}". The
+        # model still returns one (the schema requires it) and it is
+        # dropped here rather than in the prompt, so a provider that
+        # ignores an instruction cannot put its own subject on an email.
+        if display:
+            subject = fixed_subject(display)
     else:
         # The drafter schema returns one array entry per paragraph (live
         # finding 2026-09-17). A plain string still works - older stored
@@ -502,7 +512,7 @@ def _to_draft(raw: dict, step: int, company_name: str = "") -> Draft:
         # `normalise_paragraphs` repairs the breaks (2026-09-16).
         body = normalise_paragraphs(_body_text(raw.get("body")))
     return Draft(
-        subject=str(raw.get("subject") or ""),
+        subject=subject,
         body=body,
         research_source_type=str(raw.get("research_source_type") or ""),
         research_source_id=source_id,

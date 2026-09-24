@@ -208,10 +208,21 @@ SUBJECTS_JSON_SCHEMA: dict[str, Any] = {
 INSIGHT_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "paragraph": {"type": "string"},
+        "options": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "style": {"type": "string", "enum": ["excited", "curious", "short"]},
+                    "paragraph": {"type": "string"},
+                },
+                "required": ["style", "paragraph"],
+                "additionalProperties": False,
+            },
+        },
         "why": {"type": "string"},
     },
-    "required": ["paragraph", "why"],
+    "required": ["options", "why"],
     "additionalProperties": False,
 }
 

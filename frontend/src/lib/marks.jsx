@@ -89,7 +89,14 @@ function InsightCard({ hit, suggestion, pending, onApply }) {
   // honest answer to "would pressing this change anything?".
   const alreadyGeneric = hit.generic != null && hit.quote?.trim() === hit.generic.trim()
   const [tab, setTab] = useState('ai')
-  const written = hit.insight?.paragraph
+  // Three options since 2026-09-25 (excited / curious / short). An answer
+  // in the older one-paragraph shape is shown as a single option.
+  const options = hit.insight?.options?.length
+    ? hit.insight.options
+    : hit.insight?.paragraph
+      ? [{ style: '', paragraph: hit.insight.paragraph }]
+      : []
+  const written = options.length > 0
   // Opening the tab is the request. Asked once per card unless the
   // operator presses for another - `onAskInsight` guards the repeat.
   useEffect(() => {
@@ -111,26 +118,38 @@ function InsightCard({ hit, suggestion, pending, onApply }) {
         <TabsContent value="ai" className="grid gap-2">
           {written ? (
             <>
-              <div className="rounded-md border border-amber-400/70 bg-amber-50 p-2 text-sm dark:border-amber-500/40 dark:bg-amber-950/40">
-                {written}
-              </div>
+              {/* Operator request (2026-09-25): options in different voices
+                  - "excited", a plainer "curious" one that admits he does
+                  not know how they do it yet, and a "short" one - so he
+                  picks the one that sounds most like him. */}
+              <ul aria-label="Suggested paragraphs" className="grid max-h-80 gap-2 overflow-y-auto">
+                {options.map((option) => (
+                  <li key={option.paragraph} className="grid gap-1.5 rounded-md border border-amber-400/70 bg-amber-50 p-2 dark:border-amber-500/40 dark:bg-amber-950/40">
+                    {option.style && (
+                      <span className="text-muted-foreground text-xs font-medium capitalize">
+                        {option.style}
+                      </span>
+                    )}
+                    <p className="text-sm">{option.paragraph}</p>
+                    {hit.onUseInsight && (
+                      <Button size="sm" className="w-fit" disabled={hit.busy}
+                              aria-label={`Use the ${option.style || 'suggested'} one`}
+                              onClick={() => hit.onUseInsight(option.paragraph)}>
+                        Use this
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
               {hit.insight.why && (
                 <p className="text-muted-foreground text-xs leading-snug">{hit.insight.why}</p>
               )}
-              <div className="flex items-center gap-2">
-                {hit.onUseInsight && (
-                  <Button size="sm" className="w-fit" disabled={hit.busy}
-                          onClick={() => hit.onUseInsight(written)}>
-                    Use this
-                  </Button>
-                )}
-                {hit.onAskInsight && (
-                  <Button size="sm" variant="ghost" className="w-fit"
-                          disabled={hit.insightPending} onClick={hit.onAskInsight}>
-                    Another
-                  </Button>
-                )}
-              </div>
+              {hit.onAskInsight && (
+                <Button size="sm" variant="ghost" className="w-fit"
+                        disabled={hit.insightPending} onClick={hit.onAskInsight}>
+                  Another
+                </Button>
+              )}
             </>
           ) : hit.insightPending ? (
             <p className="text-muted-foreground flex items-center gap-2 text-xs">

@@ -1132,10 +1132,20 @@ class GeminiReviser:
 INSIGHT_SCHEMA: dict[str, Any] = {
     "type": "OBJECT",
     "properties": {
-        "paragraph": {"type": "STRING"},
+        "options": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "style": {"type": "STRING", "enum": ["excited", "curious", "short"]},
+                    "paragraph": {"type": "STRING"},
+                },
+                "required": ["style", "paragraph"],
+            },
+        },
         "why": {"type": "STRING"},
     },
-    "required": ["paragraph"],
+    "required": ["options"],
 }
 
 _INSIGHT_SYSTEM = """A student is sending a cold email to the founder of a startup, asking for a
@@ -1181,7 +1191,41 @@ Both say the same thing. The first reads like it was generated, because
 of the symmetry: a formal setup, "Usually ...", then "Instead you ...".
 The second reads like someone talking.
 
-THE SHAPE, in two or three sentences:
+WRITE THREE OPTIONS - the same company, three different ways of saying
+it - so he can pick the one that sounds most like him. Operator request
+(2026-09-25): alongside the excited version, he wants plainer ones like
+these, written for a warehousing company (their wording is not to be
+copied, only their manner):
+
+  CURIOUS: The inventory placement side of WareIQ is what caught my eye.
+  Guessing where stock should be before anyone orders it sounds hard to
+  get right, and I'd like to see how you do it.
+
+  SHORT: I got curious about how WareIQ decides which warehouse stock goes
+  to before an order is placed. That's the kind of problem I want to work
+  on.
+
+The curious one reads as the most human because it ADMITS he does not
+know how they do it yet. Founders like that more than a confident summary
+of their own product.
+
+The three styles, one option each:
+
+- "excited": the shape below - what you noticed, why it matters, and the
+  closing line on why he is writing.
+- "curious": plain. Name the part of what they do that caught his eye,
+  say honestly that it sounds hard and he would like to see how they do
+  it, and end on wanting to work on it. No contrast, no "instead of".
+- "short": two sentences. What he got curious about, and that it is the
+  kind of problem he wants to work on.
+
+Every option may tie it to HIM in one short clause, but ONLY through the
+list of what he has built, given below under WHAT HE HAS BUILT - name one
+of those things and add nothing about it the list does not say. Never
+invent coursework, a specialisation, a skill or an interest. If nothing
+in his list genuinely connects, leave him out; most options will.
+
+THE SHAPE of the "excited" option, in two or three sentences:
 
 1. Open with what you noticed - not what the product is, the CHOICE
    inside it. Say it in his voice: "I really like how you ...", "What I
@@ -1295,25 +1339,27 @@ HARD RULES:
   Say "writing to you" or "applying".
 - No questions. No advice about what they should build next. No criticism
   of their product, and no telling them what their own market is.
-- Do not mention the internship itself, the student's skills, projects,
-  resume or availability - the next paragraph is the ask. The closing
-  line says only that THIS is why he is writing, and stops.
-- End on the specific thing, not on yourself. A closing clause that fits
-  any company ("which is the kind of thing I want to build") is worth
-  nothing and is banned above. The last sentence lands on what their
-  choice does for the person on the other end.
+- Do not mention the internship itself, his resume or his availability -
+  the next paragraph is the ask. His background appears only as described
+  above: one thing from WHAT HE HAS BUILT, by name, or not at all.
+- Each option ends on HIM: why he is writing, or that it is the kind of
+  problem he wants to work on.
+- The three options must differ in more than wording - different
+  openings, different lengths, different things they lead with.
 - Write like a smart twenty-year-old talking, not like a brochure. Short
   words. Contractions are not merely allowed, they are the point: "you're"
   and "didn't", never "you are" and "did not".
 
-If the description is too thin to say anything true and specific - a single
-marketing line with no mechanism in it - return an EMPTY paragraph rather
-than something vague. A generic line is already written for that case, and
+If the source is too thin to say anything true and specific - a single
+marketing line with no mechanism in it - return NO options rather than
+something vague. A generic line is already written for that case, and
 inventing a detail is far worse than having nothing to add.
 
-Return JSON: {"paragraph": "...", "why": "one short line naming what you
-latched onto"}. `why` is for the student, not the founder, and never
-appears in the email."""
+Return JSON: {"options": [{"style": "excited", "paragraph": "..."},
+{"style": "curious", "paragraph": "..."}, {"style": "short",
+"paragraph": "..."}], "why": "one short line naming what you latched
+onto"}. `why` is for the student, not the founder, and never appears in
+the email."""
 
 
 def build_insight_prompt(context: dict) -> str:
@@ -1333,6 +1379,9 @@ def build_insight_prompt(context: dict) -> str:
     # letter now, and anything a previous attempt produced. Named rather
     # than described, because "write something different" means nothing
     # without the thing it has to differ from.
+    built = str(context.get("built") or "").strip()
+    if built:
+        lines += ["", "WHAT HE HAS BUILT (his own words, from his letter)", built]
     avoid = [str(a).strip() for a in (context.get("avoid") or []) if str(a).strip()]
     if avoid:
         lines += ["", "ALREADY WRITTEN FOR THIS COMPANY - take a different angle, and do "
@@ -1343,16 +1392,33 @@ def build_insight_prompt(context: dict) -> str:
 
 
 def _insight(data: Any, stage: str) -> dict:
-    """The paragraph out of a response, whatever shape it arrived in.
-    Shared by both providers, like `_revisions` above."""
+    """`{options: [{style, paragraph}], why}` out of a response, whatever
+    shape it arrived in. Shared by both providers, like `_revisions`.
+
+    A response in the older one-paragraph shape is still understood - as
+    a single option - so a model that ignores the schema is not turned
+    into a failure nobody can see."""
     if isinstance(data, list):
-        data = data[0] if data else {}
+        data = {"options": data}
     if not isinstance(data, dict):
         raise ValueError(f"{stage}: expected a JSON object")
-    for key in ("paragraph", "insight", "text"):
-        if key in data:
-            return {"paragraph": str(data[key] or ""), "why": str(data.get("why") or "")}
-    raise ValueError(f"{stage}: response has no paragraph")
+    why = str(data.get("why") or "")
+    raw = data.get("options")
+    if raw is None:
+        for key in ("paragraph", "insight", "text"):
+            if key in data:
+                raw = [{"style": "excited", "paragraph": data[key]}]
+                break
+    if not isinstance(raw, list):
+        raise ValueError(f"{stage}: response has no options")
+    options = []
+    for item in raw:
+        if isinstance(item, str):
+            item = {"style": "", "paragraph": item}
+        if isinstance(item, dict):
+            options.append({"style": str(item.get("style") or ""),
+                            "paragraph": str(item.get("paragraph") or "")})
+    return {"options": options, "why": why}
 
 
 class GeminiInsightWriter:

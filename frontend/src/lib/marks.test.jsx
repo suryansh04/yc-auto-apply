@@ -260,7 +260,7 @@ it('shows the paragraph it wrote, and puts it in on request', async () => {
   await hover(screen.getByLabelText(/paragraph about them/i))
   expect(await screen.findByText(WRITTEN)).toBeInTheDocument()
   expect(screen.getByText(/the choice inside the product/i)).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: /^use this$/i }))
+  await userEvent.click(screen.getByRole('button', { name: /use the suggested one/i }))
   expect(onUseInsight).toHaveBeenCalledWith(WRITTEN)
 })
 
@@ -316,4 +316,23 @@ it('does not offer the third tab where there is nowhere to write', async () => {
   await hover(screen.getByLabelText(/paragraph about them/i))
   await screen.findByRole('tab', { name: /generic/i })
   expect(screen.queryByRole('tab', { name: /write it/i })).not.toBeInTheDocument()
+})
+
+it('offers each option with its style, and puts in the one picked', async () => {
+  // Operator request (2026-09-25): excited, curious and short, so he picks
+  // the one that sounds most like him.
+  const onUseInsight = vi.fn()
+  show('One thing. You built a voice layer. Another.', [
+    { ...INSIGHT, onUseInsight, onAskInsight: vi.fn(),
+      insight: { options: [
+        { style: 'excited', paragraph: 'I really like how you do it.' },
+        { style: 'curious', paragraph: 'That part caught my eye.' },
+        { style: 'short', paragraph: 'I got curious about it.' },
+      ] } },
+  ])
+  await hover(screen.getByLabelText(/paragraph about them/i))
+  const list = await screen.findByRole('list', { name: /suggested paragraphs/i })
+  expect(list.querySelectorAll('li')).toHaveLength(3)
+  await userEvent.click(screen.getByRole('button', { name: /use the curious one/i }))
+  expect(onUseInsight).toHaveBeenCalledWith('That part caught my eye.')
 })

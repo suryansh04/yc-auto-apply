@@ -30,6 +30,7 @@ from app.api.schemas import (
     EditIn,
     HighlightOut,
     InsightIn,
+    InsightOptionOut,
     InsightOut,
     OkOut,
     QueueItemOut,
@@ -359,12 +360,16 @@ def write_insight(outreach_id: int, payload: InsightIn | None = None,
         one_liner=getattr(company, "one_liner", None) or "",
         description=description,
         avoid=avoid,
+        # His own list of what he has built - the only thing about him an
+        # option may mention (2026-09-25).
+        built=letter.BUILT,
     )
     if answer is None:
         return InsightOut(
             unavailable="nothing specific enough to offer from what they wrote about themselves"
         )
-    return InsightOut(paragraph=answer["paragraph"], why=answer["why"])
+    options = [InsightOptionOut(**o) for o in answer["options"]]
+    return InsightOut(options=options, paragraph=options[0].paragraph, why=answer["why"])
 
 
 @router.post("/outreach/{outreach_id}/subjects", response_model=SubjectsOut)

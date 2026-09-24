@@ -175,3 +175,21 @@ def test_the_template_every_company_would_get_is_refused(
     }
     body = client.post(f"/api/outreach/{pending_draft.outreach.id}/insight").json()
     assert body["paragraph"] is None
+
+
+def test_it_offers_every_usable_option_with_its_style(
+    client, repos, pending_draft, fake_insight_writer
+):
+    """Operator request (2026-09-25): three options - excited, curious and
+    short - so he picks the one that sounds most like him."""
+    short = ("I got curious about how Vahan puts a hiring conversation on a phone call. "
+             "That's the kind of problem I want to work on.")
+    fake_insight_writer.answer = {"options": [
+        {"style": "excited", "paragraph": GOOD},
+        {"style": "short", "paragraph": short},
+    ], "why": ""}
+    body = client.post(f"/api/outreach/{pending_draft.outreach.id}/insight").json()
+    assert [o["style"] for o in body["options"]] == ["excited", "short"]
+    assert body["paragraph"] == GOOD
+    # His own list of what he built is the only thing about him it may use.
+    assert "A few things I've built" in fake_insight_writer.context["built"]

@@ -955,7 +955,7 @@ it('puts the written paragraph into the letter on Use this', async () => {
   const edit = mockEdit()
   render(<ReviewQueue />)
   await userEvent.hover(await screen.findByLabelText(/paragraph about them/i))
-  await userEvent.click(await screen.findByRole('button', { name: /^use this$/i }))
+  await userEvent.click(await screen.findByRole('button', { name: /use the suggested one/i }))
   await waitFor(() => expect(edit).toHaveBeenCalled())
   // The body it saves is the letter with that paragraph swapped in - the
   // wire text's greeting and signature are never sent back.

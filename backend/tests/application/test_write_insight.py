@@ -53,14 +53,17 @@ def _run(writer):
 
 
 def test_a_usable_paragraph_comes_back_with_its_reason():
-    assert _run(Writer()) == {"paragraph": GOOD, "why": "the choice"}
+    assert _run(Writer()) == {
+        "options": [{"style": "excited", "paragraph": GOOD}], "why": "the choice",
+    }
 
 
 def test_the_model_is_handed_the_description_and_nothing_about_the_letter():
     writer = Writer()
     _run(writer)
     assert writer.context == {
-        "company_name": NAME, "one_liner": ONE_LINER, "description": DESCRIPTION, "avoid": [],
+        "company_name": NAME, "one_liner": ONE_LINER, "description": DESCRIPTION,
+        "built": "", "avoid": [],
     }
 
 
@@ -181,7 +184,7 @@ def test_a_template_answer_is_asked_once_more_rather_than_dropped():
     # Silence is a worse answer than a second attempt, and this is a
     # failure the model can correct when shown what it just wrote.
     writer = TwoAnswers(TEMPLATE, GOOD)
-    assert _run(writer)["paragraph"] == GOOD
+    assert _run(writer)["options"][0]["paragraph"] == GOOD
     assert len(writer.contexts) == 2
     assert TEMPLATE in writer.contexts[1]["avoid"]
 
@@ -203,5 +206,64 @@ def test_other_rejections_are_not_retried():
 def test_what_the_letter_already_says_is_never_offered_back():
     writer = TwoAnswers(GOOD, GOOD + " And one more thought about it.")
     out = run_insight_writer(writer, NAME, ONE_LINER, DESCRIPTION, avoid=[GOOD])
-    assert out["paragraph"] != GOOD
+    assert out["options"][0]["paragraph"] != GOOD
     assert GOOD in writer.contexts[0]["avoid"]
+
+
+
+# --- three options (operator request 2026-09-25) -----------------------------
+#
+# "tell the suggestion to also suggest option like this": an excited one,
+# a plainer curious one that admits he does not know how they do it yet,
+# and a short one.
+
+CURIOUS = (
+    "The way Loop Health folds clinic visits into the cover is what caught my eye. "
+    "Keeping that cheap enough to be unlimited sounds hard to get right, and I'd like to "
+    "see how you do it."
+)
+SHORT = (
+    "I got curious about how Loop Health makes everyday clinic visits part of the cover. "
+    "That's the kind of problem I want to work on."
+)
+
+
+class Options:
+    def __init__(self, *options):
+        self.options = list(options)
+        self.context = None
+
+    def write(self, context):
+        self.context = context
+        return {"options": self.options, "why": "the clinic choice"}
+
+
+def test_all_three_styles_come_back_when_all_three_are_usable():
+    out = _run(Options({"style": "excited", "paragraph": GOOD},
+                       {"style": "curious", "paragraph": CURIOUS},
+                       {"style": "short", "paragraph": SHORT}))
+    assert [o["style"] for o in out["options"]] == ["excited", "curious", "short"]
+
+
+def test_a_bad_option_is_dropped_and_the_rest_are_still_offered():
+    out = _run(Options({"style": "excited", "paragraph": TEMPLATE},
+                       {"style": "short", "paragraph": SHORT}))
+    assert out["options"] == [{"style": "short", "paragraph": SHORT}]
+
+
+def test_two_identical_options_are_one_option():
+    out = _run(Options({"style": "curious", "paragraph": CURIOUS},
+                       {"style": "short", "paragraph": CURIOUS}))
+    assert len(out["options"]) == 1
+
+
+def test_his_own_closing_line_is_not_refused_any_more():
+    # "That's the kind of problem I want to work on" closes two of the
+    # three examples he asked for.
+    assert unusable_reason(SHORT) is None
+
+
+def test_what_he_has_built_is_passed_through_as_the_only_thing_about_him():
+    writer = Options({"style": "short", "paragraph": SHORT})
+    run_insight_writer(writer, NAME, ONE_LINER, DESCRIPTION, built="1. WaveWatch: ...")
+    assert writer.context["built"] == "1. WaveWatch: ..."

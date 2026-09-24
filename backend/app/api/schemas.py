@@ -234,6 +234,11 @@ class InsightIn(BaseModel):
     avoid: list[str] = []
 
 
+class InsightOptionOut(BaseModel):
+    style: str = ""
+    paragraph: str
+
+
 class InsightOut(BaseModel):
     """A company paragraph written from the company's own YC description.
 
@@ -247,6 +252,10 @@ class InsightOut(BaseModel):
     description on its YC page, or a model that answered with something
     unusable."""
 
+    # Three options since 2026-09-25 - "excited", "curious", "short" - so
+    # the operator picks the one that sounds most like him. `paragraph` is
+    # the first of them, kept for anything that reads a single answer.
+    options: list[InsightOptionOut] = []
     paragraph: str | None = None
     why: str = ""
     unavailable: str | None = None

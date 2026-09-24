@@ -57,7 +57,10 @@ log = logging.getLogger(__name__)
 # The paragraph it replaces is one of eight in the letter. Below the floor
 # it says nothing; above the ceiling it is no longer a paragraph in a cold
 # email that is already close to its word budget (`validation.MAX_WORDS`).
-MIN_WORDS = 25
+# 18, not 25 (2026-09-25): the "short" option is two sentences by design -
+# "I got curious about how WareIQ decides which warehouse stock goes to
+# before an order is placed. That's the kind of problem I want to work on."
+MIN_WORDS = 18
 MAX_WORDS = 110
 
 # D10: the letter is plain text. A model that answers in markdown has
@@ -110,14 +113,15 @@ _FORMULA_TELLS = (
     "the thing that stuck with me",
     "on the same side",
     "kind of thing i want to build",
-    "kind of thing i want to work on",
-    "sort of problem i want to work on",
     "sort of thing i want to build",
     "kind of system i want to build",
     "kind of interface i want to build",
-    "kind of problem i want to work on",
     "which is the interface i want",
-    "is what i want to work on",
+    # "That's the kind of problem I want to work on" is NOT here any more
+    # (2026-09-25): it closes two of the three examples the operator asked
+    # the options to be like, and it was his own bridge line once. What
+    # made the first template a template was the whole shape, and those
+    # parts are still refused above.
 )
 
 _TELLS = tuple(
@@ -158,26 +162,34 @@ def unusable_reason(paragraph: str) -> str | None:
 
 
 def run_insight_writer(
-    writer, company_name: str, one_liner: str, description: str, avoid: list[str] | None = None,
+    writer, company_name: str, one_liner: str, description: str,
+    avoid: list[str] | None = None, built: str = "",
 ) -> dict | None:
-    """Ask for a company paragraph, and return it only if it is usable.
+    """Ask for company paragraphs, and return the usable ones.
+
+    Operator request (2026-09-25): three options rather than one - the
+    excited one, a plainer "curious" one that admits he does not know how
+    they do it yet, and a short one - so he picks the one that sounds most
+    like him. Each is checked on its own; the ones that fail are dropped
+    and the rest are offered.
+
+    `built` is the list of what he has built, from his own letter. It is
+    the ONLY thing about him an option may mention, so nothing about his
+    background can be invented here.
 
     `avoid` is what this company has already been given - the paragraph in
     the letter now, and whatever a previous press of "Another" produced.
-    It is handed to the model, and an answer that comes back as one of
-    them anyway is refused here.
 
-    A paragraph rejected for reaching for the template is asked ONE more
-    time, with the rejected text added to `avoid`. Silence is a worse
-    answer than a second attempt, and a template answer is a failure the
-    model can actually correct when it is shown what it just wrote. Every
-    other rejection stands: a model that quoted a number or invented a
-    detail is not more trustworthy on the retry.
+    When every option is refused and at least one for reaching for a
+    template, it is asked ONE more time with the refused text named.
+    Silence is a worse answer than a second attempt, and that failure is
+    one the model can correct. Every other refusal stands.
 
-    `{paragraph, why}` or None. Never raises (see module docstring).
+    `{options: [{style, paragraph}], why}` with at least one option, or
+    None. Never raises (see module docstring).
     """
     if not (description or "").strip():
-        log.info("insight: %s has no YC description to write from", company_name)
+        log.info("insight: %s has nothing to write from", company_name)
         return None
 
     seen = [a.strip() for a in (avoid or []) if a and a.strip()]
@@ -187,6 +199,7 @@ def run_insight_writer(
                 "company_name": company_name,
                 "one_liner": one_liner or "",
                 "description": description,
+                "built": built or "",
                 "avoid": list(seen),
             })
         except Exception as exc:  # noqa: BLE001 - a provider failure is advice that did not arrive
@@ -194,15 +207,37 @@ def run_insight_writer(
             log.warning("insight: writer failed (%s)", type(exc).__name__)
             return None
 
-        paragraph = str((answer or {}).get("paragraph") or "").strip()
-        reason = _rejection(paragraph, seen)
-        if reason is None:
-            return {"paragraph": paragraph, "why": str((answer or {}).get("why") or "").strip()}
-        log.info("insight: dropped an answer for %s - %s", company_name, reason)
-        if attempt == 2 or not _worth_retrying(reason) or not paragraph:
+        usable, retry_with = [], []
+        for option in _options_of(answer):
+            paragraph = option["paragraph"].strip()
+            reason = _rejection(paragraph, seen + [u["paragraph"] for u in usable])
+            if reason is None:
+                usable.append({"style": option["style"], "paragraph": paragraph})
+                continue
+            log.info("insight: dropped a %s option for %s - %s",
+                     option["style"] or "unlabelled", company_name, reason)
+            if paragraph and _worth_retrying(reason):
+                retry_with.append(paragraph)
+        if usable:
+            return {"options": usable, "why": str((answer or {}).get("why") or "").strip()}
+        if attempt == 2 or not retry_with:
             return None
-        seen.append(paragraph)
+        seen.extend(retry_with)
     return None
+
+
+def _options_of(answer) -> list[dict]:
+    """The options out of whatever the adapter returned - its own shape,
+    or the older single paragraph a test fake may still hand back."""
+    answer = answer or {}
+    if isinstance(answer.get("options"), list):
+        raw = answer["options"]
+    elif "paragraph" in answer:
+        raw = [{"style": "excited", "paragraph": answer.get("paragraph")}]
+    else:
+        raw = []
+    return [{"style": str(o.get("style") or ""), "paragraph": str(o.get("paragraph") or "")}
+            for o in raw if isinstance(o, dict)]
 
 
 def _rejection(paragraph: str, seen: list[str]) -> str | None:

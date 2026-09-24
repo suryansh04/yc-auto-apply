@@ -36,7 +36,10 @@ PARAGRAPH = (
     "India only kicks in when you land in a hospital, so people pay for it every year and "
     "barely use it. You turned it into something people actually use day to day."
 )
-INSIGHT_JSON = json.dumps({"paragraph": PARAGRAPH, "why": "the choice inside the product"})
+INSIGHT_JSON = json.dumps({
+    "options": [{"style": "excited", "paragraph": PARAGRAPH}],
+    "why": "the choice inside the product",
+})
 
 
 # --- GeminiInsightWriter -------------------------------------------------------
@@ -45,7 +48,8 @@ INSIGHT_JSON = json.dumps({"paragraph": PARAGRAPH, "why": "the choice inside the
 def test_gemini_writer_returns_the_paragraph_and_its_reason():
     client = FakeGenAIClient(INSIGHT_JSON)
     assert GeminiInsightWriter(client, model=MODEL).write(CONTEXT) == {
-        "paragraph": PARAGRAPH, "why": "the choice inside the product",
+        "options": [{"style": "excited", "paragraph": PARAGRAPH}],
+        "why": "the choice inside the product",
     }
 
 
@@ -60,7 +64,8 @@ def test_gemini_writer_requests_structured_json():
     GeminiInsightWriter(client, model=MODEL).write(CONTEXT)
     config = _config_as_dict(client.models.calls[0]["config"])
     assert config["response_mime_type"] == "application/json"
-    assert config["response_schema"]["properties"]["paragraph"]["type"] == "STRING"
+    item = config["response_schema"]["properties"]["options"]["items"]
+    assert item["properties"]["paragraph"]["type"] == "STRING"
 
 
 def test_gemini_writer_raises_on_non_json_output():
@@ -132,7 +137,7 @@ def _writer(**kw) -> SarvamInsightWriter:
 @respx.mock
 def test_sarvam_writer_posts_the_description_with_the_subscription_key_header():
     route = respx.post(URL).mock(return_value=_ok(INSIGHT_JSON))
-    assert _writer().write(CONTEXT)["paragraph"] == PARAGRAPH
+    assert _writer().write(CONTEXT)["options"][0]["paragraph"] == PARAGRAPH
     req = route.calls[0].request
     assert req.headers["api-subscription-key"] == API_KEY
     body = json.loads(req.content)
@@ -146,7 +151,7 @@ def test_sarvam_writer_requests_strict_json_schema():
     _writer().write(CONTEXT)
     rf = json.loads(route.calls[0].request.content)["response_format"]
     assert rf["json_schema"]["strict"] is True
-    assert rf["json_schema"]["schema"]["required"] == ["paragraph", "why"]
+    assert rf["json_schema"]["schema"]["required"] == ["options", "why"]
 
 
 @respx.mock
@@ -237,3 +242,27 @@ def test_the_draft_time_prompt_is_in_the_same_voice():
     assert "I really like how" in _FIRST_EMAIL_SYSTEM
     assert "ALWAYS end on HIM" in _FIRST_EMAIL_SYSTEM
     assert "a thing they avoided, then the thing they chose instead" not in _FIRST_EMAIL_SYSTEM
+
+
+
+def test_an_old_one_paragraph_answer_is_still_understood():
+    from app.adapters.gemini import _insight
+
+    assert _insight({"paragraph": "x", "why": "y"}, "t") == {
+        "options": [{"style": "excited", "paragraph": "x"}], "why": "y",
+    }
+
+
+def test_the_prompt_asks_for_the_curious_style_he_gave():
+    from app.adapters.gemini import _INSIGHT_SYSTEM
+
+    flat = " ".join(_INSIGHT_SYSTEM.split())
+    assert "WRITE THREE OPTIONS" in flat
+    assert "I'd like to see how you do it" in flat
+    # ...and forbids inventing his background.
+    assert "Never invent coursework" in flat
+
+
+def test_what_he_has_built_is_in_the_prompt_when_given():
+    prompt = build_insight_prompt({**CONTEXT, "built": "1. WaveWatch: a platform"})
+    assert "WHAT HE HAS BUILT" in prompt and "WaveWatch" in prompt

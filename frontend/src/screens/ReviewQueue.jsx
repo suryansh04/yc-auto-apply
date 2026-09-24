@@ -154,7 +154,9 @@ export default function ReviewQueue() {
       setInsightId(id)
       // Remembered so the next Another is asked for something else
       // again, rather than walking back to the first answer.
-      if (data?.paragraph) setInsightSeen((seen) => [...seen, data.paragraph])
+      const shown = (data?.options ?? []).map((o) => o.paragraph)
+      if (!shown.length && data?.paragraph) shown.push(data.paragraph)
+      if (shown.length) setInsightSeen((seen) => [...seen, ...shown])
     },
     onError: (err, { id }) => {
       setInsight({ paragraph: null, unavailable: err.message })

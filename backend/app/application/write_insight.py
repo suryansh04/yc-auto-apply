@@ -102,6 +102,12 @@ _DISCOVERY_TELLS = (
 _FORMULA_TELLS = (
     "and you did not",
     "and you didn't",
+    # Round three (2026-09-24): lifted from the prompt's own worked example
+    # and written back for Inito, a company the example had nothing to do
+    # with. The example no longer says it; this makes sure nothing does.
+    "unglamorous",
+    "could have taken the obvious route",
+    "the thing that stuck with me",
     "on the same side",
     "kind of thing i want to build",
     "kind of thing i want to work on",

@@ -221,6 +221,19 @@ def test_the_paragraph_ends_on_why_he_is_writing():
     must not use the phrases the rest of the letter's checks reject."""
     from app.adapters.gemini import _INSIGHT_SYSTEM
 
-    assert "ALWAYS end on HIM" in _INSIGHT_SYSTEM
-    assert "main reason I'm writing to you" in _INSIGHT_SYSTEM
-    assert 'Never "reaching out"' in _INSIGHT_SYSTEM
+    flat = " ".join(_INSIGHT_SYSTEM.split())
+    assert "ALWAYS end on HIM" in flat
+    assert "main reason I'm writing to you" in flat
+    assert 'Never "reaching out"' in flat
+
+
+def test_the_draft_time_prompt_is_in_the_same_voice():
+    """Live finding (2026-09-24): Inito's paragraph - "could have taken the
+    obvious route ... Instead you built ... the thing that stuck with me" -
+    came from the DRAFT-time prompt, which still asked for that shape. It
+    and the AI suggestion write the same paragraph, in the same voice."""
+    from app.adapters.gemini import _FIRST_EMAIL_SYSTEM
+
+    assert "I really like how" in _FIRST_EMAIL_SYSTEM
+    assert "ALWAYS end on HIM" in _FIRST_EMAIL_SYSTEM
+    assert "a thing they avoided, then the thing they chose instead" not in _FIRST_EMAIL_SYSTEM

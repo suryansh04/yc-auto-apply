@@ -55,14 +55,31 @@ def test_it_writes_nothing_to_the_draft(client, repos, pending_draft, fake_insig
     assert client.get(f"/api/queue/{pending_draft.outreach.id}").json()["body"] == before
 
 
-def test_a_company_with_no_description_says_so_rather_than_inventing_one(
+def test_no_yc_description_falls_back_to_their_news_and_launches(
     client, repos, pending_draft, fake_insight_writer
 ):
+    """Live finding (2026-09-24): Inito has no YC description but does
+    have a news story, and its paragraph could not be rewritten."""
     repos.company.rows[pending_draft.outreach.id].long_description = None
+    fake_insight_writer.answer = {"paragraph": GOOD, "why": ""}
     body = client.post(f"/api/outreach/{pending_draft.outreach.id}/insight").json()
 
+    assert body["paragraph"] == GOOD
+    material = fake_insight_writer.context["description"]
+    assert material.startswith("A news headline about them: ")
+
+
+def test_a_company_with_nothing_at_all_says_so_rather_than_inventing_one(
+    client, repos, pending_draft, fake_insight_writer
+):
+    company_id = pending_draft.outreach.id
+    repos.company.rows[company_id].long_description = None
+    repos.news.rows = [n for n in repos.news.rows if n.company_id != company_id]
+    repos.launch.rows = [l for l in repos.launch.rows if l.company_id != company_id]
+    body = client.post(f"/api/outreach/{company_id}/insight").json()
+
     assert body["paragraph"] is None
-    assert "no description" in body["unavailable"]
+    assert "nothing about this company" in body["unavailable"]
     # And nothing was asked of the model.
     assert fake_insight_writer.context is None
 

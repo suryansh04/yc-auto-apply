@@ -437,6 +437,36 @@ class ReviewOutreach:
     def _sources(self, company):
         return build_sources(self._repos.news, self._repos.launch, self._repos.job_posting, company)
 
+    # Headings for what the company paragraph is written from, in the
+    # words the model is told to use (never the database's kind names).
+    _MATERIAL_HEADINGS = {
+        "long_description": "What the founders wrote about the company",
+        "launch": "Their launch post",
+        "news": "A news headline about them",
+    }
+
+    def company_material(self, company) -> str:
+        """What the company paragraph can be written from: the founders'
+        own YC description, and failing that their launch posts and news
+        headlines.
+
+        Live finding (2026-09-24): Inito's paragraph read as generated,
+        and the AI suggestion could not replace it - Inito is one of the
+        9 companies with no YC description, though it has a news story.
+        Job postings are left out on purpose: a role someone is hiring
+        for says what they need, not what they built.
+        """
+        desc = (getattr(company, "long_description", None) or "").strip()
+        if desc:
+            return desc
+        parts = []
+        for item in self._sources(company).offered:
+            heading = self._MATERIAL_HEADINGS.get(item["kind"])
+            text = (item.get("text") or "").strip()
+            if heading and text:
+                parts.append(f"{heading}: {text}")
+        return "\n\n".join(parts)
+
     def _resolve_source(self, company, kind: str | None, source_id: int | None) -> SourceRow | None:
         if not kind or source_id is None:
             return None

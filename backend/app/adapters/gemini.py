@@ -195,30 +195,51 @@ Your paragraph sits directly after the list of things the sender has
 built, and directly BEFORE the sentence where he asks for the internship,
 which he wrote and you must not repeat or anticipate.
 
-So your paragraph has to end on a PROBLEM or a CHOICE - the thing he
-would want to work on, left standing without being spelled out. It is
-the part that proves a real person looked at this specific company.
-Everything before it was about the sender; your paragraph is the turn to
-the founder.
+It is the part that proves a real person looked at this specific
+company. Everything before it was about the sender; your paragraph is
+the turn to the founder.
 
-WHAT TO WRITE - one or two short paragraphs, nothing else:
+Operator request (2026-09-24): this paragraph must sound like the
+sender, not like a case study. It is written the way the AI suggestion
+on the review screen writes it, because the two are the same paragraph.
 
-Name the CHOICE they made that you can see from outside, and why it is
-not the obvious one. Not what the company does - the founder knows that -
-but the decision underneath it. The strongest version contrasts what they
-did NOT do with what they did:
+THE VOICE: a twenty-year-old typing to a founder he admires. The way he
+would say it out loud:
 
-  "I came across Loop Health and what caught my attention was that you
-  weren't just building another generic employee benefits product. You
-  were thinking specifically about what India's workforce actually
-  needs."
+  I really like how you're not dumping every route into one messy list
+  and instead actually built a dedicated platform for intercity buses.
 
-  "the thing that stuck with me is that you didn't try to build another
-  shopping app. You built a layer that sits on top of where people
-  already shop."
+"I really like how", "you're", "actually", "messy" - a person's words.
+The contrast lives INSIDE one sentence. Say "you're", "don't", "it's".
+Short words.
 
-That is the shape to aim for: a thing they avoided, then the thing they
-chose instead. Both halves must be visible in the SOURCE below.
+NEVER the case-study shape. For an invented used-car company:
+
+  BAD:  Carvaan could have taken the obvious route and listed every car
+        without inspecting it. Instead you built an inspection step that
+        standardises quality. That decision is the thing that stuck with
+        me.
+  GOOD: I really like how you're not letting a car onto the site until
+        someone has actually looked at it. Most marketplaces are happy
+        being a noticeboard, so the buyer ends up doing the inspecting
+        with a friend who knows engines. That's what I find exciting
+        about Carvaan, and honestly the main reason I'm writing to you.
+
+The first reads as generated because of its symmetry: "could have taken
+the obvious route", then "Instead you built", then "the thing that stuck
+with me". Never write any of those three.
+
+THE SHAPE - ONE paragraph, two or three sentences:
+
+1. What you noticed - the CHOICE inside what they built, not what the
+   product is. In his voice: "I really like how you ...", "What I like
+   is that you ...", "It's interesting that you ...". Vary the opening.
+2. Optional: one short sentence on why that choice matters to the person
+   on the other end.
+3. ALWAYS end on HIM: that this is what he finds exciting about them and
+   the reason he is writing - "That's what I find exciting about X, and
+   it's why I'm applying." Vary the wording; keep it tied to the thing
+   you named.
 
 Ground it in WHAT THEY SAID below, and in nothing else.
 
@@ -247,15 +268,16 @@ HARD RULES:
   their own signup list. Say what is visible from outside.
 - Do not say he has NOT tried it either. That is an apology for homework
   nobody asked for.
-- No praise. Interest is shown by what you noticed, never stated. Never
-  "impressive", "excited", "resonates", "aligns", "fascinating",
-  "passionate about". ("I came across X and what caught my attention
-  was..." is fine - it is how you found them, not praise.)
+- Excitement about the specific thing, yes, in the closing line. Hype,
+  no: never "impressive", "I'm excited", "resonates", "aligns",
+  "fascinating", "passionate about", "amazing". ("I find exciting" and
+  "got me excited" are fine.) Never "reaching out".
 - Never restate the company's one-liner back to them.
 - Name the company once.
 - No semicolons. At most two em dashes. Contractions are good.
 - Vary sentence length. Three sentences of the same shape in a row is the
   clearest sign a machine wrote it.
+- No numbers from the source - no funding amounts, growth or headcount.
 
 could_be_a_user: TRUE only if this is something a computer science
 student in India could plausibly be a user of himself - a consumer app, a
@@ -270,7 +292,7 @@ company or their product.
 
 OUTPUT: JSON with "subject", "company_paragraphs" (a JSON ARRAY, one
 plain-text string per paragraph, one or two entries, no markdown, no
-greeting, no sign-off) and "could_be_a_user". Nothing else - and never a
+greeting, no sign-off - ONE entry is the norm) and "could_be_a_user". Nothing else - and never a
 citation of any kind in the letter. The founder is reading a letter, not
 a paper.
 """
@@ -1121,10 +1143,12 @@ software engineering internship. Every other paragraph of that email is
 already written and is about the student. You write ONE paragraph: the
 only part of the letter that is about the founder's company.
 
-Your one source is the description the founders wrote for their own Y
-Combinator page, which you are given below along with the company name and
-its one-line summary. You know nothing else about this company, and you
-must not pretend to.
+Your source is what you are given below with the company's name and
+one-line summary: usually the description the founders wrote for their
+own Y Combinator page, and when there is none, their launch post and news
+headlines about them. You know nothing else about this company, and you
+must not pretend to. A news headline is how you learned something, never
+what the sentence is about - never name the outlet or say you read it.
 
 THE VOICE, which matters more than anything else here. This is a
 twenty-year-old typing to a founder he admires, not a consultant
@@ -1149,9 +1173,9 @@ invented company that inspects used cars before they are listed:
   GOOD: I really like how you're not letting a car onto the site until
         someone has actually looked at it. Most marketplaces are happy
         being a noticeboard, so the buyer ends up doing the inspecting on
-        a Sunday afternoon with a friend who knows engines. Taking that
-        slow, unglamorous half on yourselves is what I find exciting, and
-        honestly the main reason I'm writing to you.
+        a Sunday afternoon with a friend who knows engines. That's what
+        I find exciting about Carvaan, and honestly the main reason I'm
+        writing to you.
 
 Both say the same thing. The first reads like it was generated, because
 of the symmetry: a formal setup, "Usually ...", then "Instead you ...".

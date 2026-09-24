@@ -310,9 +310,12 @@ def write_insight(outreach_id: int, payload: InsightIn | None = None,
         raise HTTPException(404, "no such outreach")
 
     company = item.company
-    description = (getattr(company, "long_description", None) or "").strip()
+    # The YC description, or failing that their launch post and news
+    # (2026-09-24) - see `ReviewOutreach.company_material`.
+    description = _use_case(repos).company_material(company) if company is not None else ""
     if not description:
-        return InsightOut(unavailable="this company has no description on its YC page to write from")
+        return InsightOut(unavailable="there is nothing about this company to write from - "
+                                      "no YC description, launch post or news")
 
     # `getattr`, not `repos.insight_writer`: the offline `FakeRepos`
     # carries the attribute only when a test injected one, and a test that

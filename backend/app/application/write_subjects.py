@@ -93,9 +93,23 @@ def subject_problem(subject: str, company_name: str = "") -> str | None:
     others = [w.strip(".,:;'\"") for w in words if w.strip(".,:;'\"").casefold() not in name_words]
     if any(_DIGIT.search(w) for w in others):
         return "a number"
-    if any(len(w) >= 3 and w.isupper() for w in others):
+    # An acronym is not shouting: his own example is "I'd love to build
+    # Kodo's MCP". Up to four capitals is an acronym (AI, MCP, API, SAAS),
+    # and one is allowed; a longer capitalised word, or two acronyms, is.
+    capitals = [w.removesuffix("'s") for w in others if w.isupper() and len(w) >= 2]
+    if any(len(w) > 4 for w in capitals) or len(capitals) > 1:
         return "a shouted word"
     folded = text.casefold()
+    # Operator request (2026-09-24), with five examples all for Kodo:
+    # "Would love to build at Kodo", "I'd love to build Kodo's MCP", ... -
+    # "not completely similar but the intent should be the same". The
+    # intent is two things every one of them has: the company's name, and
+    # wanting to BUILD there. A clever hook without them is not his subject.
+    names = [v.casefold() for v in (company_name_variants(company_name) if company_name else [])]
+    if names and not any(n in folded for n in names):
+        return "does not name the company"
+    if not re.search(r"\bbuild", folded):
+        return "is not about building there"
     for phrase in _TELLS:
         if re.search(rf"(?<![a-z]){re.escape(phrase)}(?![a-z])", folded):
             return f"uses {phrase!r}"

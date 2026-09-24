@@ -16,9 +16,9 @@ from app.domain import letter
 class Writer:
     def __init__(self, answer=None, raises=None):
         self.answer = answer if answer is not None else [
-            "the agents GroMo actually trusts",
-            "an intern who wants to build for GroMo",
-            "why the agent is the product",
+            "Would love to build for GroMo's agents",
+            "Want to build at GroMo",
+            "I'd love to build GroMo's agent app",
         ]
         self.raises = raises
         self.context = None
@@ -36,9 +36,9 @@ def _run(writer, **kw):
 
 def test_three_usable_subjects_come_back_best_first():
     assert _run(Writer()) == [
-        "the agents GroMo actually trusts",
-        "an intern who wants to build for GroMo",
-        "why the agent is the product",
+        "Would love to build for GroMo's agents",
+        "Want to build at GroMo",
+        "I'd love to build GroMo's agent app",
     ]
 
 
@@ -58,13 +58,13 @@ def test_a_failure_yields_nothing_and_is_logged_by_type_name_only(caplog):
 
 
 def test_never_more_than_offered():
-    many = [f"GroMo angle number {w}" for w in ("one", "two", "three", "four", "five")]
+    many = [f"Would love to build {w} at GroMo" for w in ("this", "that", "more", "tools", "apps")]
     assert len(_run(Writer(many))) == OFFERED
 
 
 def test_what_was_already_offered_is_not_offered_again():
-    out = _run(Writer(), avoid=["the agents GroMo actually trusts"])
-    assert "the agents GroMo actually trusts" not in out
+    out = _run(Writer(), avoid=["Want to build at GroMo"])
+    assert "Want to build at GroMo" not in out
 
 
 # --- the rules ----------------------------------------------------------
@@ -91,8 +91,8 @@ def test_shouting_numbers_punctuation_and_emoji_are_refused():
 
 
 def test_a_digit_or_capitals_in_the_company_s_own_name_are_fine():
-    assert subject_problem("what Y42 gets right about models", "Y42") is None
-    assert subject_problem("the HDFC side of lending", "HDFC") is None
+    assert subject_problem("Would love to build at Y42", "Y42") is None
+    assert subject_problem("Would love to build HDFC's lending tools", "HDFC") is None
 
 
 def test_length_matches_the_letter_s_own_subject_check():
@@ -122,11 +122,11 @@ def _assembled_draft():
 
 
 def test_a_new_first_email_gets_the_first_usable_written_subject(repos):
-    writer = Writer(["Re: GroMo", "the agents GroMo actually trusts"])
+    writer = Writer(["Re: GroMo", "Would love to build for GroMo's agents"])
     draft = DraftOutreach(None, repos, subject_writer=writer)._with_written_subject(
         _assembled_draft(), _Company())
     # The fake reply is refused; the first usable one is taken.
-    assert draft.subject == "the agents GroMo actually trusts"
+    assert draft.subject == "Would love to build for GroMo's agents"
     # ...and the writer was shown the company paragraph it is titling.
     assert writer.context["paragraph"] == "They sell."
 
@@ -155,5 +155,47 @@ def test_without_a_writer_the_fixed_subject_stays():
 
 def test_the_company_name_is_always_spelled_exactly_as_given():
     # Live finding: "an intern who wants to build tools for groMo's agents".
-    out = run_subject_writer(Writer(["tools for groMo's agents"]), "GroMo")
-    assert out == ["tools for GroMo's agents"]
+    out = run_subject_writer(Writer(["Would love to build groMo's agent tools"]), "GroMo")
+    assert out == ["Would love to build GroMo's agent tools"]
+
+
+
+# --- the intent (operator request 2026-09-24) --------------------------------
+#
+# Five examples, all for Kodo: "not completely similar but the intent
+# should be the same".
+
+OPERATOR_EXAMPLES = [
+    "Would love to build at Kodo",
+    "I'd love to build Kodo's MCP",
+    "Would love to build this at Kodo",
+    "Want to build at Kodo",
+    "Would love to build AI into Kodo",
+]
+
+
+def test_every_one_of_his_examples_passes():
+    for subject in OPERATOR_EXAMPLES:
+        assert subject_problem(subject, "Kodo") is None, subject
+
+
+def test_a_subject_that_does_not_name_them_is_refused():
+    # What the writer produced before the examples: clever, and not his.
+    assert subject_problem("the expert on the ground", "GroMo") == "does not name the company"
+
+
+def test_a_subject_that_is_not_about_building_there_is_refused():
+    assert subject_problem("GroMo's agents are the real product", "GroMo") == (
+        "is not about building there")
+
+
+def test_one_acronym_is_not_shouting_but_two_are():
+    assert subject_problem("I'd love to build Kodo's MCP", "Kodo") is None
+    assert subject_problem("build AI and MCP at Kodo", "Kodo") == "a shouted word"
+
+
+def test_the_prompt_carries_his_examples():
+    from app.adapters.gemini import _SUBJECT_SYSTEM
+
+    for subject in OPERATOR_EXAMPLES:
+        assert subject in _SUBJECT_SYSTEM

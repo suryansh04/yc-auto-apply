@@ -1387,40 +1387,49 @@ to the founder of a startup, asking for a software engineering internship.
 
 The founder sees three things in their inbox: the sender's name, this
 subject line, and the first few words of the email. The subject decides
-whether the email is opened at all. Founders get dozens of these a week
-and most of them say "Internship inquiry" or "Quick question". Yours has
-to be the one that sounds like a specific person who actually looked at
-THIS company.
+whether the email is opened at all.
 
-You are given the company's name, its one-line summary, what the founders
-wrote about it on their own page, and the paragraph of the email that is
-about them. Everything you say must be true to those.
+THE INTENT, which every subject you write must carry: he wants to BUILD
+something at this company. Not a pitch, not a hook, not a riddle - a
+plain, warm statement of wanting to build there, the way he would say it
+to the founder's face.
 
-WHAT MAKES ONE GOOD:
+These are the sender's own examples, all for a company called Kodo. They
+show the intent and the range. Do not copy their wording for another
+company - write new ones in the same spirit:
 
-- Specific. It could only have been sent to this company. Name the thing
-  they did, the choice they made, the problem they took on.
-- Human. Written the way a twenty-year-old would type it, not the way a
-  marketing team would. Sentence case or all lowercase - never Title Case
-  On Every Word, which reads like a newsletter.
-- Short. Three to eight words. It has to survive being cut off on a phone.
-- Curious, not clickbait. It makes them want to know what comes next
-  because it is interesting, not because it is withholding something.
-- Honest. It must never pretend to be something it is not.
+  Would love to build at Kodo
+  I'd love to build Kodo's MCP
+  Would love to build this at Kodo
+  Want to build at Kodo
+  Would love to build AI into Kodo
 
-WRITE THREE, each in a different style:
+Notice what they share:
+- Every one names the company, spelled exactly as given.
+- Every one is about BUILDING - "build" is in every line.
+- Every one is short: four to seven words.
+- Sentence case - a capital first letter, everything else as normal
+  writing. Never Title Case On Every Word.
+- Some are plain ("Want to build at Kodo"); some name ONE specific thing
+  he would build there ("Kodo's MCP", "AI into Kodo").
 
-1. THEIR CHOICE, named: the specific decision you noticed.
-   e.g. for an invented used-car marketplace that inspects every car:
-   "you inspect every car before it's listed"
-2. THE ASK, made human: the internship, tied to what they build.
-   e.g. "an intern who wants to build Carvaan's inspections"
-3. THE HOOK: a short line that makes them want to read the email.
-   e.g. "the slow half of selling used cars"
+WRITE THREE, spread across that range:
 
-Use the company's name, spelled exactly as given, in at least two of the
-three. Vary the wording - three versions of the same sentence are one
-subject, not three.
+1. One plain and warm, like "Would love to build at Kodo" - but in your
+   own words, not those words.
+2. One that names a specific thing he would build, taken from what the
+   company actually does: a product, a feature, a part of the platform
+   that appears in their description. "Would love to build Carvaan's
+   inspection tools" for an invented used-car company whose description
+   talks about inspecting cars.
+3. One more, different from the other two - shorter, or naming a
+   different part of what they build.
+
+The specific thing must be REAL - something the description or the
+paragraph actually mentions. Never invent a product, a feature or a
+technology they do not have. If the description gives you nothing
+specific, write plain ones; a plain true subject beats a specific
+invented one.
 
 BANNED, every one of these:
 
@@ -1431,13 +1440,14 @@ BANNED, every one of these:
   "Collaboration", "Hello", "Hi", "Introduction", "Reaching out".
 - Clickbait and spam triggers: "You won't believe", "urgent", "free",
   "guaranteed", "act now", "limited", money symbols.
-- Exclamation marks, question marks, emoji, and words in ALL CAPS.
-- Numbers of any kind - no metrics, funding, headcount, growth rates or
-  years from their page.
+- Exclamation marks, question marks and emoji.
+- Words in ALL CAPS - except a real acronym the company uses (AI, MCP,
+  API), and at most one of those.
+- Numbers of any kind.
 - Hype: amazing, incredible, game-changing, revolutionary, disrupt,
-  passionate, excited, love.
+  passionate, excited, dream.
 - The sender's name, and any claim that he has used their product.
-- Colon titles like "GroMo: A Proposal" or "Re GroMo - internship".
+- Colon titles like "Kodo: A Proposal".
 
 Return JSON: {"subjects": ["...", "...", "..."]} - the three, and nothing
 else."""

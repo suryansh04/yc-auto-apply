@@ -9,16 +9,17 @@ def _ask(client, draft, **payload):
 
 
 def test_it_offers_the_usable_subjects(client, pending_draft, fake_subject_writer):
-    fake_subject_writer.answer = ["the voice layer Vahan built", "Re: Vahan", "an intern for Vahan"]
+    fake_subject_writer.answer = ["Would love to build Vahan's voice AI", "Re: Vahan",
+                                  "Want to build at Vahan"]
     body = _ask(client, pending_draft).json()
     # The fake reply is refused; the other two are offered in order.
-    assert body["subjects"] == ["the voice layer Vahan built", "an intern for Vahan"]
+    assert body["subjects"] == ["Would love to build Vahan's voice AI", "Want to build at Vahan"]
     assert body["unavailable"] is None
 
 
 def test_it_writes_nothing(client, pending_draft, fake_subject_writer):
     before = client.get(f"/api/queue/{pending_draft.outreach.id}").json()["subject"]
-    fake_subject_writer.answer = ["the voice layer Vahan built"]
+    fake_subject_writer.answer = ["Want to build at Vahan"]
     _ask(client, pending_draft)
     assert client.get(f"/api/queue/{pending_draft.outreach.id}").json()["subject"] == before
 
@@ -26,7 +27,7 @@ def test_it_writes_nothing(client, pending_draft, fake_subject_writer):
 def test_asking_again_avoids_the_current_subject_and_what_was_shown(
     client, pending_draft, fake_subject_writer
 ):
-    fake_subject_writer.answer = ["the voice layer Vahan built"]
+    fake_subject_writer.answer = ["Want to build at Vahan"]
     current = client.get(f"/api/queue/{pending_draft.outreach.id}").json()["subject"]
     _ask(client, pending_draft, avoid=["something shown earlier"])
     avoid = fake_subject_writer.context["avoid"]

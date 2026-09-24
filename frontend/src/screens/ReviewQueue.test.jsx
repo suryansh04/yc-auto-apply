@@ -1103,3 +1103,26 @@ it('says why there are no subjects rather than showing nothing', async () => {
   await userEvent.click(await screen.findByRole('button', { name: /suggest subjects/i }))
   expect(await screen.findByText(/SARVAM_API_KEY is not set/)).toBeInTheDocument()
 })
+
+
+// --- the company's links (operator request 2026-09-25) -------------------
+
+it("links to the company's own site and its YC page", async () => {
+  mockQueue([item({
+    company_website: 'https://www.zuddl.com',
+    company_yc_url: 'https://www.ycombinator.com/companies/zuddl',
+  })])
+  render(<ReviewQueue />)
+  const site = await screen.findByRole('link', { name: /company website, zuddl\.com/i })
+  expect(site).toHaveAttribute('href', 'https://www.zuddl.com')
+  expect(site).toHaveAttribute('target', '_blank')
+  expect(screen.getByRole('link', { name: /y combinator page/i }))
+    .toHaveAttribute('href', 'https://www.ycombinator.com/companies/zuddl')
+})
+
+it('shows no link it does not have', async () => {
+  mockQueue([item({ company_website: null, company_yc_url: null })])
+  render(<ReviewQueue />)
+  await screen.findByText('Review queue')
+  expect(screen.queryByRole('link', { name: /company website/i })).not.toBeInTheDocument()
+})

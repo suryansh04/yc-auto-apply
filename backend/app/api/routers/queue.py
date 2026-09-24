@@ -98,6 +98,23 @@ def _action_error(exc: ValueError | IllegalTransition) -> HTTPException:
     return HTTPException(409, str(exc))
 
 
+def _website(company) -> str | None:
+    """The company's own site, as a link that opens. YC's data stores some
+    bare ("acme.com"); a scheme is added so the browser does not treat it
+    as a path on this app. Only http(s) is ever returned."""
+    raw = (getattr(company, "website", None) or "").strip() if company is not None else ""
+    if not raw:
+        return None
+    if not raw.lower().startswith(("http://", "https://")):
+        raw = "https://" + raw
+    return raw
+
+
+def _yc_url(company) -> str | None:
+    slug = (getattr(company, "slug", None) or "").strip() if company is not None else ""
+    return f"https://www.ycombinator.com/companies/{slug}" if slug else None
+
+
 def _to_out(item: ReviewItem) -> QueueItemOut:
     # `get_operator_settings()`, not `get_settings()`: this route needs the
     # operator's signature, not a database. Same `.env` as `send`, so the
@@ -130,6 +147,8 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
         outreach_id=item.outreach.id,
         company_name=company_name,
         company_one_liner=getattr(item.company, "one_liner", None) if item.company is not None else None,
+        company_website=_website(item.company),
+        company_yc_url=_yc_url(item.company),
         founder_name=item.founder.full_name,
         founder_title=getattr(item.founder, "title", None),
         to=getattr(item.outreach, "resolved_email", None),

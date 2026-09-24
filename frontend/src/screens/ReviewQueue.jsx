@@ -44,6 +44,7 @@ import { LETTER_HTML_CLASSES, renderLetterHtml } from '@/lib/letterHtml'
 import { textToHtml } from '@/lib/richText'
 import RichEditor from '@/components/RichEditor'
 import SubjectSuggestions from '@/components/SubjectSuggestions'
+import CompanyLinks from '@/components/CompanyLinks'
 import { Lightbulb, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -845,7 +846,8 @@ export default function ReviewQueue() {
                   <CardDescription>{current.company_one_liner}</CardDescription>
                 )}
               </CardHeader>
-              <CardContent>
+              <CardContent className="grid gap-3">
+                <CompanyLinks website={current.company_website} ycUrl={current.company_yc_url} />
                 <Item variant="muted">
                   <ItemContent>
                     <ItemDescription>Founder</ItemDescription>

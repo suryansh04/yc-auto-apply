@@ -79,6 +79,11 @@ class QueueItemOut(BaseModel):
     outreach_id: int
     company_name: str | None = None
     company_one_liner: str | None = None
+    # Operator request (2026-09-25): the company's own site and its YC page,
+    # one click from the letter. Both come from the synced YC data; the
+    # YC URL is built from the slug, which is how YC addresses companies.
+    company_website: str | None = None
+    company_yc_url: str | None = None
     founder_name: str
     founder_title: str | None = None
     to: str | None = None

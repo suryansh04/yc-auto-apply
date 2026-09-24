@@ -43,6 +43,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { LETTER_HTML_CLASSES, renderLetterHtml } from '@/lib/letterHtml'
 import { textToHtml } from '@/lib/richText'
 import RichEditor from '@/components/RichEditor'
+import CompanyLinks from '@/components/CompanyLinks'
 
 // app/domain/letter.py's USER_FIT_MARKER. A letter still carrying it
 // cannot be sent (`send_approved` refuses), so saying so here is the
@@ -159,6 +160,10 @@ function ApprovedLetter({ item, defaultOpen }) {
             {item.company_name ?? 'Unknown company'} &middot; {item.to ?? 'no address'}
           </CardDescription>
           <CardTitle className="text-base">{item.subject ?? '(no subject)'}</CardTitle>
+          {/* 2026-09-25: their site and YC page - the last look before
+              sending is a natural moment to check who they are. */}
+          <CompanyLinks website={item.company_website} ycUrl={item.company_yc_url}
+                        className="flex flex-wrap gap-2 pt-2" />
           <CardAction className="flex items-center gap-1">
             {!isEditing && (
               <>

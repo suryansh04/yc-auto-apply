@@ -72,10 +72,10 @@ of `app.config.Settings`; `.env.example` lists all ten.
 | `EMAIL_VERIFIER_API_KEY` | MyEmailVerifier API key (D30). The key is embedded in the request URL by the provider; the adapter redacts it from logs and never lets it into an exception. | empty |
 | `GEMINI_API_KEY` | Google Gemini API key used by `parse-resume` and `draft`. | empty |
 | `GEMINI_MODEL` | Model id passed to the Gemini SDK (D13 — never hardcoded). | `gemini-3.8-flash` |
-| `GEMINI_TIER` | `free` or `paid`. On `free`, Google may train on inputs/outputs (D12): `parse-resume` warns (your own resume) and `draft` **refuses** unless `--allow-free-tier` is passed, because it sends founders' names, titles and bios. Set `paid` for the real run (D14: Cloud Billing accepts UPI in India; ~INR 95 per full run). | `free` |
-| `LLM_PROVIDER` | `gemini` (default) or `sarvam`. Gemini's free tier allows only 20 requests/day per model; Sarvam (`sarvam-105b-conversations`, ~₹29/₹73 per 1M input/output tokens, UPI top-up at dashboard.sarvam.ai) costs on the order of ₹50 for a full run. | `gemini` |
+| `GEMINI_TIER` | `free` or `paid` (set `paid` for the real run). On `free`, Google may train on inputs/outputs (D12): `parse-resume` warns (your own resume) and `draft` **refuses** unless `--allow-free-tier` is passed, because it sends founders' names, titles and bios. Set `paid` for the real run (D14: Cloud Billing accepts UPI in India; ~INR 95 per full run). | `free` |
+| `LLM_PROVIDER` | `gemini` (default, and what the operator runs since 2026-10-16 with `gemini-3.8-flash`: about ₹1.5 per letter, ₹3 from Jan 2027) or `sarvam`. Gemini's free tier allows only 20 requests/day per model; Sarvam (`sarvam-105b-conversations`, ~₹29/₹73 per 1M input/output tokens, UPI top-up at dashboard.sarvam.ai) costs on the order of ₹50 for a full run. | `gemini` |
 | `SARVAM_API_KEY` | Sarvam subscription key (`sk_...`) when `LLM_PROVIDER=sarvam`. | empty |
-| `TAVILY_API_KEY` | Optional. Web search for the founder line when a founder's YC bio is too thin (free tier: 1,000 searches a month). Blank means the YC bio only. | empty |
+| `TAVILY_API_KEY` | Web search for research before drafting: about 4 searches per company (two for the company, one or two for the founder), cached on the company and founder so a redraft costs nothing. Free tier: 1,000 searches a month. Blank means research uses only what is in the database. | empty |
 | `SARVAM_MODEL` | Sarvam chat model id. `sarvam-105b` is a reasoning model that spends thousands of output tokens thinking; the `-conversations` variant does not and is ~40x cheaper. | `sarvam-105b-conversations` |
 | `DAILY_SEND_CAP` | Maximum outbound emails per rolling 24-hour window (ruling R-A), counted against `messages.sent_at`. Gmail's own limit is 500/day; keep this low for deliverability (§18). | `20` |
 | `SIGNATURE` | Your sign-off, appended at send time under the body (ruling R2). Multi-line: quote it in `.env`. `send` refuses a blank signature. | empty |
@@ -133,16 +133,36 @@ prints the full docstring.
 | 11 | `send --to-self [--limit ≤3]` | Smoke test: emails the first approved draft(s) to `GMAIL_SENDER_ADDRESS` instead of the founders. Reserves nothing, changes no state. Check spam placement, the attachment, the signature and the opt-out line. |
 | 12 | `send [--limit N]` | Sends every `APPROVED` outreach: at most `DAILY_SEND_CAP` per rolling 24 hours, 20–75 s random pause between sends (§18), plain text with the resume attached. Each row is reserved by a committed conditional `UPDATE` before Gmail is called, so a crash can never send twice (§13). The first Gmail error stops the run. Run again the next day for the remainder. |
 
-Phase 1 sends step 0 only (ruling R-C): follow-ups are Phase 2.
+Follow-ups are sent through the same `send`: a follow-up step goes as a
+reply in the first email's Gmail thread (`threadId`, `In-Reply-To`,
+"Re:" subject) and without the resume attached again.
+
+### Research and the letter (2026-09-25)
+
+Before a first email is written, `draft` gathers numbered sources (YC
+page, launch posts, news, the founder's YC bio, and Tavily web results),
+and the researcher picks what the company does, one specific named
+thing, one founder fact, and one technical question. Each fact is checked
+against the source it cites (words, numbers and names must be there) and
+stored with its URL on the message (`messages.research`); a source two or
+more years old marks the fact OLD. The writer is given only those facts,
+the operator's system prompt and his three example emails, and writes the
+company paragraph, an optional tie-in and an optional founder line. The
+fixed blocks (`app/domain/letter.py`) are assembled around them. The
+operator's checklist runs as hard checks (50 to 110 words, one question,
+no dashes, no links, no banned words, no "X instead of Y", OLD facts
+framed as "I read that ..."), with one retry naming the exact problems.
 
 ## 7. Quotas and cost
 
 - **MyEmailVerifier**: 100 verifications/day on the free tier; the adapter
   self-throttles to 30 requests/minute. `resolve` pauses cleanly on
   exhaustion and picks up next day. Budget ~2.5 per founder.
-- **Gemini**: free tier is for development only and sends no founder data
-  without an explicit `--allow-free-tier`. Paid tier ≈ INR 95 per full run
-  (§19); billing by UPI through Google Cloud Billing (D14).
+- **Gemini** (`gemini-3.8-flash`): about ₹1.5 per letter on the paid tier
+  (research, writing, a possible retry, subject and founder line), ₹3
+  from January 2027. The free tier is for development only and sends no
+  founder data without an explicit `--allow-free-tier`. Billing by UPI.
+- **Tavily**: 1,000 free searches a month, about 4 per company, cached.
 - **Gmail**: 500 sends/day for a consumer account; `DAILY_SEND_CAP` defaults
   to 20. `--to-self` copies do not count toward the DB cap but do toward
   Gmail's.
@@ -260,6 +280,18 @@ full thread history, must be shorter than the message before it
 (~60 words at step 1, ~40 at step 2), and is rejected by the validator if
 it restates the earlier email instead of continuing it. Nothing
 auto-sends at any step — the human approval gate is unchanged.
+
+**The Follow-ups screen (2026-10-16)** is the usual way in. It lists every
+`SENT` thread with no human reply (`GET /api/followups`), when its next
+follow-up is due, and any approved follow-up not yet sent. **Suggest**
+(`POST /api/followups/{id}/suggest`) asks the model for three options -
+bring the question back, something new from the research, a last note -
+each checked (length, one question, no "just following up" and the like,
+no number that is not in the facts). **Approve**
+(`POST /api/followups/{id}/approve`) stores the chosen text as the next
+step and moves the row `SENT -> READY_TO_DRAFT -> PENDING_APPROVAL ->
+APPROVED`; **Send now** is the normal `send`, which replies in the same
+thread. Run **Check inbox for replies** first.
 
 ### Critic
 

@@ -70,7 +70,7 @@ def test_swapping_the_company_paragraph_keeps_the_rest_of_the_formatting(
     operator had put anywhere else in the letter."""
     body = letter.assemble_body("Vahan", ["You built a voice layer."])
     html = "".join(
-        f"<p><strong>{p}</strong></p>" if p == letter.OPENER else f"<p>{p}</p>"
+        f"<p><strong>{p}</strong></p>" if p == letter.INTRO else f"<p>{p}</p>"
         for p in body.split("\n\n")
     ).replace("\n", "<br>")
     _edit(client, pending_draft, body_html=html)
@@ -79,6 +79,8 @@ def test_swapping_the_company_paragraph_keeps_the_rest_of_the_formatting(
     client.post(f"/api/outreach/{pending_draft.outreach.id}/generic-line")
 
     row = _row(repos, pending_draft)
-    assert letter.generic_insight("Vahan") in row.body
-    assert f"<strong>{letter.OPENER}</strong>" in row.body_html
-    assert letter.generic_insight("Vahan") in row.body_html
+    tie_in, curious = letter.generic_insight("Vahan").split("\n\n")
+    assert f"{letter.BETTER} {tie_in}" in row.body
+    assert curious in row.body
+    assert f"<strong>{letter.INTRO}</strong>" in row.body_html
+    assert tie_in in row.body_html and curious in row.body_html

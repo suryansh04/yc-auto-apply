@@ -84,13 +84,21 @@ function Card({ hit, suggestion, pending, onApply }) {
  * opening it. The generic tab always has its line, because that line is
  * written down.
  */
+// What each option's style means to the person picking one (2026-09-25).
+const STYLE_LABELS = {
+  template: 'Like your examples',
+  angle: 'Different angle',
+  short: 'Short',
+}
+
 function InsightCard({ hit, suggestion, pending, onApply }) {
   // `hit.quote` IS the paragraph as it currently stands, so this is the
   // honest answer to "would pressing this change anything?".
   const alreadyGeneric = hit.generic != null && hit.quote?.trim() === hit.generic.trim()
   const [tab, setTab] = useState('ai')
-  // Three options since 2026-09-25 (excited / curious / short). An answer
-  // in the older one-paragraph shape is shown as a single option.
+  // Three options (2026-09-25), each the whole company part of his
+  // template: the tie-in and the curious paragraph. An answer in the
+  // older one-paragraph shape is shown as a single option.
   const options = hit.insight?.options?.length
     ? hit.insight.options
     : hit.insight?.paragraph
@@ -118,23 +126,22 @@ function InsightCard({ hit, suggestion, pending, onApply }) {
         <TabsContent value="ai" className="grid gap-2">
           {written ? (
             <>
-              {/* Operator request (2026-09-25): options in different voices
-                  - "excited", a plainer "curious" one that admits he does
-                  not know how they do it yet, and a "short" one - so he
-                  picks the one that sounds most like him. */}
+              {/* Operator request (2026-09-25): three takes on his WareIQ
+                  template - one close to it, one on a different part of
+                  the product, and a short one. */}
               <ul aria-label="Suggested paragraphs" className="grid max-h-80 gap-2 overflow-y-auto">
                 {options.map((option) => (
                   <li key={option.paragraph} className="grid gap-1.5 rounded-md border border-amber-400/70 bg-amber-50 p-2 dark:border-amber-500/40 dark:bg-amber-950/40">
                     {option.style && (
-                      <span className="text-muted-foreground text-xs font-medium capitalize">
-                        {option.style}
+                      <span className="text-muted-foreground text-xs font-medium">
+                        {STYLE_LABELS[option.style] ?? option.style}
                       </span>
                     )}
-                    <p className="text-sm">{option.paragraph}</p>
+                    <p className="text-sm whitespace-pre-line">{option.paragraph}</p>
                     {hit.onUseInsight && (
                       <Button size="sm" className="w-fit" disabled={hit.busy}
-                              aria-label={`Use the ${option.style || 'suggested'} one`}
-                              onClick={() => hit.onUseInsight(option.paragraph)}>
+                              aria-label={`Use the ${(STYLE_LABELS[option.style] ?? option.style) || 'suggested'} one`}
+                              onClick={() => hit.onUseInsight(option.paragraph, option)}>
                         Use this
                       </Button>
                     )}

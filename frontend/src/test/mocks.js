@@ -668,3 +668,29 @@ export function mockReplaceResume({ status = 200, detail = null, ...over } = {})
 export function mockApplications(items = []) {
   server.use(http.get('/api/applications', () => HttpResponse.json(items)))
 }
+
+/** POST /api/outreach/:id/founder-line - lines about the founder
+ *  (2026-09-25). */
+export function mockWriteFounderLine({ options = [], why = '', source = 'their YC bio',
+                                       material = '', unavailable = null } = {}) {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/founder-line', async ({ params, request }) => {
+      spy(Number(params.id), await request.json().catch(() => ({})))
+      return HttpResponse.json({ options, why, source, material, unavailable })
+    }),
+  )
+  return spy
+}
+
+/** POST /api/outreach/:id/founder-line/use - the line goes into the letter. */
+export function mockUseFounderLine() {
+  const spy = vi.fn()
+  server.use(
+    http.post('/api/outreach/:id/founder-line/use', async ({ params, request }) => {
+      spy(Number(params.id), await request.json().catch(() => ({})))
+      return HttpResponse.json({ notes: [], highlights: [] })
+    }),
+  )
+  return spy
+}

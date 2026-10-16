@@ -110,7 +110,8 @@ def test_draft_command_wires_a_critic_into_draftoutreach(monkeypatch, tmp_path):
 
     class _RecordingDraftOutreach:
         def __init__(self, drafter, repos, keep_unverified=False, critic=None,
-                     subject_writer=None):
+                     subject_writer=None, founder_writer=None, web_search=None,
+                     researcher=None):
             captured["critic"] = critic
 
         def run(self, limit=None):

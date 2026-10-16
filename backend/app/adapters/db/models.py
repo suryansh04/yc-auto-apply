@@ -78,6 +78,10 @@ class Company(Base):
     is_hiring: Mapped[bool] = mapped_column(default=False)
     one_liner: Mapped[str | None] = mapped_column(Text)
     long_description: Mapped[str | None] = mapped_column(Text)
+    # 2026-09-25: what a web search found about the company, cached (0008):
+    # a list of {title, url, content, published_date}.
+    web_research: Mapped[list | None] = mapped_column(JSONB)
+    web_researched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     job_postings: Mapped[list["JobPosting"]] = relationship(back_populates="company")
@@ -115,6 +119,9 @@ class Founder(Base):
     linkedin_url: Mapped[str | None] = mapped_column(String(500))
     twitter_url: Mapped[str | None] = mapped_column(String(500))
     bio: Mapped[str | None] = mapped_column(Text)
+    # 2026-09-25: what a web search found about them, cached (0007).
+    web_research: Mapped[str | None] = mapped_column(Text)
+    web_researched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     company: Mapped["Company"] = relationship(back_populates="founders")
@@ -257,6 +264,10 @@ class Message(Base):
     # has no formatting. `body` is always derived from it, never the other
     # way round (`app.domain.rich_text`), and stays what everything reads.
     body_html: Mapped[str | None] = mapped_column(Text)
+    # 2026-09-25: the line about the founder this letter was last given (0007).
+    founder_line: Mapped[str | None] = mapped_column(Text)
+    # 2026-09-25: the verified facts this letter was written from (0008).
+    research: Mapped[dict | None] = mapped_column(JSONB)
     research_source_type: Mapped[str | None] = mapped_column(String(30))
     # news | launch | job_posting | long_description; null for inbound
     research_source_id: Mapped[int | None]

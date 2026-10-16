@@ -15,10 +15,11 @@ stay there.
 """
 
 GOOD = (
-    "I like how Vahan puts the job and the worker in the same phone call. Hiring for these "
-    "roles usually runs through agents who take a cut and lose the candidate halfway, so the "
-    "person who needs the work waits longest. You made the slow part the part a machine can "
-    "do, and that is worth building."
+    "I read that Vahan runs recruitment over voice, so a candidate can apply for a job just "
+    "by talking on the phone. Hiring for these roles usually runs through agents who take a "
+    "cut and lose the candidate halfway. I'm curious how you check what a candidate said "
+    "on the call before it reaches the employer. I'd love to learn how your team thinks "
+    "about that."
 )
 
 
@@ -182,8 +183,10 @@ def test_it_offers_every_usable_option_with_its_style(
 ):
     """Operator request (2026-09-25): three options - excited, curious and
     short - so he picks the one that sounds most like him."""
-    short = ("I got curious about how Vahan puts a hiring conversation on a phone call. "
-             "That's the kind of problem I want to work on.")
+    short = ("I read that Vahan puts a whole hiring conversation on one phone call for "
+             "people who never type. I'm curious how you handle a candidate who switches "
+             "language halfway through the call. I'd love to learn how your team approaches "
+             "that, since it seems like the hardest part of the whole product.")
     fake_insight_writer.answer = {"options": [
         {"style": "excited", "paragraph": GOOD},
         {"style": "short", "paragraph": short},
@@ -192,4 +195,4 @@ def test_it_offers_every_usable_option_with_its_style(
     assert [o["style"] for o in body["options"]] == ["excited", "short"]
     assert body["paragraph"] == GOOD
     # His own list of what he built is the only thing about him it may use.
-    assert "A few things I've built" in fake_insight_writer.context["built"]
+    assert "Outside work:" in fake_insight_writer.context["built"]

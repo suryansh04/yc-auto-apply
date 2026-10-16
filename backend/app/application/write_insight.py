@@ -46,6 +46,7 @@ from __future__ import annotations
 import logging
 import re
 
+from app.application.research_company import facts_text
 from app.domain.validation import (
     BANNED_PHRASES,
     SOURCE_REFERENCE_PHRASES,
@@ -60,8 +61,25 @@ log = logging.getLogger(__name__)
 # 18, not 25 (2026-09-25): the "short" option is two sentences by design -
 # "I got curious about how WareIQ decides which warehouse stock goes to
 # before an order is placed. That's the kind of problem I want to work on."
-MIN_WORDS = 18
-MAX_WORDS = 110
+#
+# 2026-09-25: an option is now the whole company part of his template -
+# the tie-in and the curious paragraph together - so the bounds are for
+# both. His own WareIQ version is 56 words.
+MIN_WORDS = 25
+MAX_WORDS = 130   # the checklist's 50-110 (validation.company_part_problems) applies first
+MAX_PARAGRAPHS = 2
+
+# Operator decision (2026-09-25): ONE number is allowed - a fact about
+# what the product does, as in his own "you sync orders across 50+
+# channels". What stays banned is the fundraising kind: money, growth,
+# percentages, and anything counted in customers or users.
+MAX_NUMBERS = 1
+_INVESTOR_FACT = re.compile(
+    r"%|\bpercent|[$₹]|\b(?:rs\.?|inr|usd|crore|cr|lakh|million|billion|bn|arr|mrr|"
+    r"revenue|raised|funding|valuation|growth|grew|growing|customers?|users?|clients?|"
+    r"downloads?|investors?)\b",
+    re.I,
+)
 
 # D10: the letter is plain text. A model that answers in markdown has
 # written something that cannot be pasted into the body as it stands.
@@ -75,10 +93,13 @@ _NUMBER = re.compile(r"(?<![A-Za-z0-9])\d[\d,.]*\s*(?:%|percent|x|k|m|bn|b|cr|cr
 # why that phrase is not in `SOURCE_REFERENCE_PHRASES` - he writes it
 # himself, deliberately, in the line that claims nothing. A paragraph the
 # model wrote to be SPECIFIC has no business starting there.
+# 2026-09-25: "I came across", "I read about" and "I was reading" are no
+# longer here - his pipeline document's own examples open that way ("I
+# came across Aadi on Hugging Face", "I read about Kosh's joint liability
+# model"), because with verified research they are simply true.
 _DISCOVERY_TELLS = (
-    "i came across", "i stumbled", "i found your", "i saw your", "i read about",
-    "i was reading", "while looking for", "came across your", "your yc page",
-    "y combinator", "your website says", "according to your",
+    "i stumbled", "i found your", "i saw your", "while looking for", "came across your",
+    "your yc page", "y combinator", "your website says", "according to your",
 )
 
 # Live finding (2026-09-23): the operator read the paragraphs for
@@ -130,7 +151,21 @@ _TELLS = tuple(
 )
 
 
-def unusable_reason(paragraph: str) -> str | None:
+def unusable_reason(paragraph: str, description: str | None = None) -> str | None:
+    """Why this answer cannot be offered, or None when it can.
+
+    His pipeline document's checklist first (2026-09-25) - the same one a
+    draft is held to (`validation.company_part_problems`) - then the
+    older checks below it."""
+    from app.domain.validation import company_part_problems
+
+    problems = company_part_problems(paragraph or "")
+    if (paragraph or "").strip() and problems:
+        return problems[0]
+    return _older_reason(paragraph, description)
+
+
+def _older_reason(paragraph: str, description: str | None = None) -> str | None:
     """Why this answer cannot be offered, or None when it can.
 
     A reason string, not a boolean, because the API logs it - a paragraph
@@ -140,8 +175,8 @@ def unusable_reason(paragraph: str) -> str | None:
     text = (paragraph or "").strip()
     if not text:
         return "the model had nothing specific to say about this company"
-    if "\n\n" in text:
-        return "more than one paragraph"
+    if len([p for p in text.split("\n\n") if p.strip()]) > MAX_PARAGRAPHS:
+        return f"more than {MAX_PARAGRAPHS} paragraphs"
     words = len(text.split())
     if words < MIN_WORDS:
         return f"too short ({words} words)"
@@ -153,8 +188,18 @@ def unusable_reason(paragraph: str) -> str | None:
     for phrase in _TELLS:
         if phrase in folded:
             return f"uses a phrase the letter bans ({phrase!r})"
-    if _NUMBER.search(text):
-        return "quotes a number from their YC page"
+    # Numbers (2026-09-25): any that the facts contain ("49 plant
+    # genomes", "50+ channels"), never an investor number.
+    numbers = _NUMBER.findall(text)
+    if numbers:
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            if _NUMBER.search(sentence) and _INVESTOR_FACT.search(sentence):
+                return "quotes an investor number (money, growth, customers)"
+        known = re.sub(r"[^0-9]+", " ", description or "").split()
+        for number in numbers:
+            digits = re.sub(r"[^0-9]", "", number)
+            if description is not None and digits and digits not in known:
+                return "quotes a number that is not in what they wrote"
     for phrase in _FORMULA_TELLS:
         if phrase in folded:
             return f"reuses the template every other letter would get ({phrase!r})"
@@ -163,7 +208,7 @@ def unusable_reason(paragraph: str) -> str | None:
 
 def run_insight_writer(
     writer, company_name: str, one_liner: str, description: str,
-    avoid: list[str] | None = None, built: str = "",
+    avoid: list[str] | None = None, built: str = "", research: dict | None = None,
 ) -> dict | None:
     """Ask for company paragraphs, and return the usable ones.
 
@@ -200,6 +245,7 @@ def run_insight_writer(
                 "one_liner": one_liner or "",
                 "description": description,
                 "built": built or "",
+                "research": research,
                 "avoid": list(seen),
             })
         except Exception as exc:  # noqa: BLE001 - a provider failure is advice that did not arrive
@@ -210,9 +256,10 @@ def run_insight_writer(
         usable, retry_with = [], []
         for option in _options_of(answer):
             paragraph = option["paragraph"].strip()
-            reason = _rejection(paragraph, seen + [u["paragraph"] for u in usable])
+            known = "\n".join(p for p in (description, facts_text(research)) if p)
+            reason = _rejection(paragraph, seen + [u["paragraph"] for u in usable], known)
             if reason is None:
-                usable.append({"style": option["style"], "paragraph": paragraph})
+                usable.append({**option, "paragraph": paragraph})
                 continue
             log.info("insight: dropped a %s option for %s - %s",
                      option["style"] or "unlabelled", company_name, reason)
@@ -236,13 +283,14 @@ def _options_of(answer) -> list[dict]:
         raw = [{"style": "excited", "paragraph": answer.get("paragraph")}]
     else:
         raw = []
-    return [{"style": str(o.get("style") or ""), "paragraph": str(o.get("paragraph") or "")}
+    return [{**{k: str(v or "") for k, v in o.items()},
+             "style": str(o.get("style") or ""), "paragraph": str(o.get("paragraph") or "")}
             for o in raw if isinstance(o, dict)]
 
 
-def _rejection(paragraph: str, seen: list[str]) -> str | None:
+def _rejection(paragraph: str, seen: list[str], description: str | None = None) -> str | None:
     """`unusable_reason`, plus "we have already offered this one"."""
-    reason = unusable_reason(paragraph)
+    reason = unusable_reason(paragraph, description)
     if reason is not None:
         return reason
     folded = paragraph.strip().casefold()

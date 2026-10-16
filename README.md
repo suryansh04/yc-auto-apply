@@ -81,6 +81,10 @@ Notes:
   git-ignored.
 - The two `GMAIL_` lines can stay blank for now. The app's own setup
   guide tells you what goes there.
+- Optional: add `TAVILY_API_KEY=tvly-...` to write the line about a
+  founder whose YC bio says nothing. Get a free key at
+  [tavily.com](https://tavily.com) (1,000 searches a month, no card).
+  Without it, that line comes from the YC bio only.
 - Leave the rest alone. `SARVAM_MODEL`, `DAILY_SEND_CAP` and the
   `GEMINI_` lines already have working defaults, and you only need a
   Gemini key if you set `LLM_PROVIDER=gemini`.

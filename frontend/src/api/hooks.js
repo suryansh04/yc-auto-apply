@@ -369,6 +369,55 @@ export function useWriteInsight(options = {}) {
  * company (2026-09-23). Advice: never writes; "nothing usable" is a 200
  * with a reason. `avoid` is what the screen has already shown.
  */
+/**
+ * POST /api/outreach/{id}/founder-line - lines about the founder
+ * personally, from their YC bio or a web search (2026-09-25). Advice:
+ * never writes; "nothing to offer" is a 200 with a reason.
+ */
+/**
+ * POST /api/outreach/{id}/insight/use - put an AI suggestion in
+ * (2026-09-25). Done on the server so a suggestion with no tie-in is not
+ * glued onto his Better paragraph. An edit like any other.
+ */
+export function useUseInsight(options = {}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, tieIn, paragraph }) =>
+      apiPost(`/outreach/${id}/insight/use`, { tie_in: tieIn ?? '', paragraph }),
+    ...options,
+    onSuccess: (data, vars, ctx) => {
+      queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
+      options.onSuccess?.(data, vars, ctx)
+    },
+  })
+}
+
+export function useWriteFounderLine(options = {}) {
+  return useMutation({
+    mutationFn: ({ id, avoid = [] }) => apiPost(`/outreach/${id}/founder-line`, { avoid }),
+    ...options,
+  })
+}
+
+/**
+ * POST /api/outreach/{id}/founder-line/use - put a line in the letter,
+ * replacing the one it had; an empty line removes it. An edit like any
+ * other, so the lists that show the letter are refreshed.
+ */
+export function useUseFounderLine(options = {}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, line }) => apiPost(`/outreach/${id}/founder-line/use`, { line }),
+    ...options,
+    onSuccess: (data, vars, ctx) => {
+      queryClient.invalidateQueries({ queryKey: ['queue'] })
+      queryClient.invalidateQueries({ queryKey: ['approved'] })
+      options.onSuccess?.(data, vars, ctx)
+    },
+  })
+}
+
 export function useSuggestSubjects(options = {}) {
   return useMutation({
     mutationFn: ({ id, avoid = [] }) => apiPost(`/outreach/${id}/subjects`, { avoid }),
@@ -413,6 +462,7 @@ export function useSend() {
       queryClient.invalidateQueries({ queryKey: ['stats'] })
       queryClient.invalidateQueries({ queryKey: ['queue'] })
       queryClient.invalidateQueries({ queryKey: ['approved'] })
+      queryClient.invalidateQueries({ queryKey: ['followups'] })
     },
   })
 }
@@ -448,6 +498,36 @@ export function useSetLabel() {
     // to mutate(), per TanStack Query's mutation contract.
     onSuccess: (_data, { threadId }) => {
       queryClient.invalidateQueries({ queryKey: ['thread', threadId] })
+    },
+  })
+}
+
+/**
+ * Follow-ups (2026-10-16): sent emails with no reply, when each is due,
+ * and approved follow-ups waiting to go out.
+ */
+export function useFollowUps() {
+  return useQuery({ queryKey: ['followups'], queryFn: () => apiGet('/followups') })
+}
+
+/** POST /api/followups/{id}/suggest - advice only, never writes. */
+export function useSuggestFollowUps(options = {}) {
+  return useMutation({
+    mutationFn: ({ id, avoid = [] }) => apiPost(`/followups/${id}/suggest`, { avoid }),
+    ...options,
+  })
+}
+
+/** POST /api/followups/{id}/approve - lines it up to send in the thread. */
+export function useApproveFollowUp(options = {}) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }) => apiPost(`/followups/${id}/approve`, { body }),
+    ...options,
+    onSuccess: (data, vars, ctx) => {
+      queryClient.invalidateQueries({ queryKey: ['followups'] })
+      queryClient.invalidateQueries({ queryKey: ['stats'] })
+      options.onSuccess?.(data, vars, ctx)
     },
   })
 }

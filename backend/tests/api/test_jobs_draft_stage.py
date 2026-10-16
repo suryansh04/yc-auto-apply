@@ -33,7 +33,8 @@ def test_draft_stage_falls_back_to_no_critic_when_build_critic_fails(monkeypatch
 
     class _RecordingDraftOutreach:
         def __init__(self, drafter, repos, keep_unverified=False, critic=None,
-                     subject_writer=None):
+                     subject_writer=None, founder_writer=None, web_search=None,
+                     researcher=None):
             captured["drafter"] = drafter
             captured["critic"] = critic
             captured["subject_writer"] = subject_writer
@@ -98,7 +99,8 @@ def test_draft_stage_passes_the_built_critic_through_on_success(monkeypatch):
 
     class _RecordingDraftOutreach:
         def __init__(self, drafter, repos, keep_unverified=False, critic=None,
-                     subject_writer=None):
+                     subject_writer=None, founder_writer=None, web_search=None,
+                     researcher=None):
             captured["critic"] = critic
 
         def run(self, limit=None):

@@ -65,6 +65,7 @@ def test_gemini_writer_requests_structured_json():
     config = _config_as_dict(client.models.calls[0]["config"])
     assert config["response_mime_type"] == "application/json"
     item = config["response_schema"]["properties"]["options"]["items"]
+    assert item["properties"]["tie_in"]["type"] == "STRING"
     assert item["properties"]["paragraph"]["type"] == "STRING"
 
 
@@ -82,27 +83,8 @@ def test_the_company_description_is_what_the_model_is_given():
     assert "Modern & comprehensive health insurance" in prompt
 
 
-def test_the_prompt_forbids_reciting_their_metrics():
-    """Every number in a YC description is a fundraising fact, and
-    repeating one back reads as reciting their own page at them."""
-    from app.adapters.gemini import _INSIGHT_SYSTEM
-
-    assert "NO NUMBERS" in _INSIGHT_SYSTEM
-    assert "Y Combinator" in _INSIGHT_SYSTEM  # ...and never to mention where it came from
 
 
-def test_the_prompt_describes_the_standard_without_quoting_it():
-    """Live finding (2026-09-23): the operator's own Loop Health sentence
-    was in the prompt as the worked example, and Sarvam wrote it again
-    for a bus company and a robotics company - "it is showing the same
-    for orangewood and zingbus". An example is a phrase a model reaches
-    for, so the one phrase that must not repeat cannot be in there."""
-    from app.adapters.gemini import _INSIGHT_SYSTEM
-
-    assert "doctors and insurers" not in _INSIGHT_SYSTEM
-    # Described instead, and banned by name.
-    assert "health insurance company" in _INSIGHT_SYSTEM
-    assert '"on the same side"' in _INSIGHT_SYSTEM
 
 
 def test_what_has_already_been_offered_is_named_in_the_prompt():
@@ -220,28 +202,8 @@ def test_the_subject_prompt_bans_fake_replies_and_the_generic_ones():
         assert banned in _SUBJECT_SYSTEM
 
 
-def test_the_paragraph_ends_on_why_he_is_writing():
-    """Operator request (2026-09-23): "show excitement about them and also
-    why i am applying". The closing line is required, not optional, and it
-    must not use the phrases the rest of the letter's checks reject."""
-    from app.adapters.gemini import _INSIGHT_SYSTEM
-
-    flat = " ".join(_INSIGHT_SYSTEM.split())
-    assert "ALWAYS end on HIM" in flat
-    assert "main reason I'm writing to you" in flat
-    assert 'Never "reaching out"' in flat
 
 
-def test_the_draft_time_prompt_is_in_the_same_voice():
-    """Live finding (2026-09-24): Inito's paragraph - "could have taken the
-    obvious route ... Instead you built ... the thing that stuck with me" -
-    came from the DRAFT-time prompt, which still asked for that shape. It
-    and the AI suggestion write the same paragraph, in the same voice."""
-    from app.adapters.gemini import _FIRST_EMAIL_SYSTEM
-
-    assert "I really like how" in _FIRST_EMAIL_SYSTEM
-    assert "ALWAYS end on HIM" in _FIRST_EMAIL_SYSTEM
-    assert "a thing they avoided, then the thing they chose instead" not in _FIRST_EMAIL_SYSTEM
 
 
 
@@ -253,16 +215,126 @@ def test_an_old_one_paragraph_answer_is_still_understood():
     }
 
 
-def test_the_prompt_asks_for_the_curious_style_he_gave():
-    from app.adapters.gemini import _INSIGHT_SYSTEM
-
-    flat = " ".join(_INSIGHT_SYSTEM.split())
-    assert "WRITE THREE OPTIONS" in flat
-    assert "I'd like to see how you do it" in flat
-    # ...and forbids inventing his background.
-    assert "Never invent coursework" in flat
+# --- his researched template (2026-09-25) -----------------------------------
 
 
-def test_what_he_has_built_is_in_the_prompt_when_given():
-    prompt = build_insight_prompt({**CONTEXT, "built": "1. WaveWatch: a platform"})
-    assert "WHAT HE HAS BUILT" in prompt and "WaveWatch" in prompt
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_both_prompts_carry_his_pipeline_rules():
+    """His pipeline document (2026-09-25): the draft and the AI suggestion
+    follow the same system prompt, so they share one set of rules."""
+    from app.adapters.gemini import _EMAIL_RULES, _FIRST_EMAIL_SYSTEM, _INSIGHT_SYSTEM
+
+    assert _EMAIL_RULES in _FIRST_EMAIL_SYSTEM
+    assert _EMAIL_RULES in _INSIGHT_SYSTEM
+    flat = _flat(_EMAIL_RULES)
+    assert "If a fact is marked OLD, frame it as \"I read that...\"" in flat
+    assert "caught my eye" in flat          # in the banned list
+    assert "50 to 110 words" in flat
+
+
+def test_his_three_examples_go_in_every_call():
+    from app.adapters.gemini import EXAMPLE_EMAILS, build_draft_prompt, build_insight_prompt
+
+    for name in ("WareIQ", "UrbanKisaan", "Kosh"):
+        assert name in EXAMPLE_EMAILS
+    ctx = {"company": {"name": "Zave"}, "founder": {"full_name": "Hiren Shah"},
+           "available_sources": [], "sequence_step": 0}
+    assert EXAMPLE_EMAILS in build_draft_prompt(ctx)
+    assert EXAMPLE_EMAILS in build_insight_prompt({"company_name": "Zave", "description": "x"})
+
+
+def test_the_writer_is_handed_only_the_verified_facts():
+    from app.adapters.gemini import build_draft_prompt
+
+    research = {"facts": [
+        {"kind": "specific_thing", "text": "Aadi, a model pretrained on 49 plant genomes", "old": False},
+        {"kind": "founder_fact", "text": "Spent time talking to farmers", "old": True},
+    ], "question": "How do you clean phenotype data?", "skill_connection": ""}
+    prompt = build_draft_prompt({"company": {"name": "UrbanKisaan"},
+                                 "founder": {"full_name": "Vihari Kanukollu"},
+                                 "available_sources": [], "sequence_step": 0,
+                                 "research": research})
+    assert "Founder first name: Vihari" in prompt
+    assert "- Specific thing to mention: Aadi, a model pretrained on 49 plant genomes" in prompt
+    assert "- Founder fact: Spent time talking to farmers (OLD)" in prompt
+    assert "- Facts marked OLD: Spent time talking to farmers" in prompt
+
+
+def test_the_link_to_him_is_only_when_real():
+    from app.adapters.gemini import _EMAIL_RULES
+
+    flat = _flat(_EMAIL_RULES)
+    assert "If the connection is a stretch, skip it." in flat
+    assert "is NOT backend work" in flat
+
+
+def test_three_options_differ_in_what_they_notice():
+    from app.adapters.gemini import INSIGHT_STYLES, _INSIGHT_SYSTEM
+
+    assert INSIGHT_STYLES == ["template", "angle", "short"]
+    assert "WRITE THREE OPTIONS" in _INSIGHT_SYSTEM
+
+
+def test_an_option_is_the_tie_in_and_the_curious_paragraph_joined():
+    from app.adapters.gemini import _insight
+
+    out = _insight({"options": [{"style": "template", "tie_in": "A.", "paragraph": "B?"}],
+                    "why": "w"}, "t")
+    assert out["options"][0]["paragraph"] == "A.\n\nB?"
+    assert out["options"][0]["tie_in"] == "A."
+    assert out["options"][0]["company_paragraph"] == "B?"
+
+
+def test_a_first_email_answer_becomes_two_company_paragraphs():
+    from app.adapters.gemini import _first_email
+
+    out = _first_email({"subject": "s", "tie_in": "Tie.", "paragraph": "Para?",
+                        "founder_line": "Line.", "could_be_a_user": False},
+                       {"available_sources": []}, "drafter")
+    assert out["tie_in"] == "Tie."
+    assert out["company_paragraphs"] == ["Para?"]
+    assert out["founder_line"] == "Line."
+
+
+# --- the founder line (2026-09-25) ---------------------------------------------
+
+
+def test_the_founder_prompt_is_shared_with_sarvam_by_identity():
+    from app.adapters import gemini, sarvam
+
+    assert sarvam._FOUNDER_SYSTEM is gemini._FOUNDER_SYSTEM
+    assert sarvam.build_founder_prompt is gemini.build_founder_prompt
+
+
+def test_the_founder_prompt_carries_his_example_and_bans_where_it_was_found():
+    from app.adapters.gemini import _FOUNDER_SYSTEM
+
+    flat = _flat(_FOUNDER_SYSTEM)
+    assert "spent time talking to drivers and factory workers" in flat
+    assert "no LinkedIn" in flat
+
+
+def test_the_founder_material_and_its_source_are_in_the_prompt():
+    from app.adapters.gemini import build_founder_prompt
+
+    prompt = build_founder_prompt({"founder_name": "Neel Balar", "company_name": "Clueso",
+                                   "material": "Studied at IIT Madras.", "source": "a web search",
+                                   "avoid": ["An earlier line."]})
+    assert "FOUNDER MATERIAL (from a web search)" in prompt
+    assert "IIT Madras" in prompt and "An earlier line." in prompt
+
+
+@respx.mock
+def test_sarvam_founder_writer_returns_the_options():
+    from app.adapters.sarvam import SarvamFounderLineWriter
+
+    answer = json.dumps({"options": [{"style": "short", "line": "A line."}], "why": "w"})
+    route = respx.post(URL).mock(return_value=_ok(answer))
+    out = SarvamFounderLineWriter(API_KEY, SARVAM_MODEL, _sleep=lambda s: None).write(
+        {"founder_name": "Neel Balar", "material": "bio"})
+    assert out == {"options": [{"style": "short", "line": "A line."}], "why": "w"}
+    rf = json.loads(route.calls[0].request.content)["response_format"]
+    assert rf["json_schema"]["schema"]["required"] == ["options", "why"]

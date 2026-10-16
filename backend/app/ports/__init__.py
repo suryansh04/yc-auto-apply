@@ -219,6 +219,49 @@ class InsightWriter(Protocol):
     def write(self, context: dict) -> dict: ...  # {paragraph, why}
 
 
+class FollowUpWriter(Protocol):
+    """Follow-ups for a sent email with no reply (2026-10-16).
+    `write(context)` takes `{founder_first_name, company_name, step,
+    days_since, first_email, earlier_followup, research, description,
+    avoid}` and answers `{options: [{style, body}], why}`. Advisory: the
+    operator picks, edits and approves."""
+
+    def write(self, context: dict) -> dict: ...
+
+
+class CompanyResearcher(Protocol):
+    """Operator's pipeline document (2026-09-25): pick verified facts for
+    a letter. `research(context)` takes `{company_name, founder_name,
+    today, sources: [{id, label, text, url, date}]}` and answers `{facts:
+    [{kind, text, source, old}], question, skill_connection, note}`.
+    Every fact cites the id of the one source it came from; checking that
+    it really is there is `app.application.research_company`'s job."""
+
+    def research(self, context: dict) -> dict: ...
+
+
+class FounderLineWriter(Protocol):
+    """Operator request (2026-09-25): one line about the founder
+    personally - "I found your ML background really interesting" - written
+    from their YC bio or what a web search found about them.
+
+    `write(context)` takes `{founder_name, company_name, title, material,
+    about_him, avoid}` and answers `{options: [{style, line}], why}`.
+    Advisory like `InsightWriter`: whether a line is usable is
+    `app.application.write_founder_line`'s call, and a `write` that raises
+    leaves the letter exactly as it was."""
+
+    def write(self, context: dict) -> dict: ...
+
+
+class WebSearch(Protocol):
+    """A web search (2026-09-25), used only to learn something about a
+    founder whose YC bio says too little. `search(query, max_results)`
+    answers `[{title, url, content}]`; an error must never carry the key."""
+
+    def search(self, query: str, max_results: int = 5) -> list[dict]: ...
+
+
 @runtime_checkable
 class SubjectWriter(Protocol):
     """Operator request (2026-09-23): "a agent specifically for writing
@@ -249,7 +292,8 @@ class MailSender(Protocol):
 
     def send(
         self, to: str, subject: str, body: str, attachment_path: str | None,
-        html: str | None = None,
+        html: str | None = None, thread_id: str | None = None,
+        in_reply_to: str | None = None,
     ) -> tuple[str, str]: ...  # (message_id, thread_id)
 
 

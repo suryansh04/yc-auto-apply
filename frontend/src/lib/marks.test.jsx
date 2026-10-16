@@ -261,7 +261,7 @@ it('shows the paragraph it wrote, and puts it in on request', async () => {
   expect(await screen.findByText(WRITTEN)).toBeInTheDocument()
   expect(screen.getByText(/the choice inside the product/i)).toBeInTheDocument()
   await userEvent.click(screen.getByRole('button', { name: /use the suggested one/i }))
-  expect(onUseInsight).toHaveBeenCalledWith(WRITTEN)
+  expect(onUseInsight.mock.calls[0][0]).toBe(WRITTEN)
 })
 
 it('says why there is nothing rather than looking broken', async () => {
@@ -334,5 +334,5 @@ it('offers each option with its style, and puts in the one picked', async () => 
   const list = await screen.findByRole('list', { name: /suggested paragraphs/i })
   expect(list.querySelectorAll('li')).toHaveLength(3)
   await userEvent.click(screen.getByRole('button', { name: /use the curious one/i }))
-  expect(onUseInsight).toHaveBeenCalledWith('That part caught my eye.')
+  expect(onUseInsight.mock.calls[0][0]).toBe('That part caught my eye.')
 })

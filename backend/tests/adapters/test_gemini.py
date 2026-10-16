@@ -173,8 +173,8 @@ def test_drafter_returns_the_decoded_draft_dict():
     out = GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     # The source NUMBER is mapped back to our own (kind, id) here, so
     # nothing downstream has to know the model was shown a list.
-    assert out["research_source_type"] == CONTEXT["available_sources"][0]["kind"]
-    assert out["research_source_id"] == CONTEXT["available_sources"][0]["id"]
+    # 2026-09-25: a first email grounds on the founders' own description.
+    assert (out["research_source_type"], out["research_source_id"]) == ("long_description", 3)
     assert out["company_paragraphs"] and out["could_be_a_user"] is False
 
 
@@ -192,7 +192,9 @@ def test_drafter_requests_structured_json_with_the_four_field_schema():
     schema = json.dumps(cfg.get("response_schema") or cfg.get("response_json_schema"), default=str)
     # A first email asks for the company paragraphs, not a whole body: the
     # rest of the letter is the operator's own and is assembled in code.
-    for field in ("subject", "company_paragraphs", "could_be_a_user"):
+    # 2026-09-25: the two parts of his template - the tie-in and the
+    # curious paragraph.
+    for field in ("subject", "tie_in", "paragraph", "founder_line", "could_be_a_user"):
         assert field in schema
     # Deliberately absent: the source kinds. The model picks a NUMBER, so
     # our enum never reaches it - in the schema or the prompt - and it
@@ -229,9 +231,8 @@ def test_drafter_prompt_says_the_source_is_never_named_in_the_body():
     client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
-    assert "never" in prompt
-    assert "outlet" in prompt or "publication" in prompt
-    assert "how you learned" in prompt or "how the sender learned" in prompt
+    assert "never mention y combinator" in prompt
+    assert "news outlet" in " ".join(prompt.split())
 
 
 def test_drafter_prompt_forbids_location_and_asks_for_a_swe_internship():
@@ -349,18 +350,20 @@ def test_a_first_email_is_grounded_on_the_top_priority_source():
     is known without asking - and cannot be pasted into the letter."""
     client = FakeGenAIClient(FIRST_EMAIL_JSON)
     out = GeminiDrafter(client, model=MODEL).draft(CONTEXT)
-    top = CONTEXT["available_sources"][0]
-    assert (out["research_source_type"], out["research_source_id"]) == (top["kind"], top["id"])
+    # 2026-09-25: the founders' own description comes first for a first
+    # email - his template needs a concrete thing the product does, and a
+    # news headline rarely has one.
+    assert (out["research_source_type"], out["research_source_id"]) == ("long_description", 3)
 
 
 def test_a_first_email_is_shown_only_the_top_source():
     client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
-    assert "openai backs indian startup" in prompt
-    # The second-priority source is not offered at all, so there is no
-    # list, no numbering, and nothing to cite.
-    assert "in a dozen languages" not in prompt
+    assert "in a dozen languages" in prompt
+    # The other source is not offered at all, so there is no list, no
+    # numbering, and nothing to cite.
+    assert "openai backs indian startup" not in prompt
     assert "source 1" not in prompt
 
 
@@ -474,9 +477,9 @@ def test_first_email_prompt_ends_with_the_one_paragraph_instruction():
     client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
     prompt = _prompt_of(client)
-    assert "write only the paragraph about this company" in prompt
+    assert 'write only "tie_in"' in prompt
     assert "not yours to produce" in prompt
-    assert prompt.index("write only the paragraph") < prompt.index("write the email now")
+    assert prompt.index("write only") < prompt.index("write the email now")
 
 def test_a_follow_up_prompt_has_no_first_email_checklist():
     # A follow-up is one short paragraph - the four-part checklist would be
@@ -511,7 +514,7 @@ def test_the_prompt_forbids_mixing_two_fact_groups():
 def test_the_prompt_forbids_claiming_to_have_used_the_product():
     client = FakeGenAIClient(FIRST_EMAIL_JSON)
     GeminiDrafter(client, model=MODEL).draft(CONTEXT)
-    assert "never claim to have signed up for, tried, used" in _prompt_of(client)
+    assert "never claim he used, signed up for or tested" in " ".join(_prompt_of(client).split())
 
 
 def test_the_tone_example_is_marked_as_not_the_company_being_written_to():

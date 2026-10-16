@@ -561,10 +561,10 @@ def test_a_first_email_is_assembled_from_the_operators_blocks():
         "research_source_id": 7,
     }
     draft = _to_draft(raw, 0, "Vahan")
-    assert letter.OPENER in draft.body
-    assert letter.BUILT in draft.body
+    assert letter.INTRO in draft.body
+    assert letter.BETTER + " You put the whole thing on a voice call." in draft.body
     assert "You put the whole thing on a voice call." in draft.body
-    assert "do that at Vahan." in draft.body
+    assert "intern at Vahan this winter" in draft.body
     assert not letter.contains_stub(draft.body)
 
 
@@ -592,7 +592,7 @@ def test_a_follow_up_is_still_written_whole_by_the_model():
            "research_source_type": "news", "research_source_id": 7}
     draft = _to_draft(raw, 1, "Vahan")
     assert draft.body == "Still keen on the voice routing problem."
-    assert letter.OPENER not in draft.body
+    assert letter.INTRO not in draft.body
 
 
 def test_a_paragraph_array_is_never_stringified_into_the_body():

@@ -158,8 +158,9 @@ class FakeSender:
     def __init__(self):
         self.sent: list[dict] = []
 
-    def send(self, to, subject, body, attachment_path, html=None):
-        self.sent.append({"to": to, "subject": subject, "body": body, "html": html})
+    def send(self, to, subject, body, attachment_path, html=None, thread_id=None, in_reply_to=None):
+        self.sent.append({"to": to, "subject": subject, "body": body, "html": html,
+                          "attachment": attachment_path, "thread_id": thread_id})
         n = len(self.sent)
         return (f"msg-{n}", f"thread-{n}")
 

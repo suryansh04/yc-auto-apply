@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     database_url: str
     email_verifier_api_key: str = ""
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.8-flash"   # operator choice 2026-10-16: newest Flash, cheap and capable
     gemini_tier: Literal["free", "paid"] = "free"
     # LLM provider switch (2026-09-13): Gemini's free tier is 20 requests/day
     # per model, unusable at outreach volume; Sarvam (Indian pricing, UPI)
@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     sarvam_api_key: str = ""
     sarvam_model: str = "sarvam-105b-conversations"
     daily_send_cap: int = 20
+    # 2026-09-25: web search for the founder line, used only when a
+    # founder's YC bio is too thin. Optional - blank means the YC bio only.
+    # Free tier: 1,000 searches a month at tavily.com.
+    tavily_api_key: str = ""
 
     # Task 15 (sending). Every default below is EMPTY on purpose: `send`
     # refuses to build a sender until all four are set, so no configuration

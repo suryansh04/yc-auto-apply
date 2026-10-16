@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+MESSAGE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}"
 SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 _EXPIRY_MARGIN_SECONDS = 60.0  # refresh this long before Google says the token dies
@@ -66,7 +67,7 @@ __all__ = ["GmailAuthRequired", "GmailError", "GmailSender", "build_mime", "enco
 
 
 def build_mime(sender: str, to: str, subject: str, body: str, attachment_path: str | None,
-               html: str | None = None) -> bytes:
+               html: str | None = None, in_reply_to: str | None = None) -> bytes:
     """RFC 2822 bytes: a `text/plain` body and, when `attachment_path` is
     given, that file as an attachment (PDF by default; the MIME type is
     guessed from the suffix). Raises `FileNotFoundError` for a missing
@@ -81,6 +82,11 @@ def build_mime(sender: str, to: str, subject: str, body: str, attachment_path: s
     msg["From"] = sender
     msg["To"] = to
     msg["Subject"] = subject
+    # A follow-up (2026-10-16) answers the email before it, so every mail
+    # client threads it under that email rather than as a new one.
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = in_reply_to
     msg.set_content(body)  # text/plain; charset chosen by the stdlib (utf-8 when needed)
     if html:
         msg.add_alternative(html, subtype="html")
@@ -131,14 +137,18 @@ class GmailSender:
     # -- MailSender ----------------------------------------------------------
 
     def send(self, to: str, subject: str, body: str, attachment_path: str | None,
-             html: str | None = None) -> tuple[str, str]:
-        raw = encode_raw(build_mime(self.sender_address, to, subject, body, attachment_path, html))
-        response = self._post_send(raw)
+             html: str | None = None, thread_id: str | None = None,
+             in_reply_to: str | None = None) -> tuple[str, str]:
+        """`thread_id` and `in_reply_to` (2026-10-16) send a follow-up as
+        a reply in the thread of the email it follows up."""
+        raw = encode_raw(build_mime(self.sender_address, to, subject, body, attachment_path, html,
+                                    in_reply_to=in_reply_to))
+        response = self._post_send(raw, thread_id)
         if response.status_code == 401:
             # Access token rejected despite looking fresh: refresh once, retry once.
             logger.info("gmail send got 401; refreshing the access token and retrying once")
             self._access_token = None
-            response = self._post_send(raw)
+            response = self._post_send(raw, thread_id)
         if response.status_code >= 400:
             raise GmailError("send", status=response.status_code)
         try:
@@ -151,11 +161,38 @@ class GmailSender:
 
     # -- internals -----------------------------------------------------------
 
-    def _post_send(self, raw: str) -> httpx.Response:
+    def rfc_message_id(self, gmail_message_id: str) -> str | None:
+        """The `Message-ID` header of a message this account sent - what a
+        reply's `In-Reply-To` must name. None when Gmail will not say
+        (the reply still threads by `threadId` in Gmail itself)."""
         token = self._access_token_value()
         try:
+            response = self._http.get(
+                MESSAGE_URL.format(id=gmail_message_id),
+                params={"format": "metadata", "metadataHeaders": "Message-ID"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        except httpx.HTTPError:
+            return None
+        if response.status_code != 200:
+            return None
+        try:
+            headers = response.json().get("payload", {}).get("headers", [])
+        except ValueError:
+            return None
+        for h in headers:
+            if str(h.get("name", "")).lower() == "message-id":
+                return str(h.get("value") or "") or None
+        return None
+
+    def _post_send(self, raw: str, thread_id: str | None = None) -> httpx.Response:
+        token = self._access_token_value()
+        payload = {"raw": raw}
+        if thread_id:
+            payload["threadId"] = thread_id
+        try:
             return self._http.post(
-                SEND_URL, json={"raw": raw},
+                SEND_URL, json=payload,
                 headers={"Authorization": f"Bearer {token}"},
             )
         except httpx.HTTPError as exc:

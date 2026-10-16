@@ -102,12 +102,12 @@ def test_drafter_sends_the_system_instruction_and_the_draft_schema():
     out = _drafter().draft(CONTEXT)
     assert set(out) >= {"subject", "company_paragraphs", "could_be_a_user",
                         "research_source_type", "research_source_id"}
-    assert out["research_source_type"] == CONTEXT["available_sources"][0]["kind"]
+    assert out["research_source_type"] == "long_description"
     body = json.loads(route.calls[0].request.content)
     assert body["messages"][0]["role"] == "system"
-    assert "one part of a cold email" in body["messages"][0]["content"].lower()
+    assert "you write only the parts that change" in " ".join(body["messages"][0]["content"].lower().split())
     schema = body["response_format"]["json_schema"]["schema"]
-    assert schema["required"] == ["subject", "company_paragraphs", "could_be_a_user"]
+    assert schema["required"] == ["subject", "tie_in", "paragraph", "founder_line", "could_be_a_user"]
 
 
 @respx.mock

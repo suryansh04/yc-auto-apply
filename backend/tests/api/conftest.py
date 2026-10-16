@@ -136,6 +136,43 @@ def _no_real_subject_writer_seam(repos):
     return repos.subject_writer
 
 
+class _OfflineFounderWriter:
+    """Stands in for a real `FounderLineWriter` (2026-09-25)."""
+
+    def write(self, context):
+        raise AssertionError("an offline test reached the founder-line seam")
+
+
+class _OfflineWebSearch:
+    """Stands in for a real `WebSearch` - a search is a real request that
+    spends a credit (2026-09-25)."""
+
+    def search(self, query, max_results=5):
+        raise AssertionError("an offline test reached the web-search seam")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_founder_line_seams(repos):
+    repos.founder_writer = _OfflineFounderWriter()
+    repos.web_search = _OfflineWebSearch()
+
+
+@pytest.fixture
+def fake_founder_writer(repos):
+    class FakeFounderWriter:
+        def __init__(self):
+            self.answer = {"options": [], "why": ""}
+            self.context = None
+
+        def write(self, context):
+            self.context = context
+            return self.answer
+
+    writer = FakeFounderWriter()
+    repos.founder_writer = writer
+    return writer
+
+
 @pytest.fixture
 def fake_subject_writer(repos):
     """A `SubjectWriter` answering with whatever the test sets on

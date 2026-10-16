@@ -75,6 +75,7 @@ of `app.config.Settings`; `.env.example` lists all ten.
 | `GEMINI_TIER` | `free` or `paid`. On `free`, Google may train on inputs/outputs (D12): `parse-resume` warns (your own resume) and `draft` **refuses** unless `--allow-free-tier` is passed, because it sends founders' names, titles and bios. Set `paid` for the real run (D14: Cloud Billing accepts UPI in India; ~INR 95 per full run). | `free` |
 | `LLM_PROVIDER` | `gemini` (default) or `sarvam`. Gemini's free tier allows only 20 requests/day per model; Sarvam (`sarvam-105b-conversations`, ~₹29/₹73 per 1M input/output tokens, UPI top-up at dashboard.sarvam.ai) costs on the order of ₹50 for a full run. | `gemini` |
 | `SARVAM_API_KEY` | Sarvam subscription key (`sk_...`) when `LLM_PROVIDER=sarvam`. | empty |
+| `TAVILY_API_KEY` | Optional. Web search for the founder line when a founder's YC bio is too thin (free tier: 1,000 searches a month). Blank means the YC bio only. | empty |
 | `SARVAM_MODEL` | Sarvam chat model id. `sarvam-105b` is a reasoning model that spends thousands of output tokens thinking; the `-conversations` variant does not and is ~40x cheaper. | `sarvam-105b-conversations` |
 | `DAILY_SEND_CAP` | Maximum outbound emails per rolling 24-hour window (ruling R-A), counted against `messages.sent_at`. Gmail's own limit is 500/day; keep this low for deliverability (§18). | `20` |
 | `SIGNATURE` | Your sign-off, appended at send time under the body (ruling R2). Multi-line: quote it in `.env`. `send` refuses a blank signature. | empty |

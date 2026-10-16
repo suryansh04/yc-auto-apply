@@ -31,6 +31,7 @@ import {
   useApprove,
   useCheckDraft,
   useGenericLine,
+  useUseInsight,
   useEdit,
   useQueue,
   useRedraft,
@@ -45,6 +46,8 @@ import { textToHtml } from '@/lib/richText'
 import RichEditor from '@/components/RichEditor'
 import SubjectSuggestions from '@/components/SubjectSuggestions'
 import CompanyLinks from '@/components/CompanyLinks'
+import FounderLine from '@/components/FounderLine'
+import ResearchFacts from '@/components/ResearchFacts'
 import { Lightbulb, RefreshCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -166,18 +169,24 @@ export default function ReviewQueue() {
   // Swapping in the generic company line is an edit, so its result is
   // the checks' verdict on the new text - shown exactly where a save's
   // would be.
-  const genericLine = useGenericLine({
-    onSuccess: (data, id) => {
-      setCheckNotes(data?.notes ?? [])
-      setCheckHighlights(data?.highlights ?? [])
-      setCheckedId(id)
-      setActiveNote(null)
-      setRewrites({})
-      setSuggestedId(null)
-      setInsight(null)
-      setInsightId(null)
-      setInsightSeen([])
-    },
+  // After the company paragraph is swapped (generic line or an AI
+  // suggestion): show the fresh checks, and forget the old suggestions.
+  function afterSwap(data, id) {
+    setCheckNotes(data?.notes ?? [])
+    setCheckHighlights(data?.highlights ?? [])
+    setCheckedId(id)
+    setActiveNote(null)
+    setRewrites({})
+    setSuggestedId(null)
+    setInsight(null)
+    setInsightId(null)
+    setInsightSeen([])
+  }
+  const genericLine = useGenericLine({ onSuccess: afterSwap })
+  // 2026-09-25: an AI suggestion goes in through the server, which knows
+  // whether it has a tie-in. Same aftermath as the generic line.
+  const putInsight = useUseInsight({
+    onSuccess: (data, { id }) => afterSwap(data, id),
   })
   const checkDraft = useCheckDraft({
     onSuccess: (data, { id }) => {
@@ -543,7 +552,15 @@ export default function ReviewQueue() {
   }
   // Accept it: the paragraph the API wrote goes in where the current one
   // is, and `edit` re-runs the checks over the result.
-  function useInsightNow(paragraph) {
+  function useInsightNow(paragraph, option) {
+    if (option?.company_paragraph) {
+      setActionError(null)
+      putInsight.mutate(
+        { id: current.outreach_id, tieIn: option.tie_in, paragraph: option.company_paragraph },
+        { onError: (err) => setActionError(err.message) },
+      )
+      return
+    }
     const body = current.body ?? ''
     if (!paragraph || !current.insight_text || !body.includes(current.insight_text)) return
     saveEdit(current.subject ?? '', body.replace(current.insight_text, paragraph))
@@ -859,6 +876,15 @@ export default function ReviewQueue() {
                     </ItemTitle>
                   </ItemContent>
                 </Item>
+                {current.research && <ResearchFacts research={current.research} />}
+                {(current.sequence_step ?? 0) === 0 && (
+                  <FounderLine
+                    key={current.outreach_id}
+                    outreachId={current.outreach_id}
+                    founderName={current.founder_name}
+                    currentLine={current.founder_line}
+                  />
+                )}
               </CardContent>
             </Card>
 

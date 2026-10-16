@@ -173,6 +173,38 @@ class SendApproved:
         configured = getattr(settings_row, "followup_day_2", None)
         return configured if configured is not None else self._followup_day_2
 
+    def _subject(self, outreach, row) -> str:
+        """The subject: the draft's own for a first email; for a follow-up,
+        "Re: " and the first email's subject, so it reads as the reply it
+        is (2026-10-16)."""
+        if outreach.sequence_step == 0:
+            return row.subject or ""
+        first = self._repos.message.get_outbound(outreach.id, 0)
+        original = (getattr(first, "subject", None) or row.subject or "").strip()
+        while original.lower().startswith("re:"):
+            original = original[3:].strip()
+        return f"Re: {original}"
+
+    def _reply_part(self, outreach) -> dict:
+        """For a follow-up, the thread and message it replies to: the last
+        email sent in this outreach (2026-10-16). Empty for a first email,
+        so that call is exactly what it always was."""
+        if outreach.sequence_step == 0:
+            return {}
+        previous = self._repos.message.get_outbound(outreach.id, outreach.sequence_step - 1)
+        first = self._repos.message.get_outbound(outreach.id, 0)
+        thread_id = getattr(previous, "gmail_thread_id", None) or getattr(first, "gmail_thread_id", None)
+        if not thread_id:
+            return {}
+        part = {"thread_id": thread_id}
+        lookup = getattr(self._sender, "rfc_message_id", None)
+        gmail_id = getattr(previous, "gmail_message_id", None)
+        if lookup is not None and gmail_id:
+            rfc = lookup(gmail_id)
+            if rfc:
+                part["in_reply_to"] = rfc
+        return part
+
     def _html_part(self, founder, row) -> dict:
         """`{"html": ...}` for a formatted letter, `{}` for every other.
 
@@ -307,8 +339,12 @@ class SendApproved:
             wire_text = compose_wire_text(first_name(founder.full_name), row.body, self._signature)
             try:
                 gmail_message_id, gmail_thread_id = self._sender.send(
-                    outreach.resolved_email, row.subject or "", wire_text, self._attachment_path,
+                    outreach.resolved_email, self._subject(outreach, row), wire_text,
+                    # The resume went with the first email; a follow-up
+                    # does not attach it again (2026-10-16).
+                    self._attachment_path if outreach.sequence_step == 0 else None,
                     **self._html_part(founder, row),
+                    **self._reply_part(outreach),
                 )
             except Exception as exc:  # noqa: BLE001 — any sender failure pauses the run
                 reason = type(exc).__name__

@@ -97,6 +97,14 @@ class CompanyRepo:
         self.session.flush()
         return existing
 
+    def set_web_research(self, id: int, results: list, at) -> None:
+        """Cache what a web search found about this company (2026-09-25)."""
+        company = self.session.get(Company, id)
+        if company is not None:
+            company.web_research = results
+            company.web_researched_at = at
+            self.session.flush()
+
     def get(self, id: int) -> Company | None:
         return self.session.get(Company, id)
 
@@ -128,6 +136,14 @@ class FounderRepo:
 
     def get(self, id: int) -> Founder | None:
         return self.session.get(Founder, id)
+
+    def set_web_research(self, id: int, text: str, at) -> None:
+        """Cache what a web search found about this founder (2026-09-25)."""
+        founder = self.session.get(Founder, id)
+        if founder is not None:
+            founder.web_research = text
+            founder.web_researched_at = at
+            self.session.flush()
 
     def get_by_yc_user_id(self, yc_user_id: int) -> Founder | None:
         """Added in Task 11: lets `ScrapeCompanyPage` tell a brand-new

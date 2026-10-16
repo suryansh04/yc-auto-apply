@@ -60,7 +60,7 @@ def test_a_hook_note_points_at_the_company_paragraph():
     span = span_for("hook shares no distinctive term with the cited source", BODY)
     assert span is not None
     assert "In the funding announcement" in span
-    assert letter.OPENER not in span
+    assert letter.INTRO not in span
 
 
 def test_a_note_about_the_whole_letter_highlights_nothing():

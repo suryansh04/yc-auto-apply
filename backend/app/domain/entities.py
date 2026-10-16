@@ -76,3 +76,6 @@ class Draft:
     research_source_type: str        # news | launch | job_posting | long_description
     research_source_id: int | None
     sequence_step: int = 0
+    # 2026-09-25: the line about the founder, when one was written. It is
+    # already in `body`; this is what lets a later swap find it.
+    founder_line: str | None = None

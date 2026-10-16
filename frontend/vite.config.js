@@ -19,7 +19,8 @@ export default defineConfig({
       // can resolve to ::1 first and the backend (bound to 127.0.0.1) then
       // refuses the connection.
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        // API_URL lets the API run on another port when 8000 is taken.
+        target: process.env.API_URL ?? 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

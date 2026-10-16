@@ -18,47 +18,91 @@ class _Draft:
 
 
 INSIGHT = [
-    "You didn't try to build another shopping app. You built a layer that "
-    "sits on top of where people already shop.",
+    "While looking at Zave, I noticed you sit on top of the shopping apps "
+    "people already use. Keeping that many integrations working is the kind "
+    "of backend work I enjoyed most at Better.",
+    "The other thing I got curious about is price tracking. How do you know "
+    "when a price change is real? I'd love to learn how your team approaches that.",
 ]
+
+
+def _old_letter(company="Zave", paragraph="An older company paragraph."):
+    """A letter drafted from the previous template (2026-09-23)."""
+    return "\n\n".join([
+        letter.OLD_OPENER, letter.OLD_INTRO, letter.OLD_BACKGROUND, letter.OLD_BUILT,
+        paragraph, letter.OLD_ASK.format(company=company), letter.OLD_CLOSE,
+    ])
 
 
 def test_the_senders_own_facts_appear_verbatim():
     """The whole point: three live drafts were rejected for garbling these
     (a Better metric attributed to WaveWatch). Nothing regenerates them."""
     body = letter.assemble_body("Zave", INSIGHT)
-    for block in (letter.OPENER, letter.INTRO, letter.BACKGROUND, letter.BUILT):
+    for block in (letter.INTRO, letter.BETTER, letter.OUTSIDE):
         assert block in body
-    assert "Smart India Hackathon 2025, competing against 68,000+ teams" in body
-    assert "Won CodeClash 2.0, competing against 1,000+ teams" in body
-    assert "cut repeated token calls by 98% with caching" in body
+    assert "final-year CS (Data Science) student at Manipal University Jaipur" in body
+    assert "Won Smart India Hackathon 2025 against 68,000+ teams" in body
+    assert "cut repeated GitHub token requests by 98% with caching" in body
 
 
-def test_the_company_paragraph_sits_between_what_he_built_and_the_ask():
-    # 2026-09-23: the "Now Here's the Important Part:" hinge went first,
-    # then the bridge line under it ("That's the kind of problem I'd
-    # genuinely like to work on") on the operator's say-so. The ask is
-    # the closing anchor now, and it can be: its first words are the same
-    # in every letter.
+def test_the_template_is_the_operators_wareiq_letter():
+    """Operator's researched template (2026-09-25): the tie-in continues
+    the Better paragraph, the curious paragraph stands alone, then his
+    projects and the ask."""
+    body = letter.assemble_body("WareIQ", INSIGHT)
+    paragraphs = body.split("\n\n")
+    assert paragraphs[0] == letter.INTRO
+    assert paragraphs[1] == f"{letter.BETTER} {INSIGHT[0]}"
+    assert paragraphs[2] == INSIGHT[1]
+    assert paragraphs[3] == "Outside work:"
+    assert body.endswith("I'd love to intern at WareIQ this winter, remote or on-site. Resume attached.")
+
+
+def test_the_company_part_sits_between_better_and_outside_work():
     body = letter.assemble_body("Zave", INSIGHT)
-    assert body.index(letter.BUILT) < body.index(INSIGHT[0]) < body.index(letter.ASK_ANCHOR)
-    assert letter.OLD_BRIDGE not in body
+    assert letter.insight_region(body) == INSIGHT[0] + "\n\n" + INSIGHT[1]
 
 
-def test_the_dropped_bridge_still_finds_the_paragraph_in_a_letter_that_has_it():
-    # Letters drafted before it was dropped still carry that line, and
-    # they are reviewable letters, not history - the swap and the hover
-    # card have to keep working on them.
-    old = letter.assemble_body("Zave", INSIGHT).replace(
-        INSIGHT[0], INSIGHT[0] + "\n\n" + letter.OLD_BRIDGE)
-    assert letter.insight_region(old) == INSIGHT[0]
+def test_a_letter_from_the_previous_template_is_still_found():
+    # Approved or sent before 2026-09-25: still reviewable, so the swap and
+    # the hover card keep working on them.
+    old = _old_letter()
+    assert letter.insight_region(old) == "An older company paragraph."
     swapped = letter.with_insight(old, ["A different line entirely."])
     assert "A different line entirely." in swapped
-    assert letter.OLD_BRIDGE in swapped
+    assert letter.OLD_BUILT in swapped
 
 
 def test_the_ask_names_the_company():
-    assert "do that at Zave." in letter.assemble_body("Zave", INSIGHT)
+    assert "intern at Zave this winter" in letter.assemble_body("Zave", INSIGHT)
+
+
+# --- the founder line (2026-09-25) -------------------------------------------
+
+LINE = "I also found your time building search at Flipkart really interesting."
+
+
+def test_the_founder_line_ends_the_curious_paragraph():
+    body = letter.assemble_body("Zave", INSIGHT, founder_line=LINE)
+    assert f"{INSIGHT[1]} {LINE}\n\nOutside work:" in body
+
+
+def test_a_new_founder_line_replaces_the_old_one_where_it_stands():
+    body = letter.assemble_body("Zave", INSIGHT, founder_line=LINE)
+    swapped = letter.with_founder_line(body, LINE, "A newer line about you.")
+    assert LINE not in swapped
+    assert f"{INSIGHT[1]} A newer line about you." in swapped
+
+
+def test_a_letter_with_no_founder_line_gets_one_at_the_end_of_the_company_part():
+    body = letter.assemble_body("Zave", INSIGHT)
+    added = letter.with_founder_line(body, None, LINE)
+    assert f"{INSIGHT[1]} {LINE}\n\nOutside work:" in added
+
+
+def test_an_empty_founder_line_removes_it():
+    body = letter.assemble_body("Zave", INSIGHT, founder_line=LINE)
+    assert letter.with_founder_line(body, LINE, "") == letter.assemble_body("Zave", INSIGHT)
 
 
 def test_no_fixed_block_makes_a_claim_about_the_company():
@@ -105,7 +149,7 @@ def test_the_generic_line_can_replace_a_specific_one_in_place():
 
 def test_an_operator_edit_elsewhere_survives_the_swap():
     body = letter.assemble_body("Zave", INSIGHT).replace(
-        "I've attached my resume.", "My resume is attached."
+        "Resume attached.", "My resume is attached."
     )
     swapped = letter.with_insight(body, ["A different line entirely."])
     assert "My resume is attached." in swapped
@@ -178,7 +222,7 @@ def test_the_wire_text_is_the_letter_plus_a_greeting_and_a_signature():
     # deleted at the operator's instruction.
     body = letter.assemble_body("Zave", INSIGHT)
     wire = compose_wire_text("Hiren", body, "Thanks for reading\nSuryansh")
-    assert wire.startswith("Hi Hiren,\n\n" + letter.OPENER)
+    assert wire.startswith("Hi Hiren,\n\n" + letter.INTRO)
     assert wire.endswith("Thanks for reading\nSuryansh")
 
 
@@ -191,9 +235,18 @@ def test_the_operators_own_blocks_are_not_policed_for_phrasing(phrase):
 
     body = letter.assemble_body("Zave", [f"They are {phrase} the problem."])
     region = _generated_region(body, "Zave")
-    assert letter.OPENER not in region
-    assert letter.BUILT not in region
+    assert letter.INTRO not in region
+    assert letter.OUTSIDE not in region
     assert phrase in region  # the model's own paragraph IS still checked
+
+
+def test_his_remote_or_on_site_offer_is_not_a_model_raising_location():
+    """"remote" is banned for the MODEL; the ask is his own words."""
+    from app.domain.validation import validate_style
+
+    body = letter.assemble_body("Zave", INSIGHT)
+    assert not [e for e in validate_style(_Draft("Would love to build at Zave", body), None, "Zave")
+                if "location" in e]
 
 
 # --- the subject line (operator request 2026-09-23) -----------------------
@@ -218,24 +271,64 @@ def test_the_subject_fits_the_checks_that_judge_a_subject():
 
 
 
-# --- the 2026-09-23 opener and list ----------------------------------------
+def test_outside_work_is_his_two_projects_as_bullets():
+    items = letter.OUTSIDE.split("\n\n", 1)[1].split("\n")
+    assert [i.split(":", 1)[0] for i in items] == ["• Lerno.ai", "• WaveWatch"]
 
 
-def test_the_opener_no_longer_promises_it_is_not_ai():
-    # Operator request: "remove this whole line from the mail".
-    body = letter.assemble_body("Zave", INSIGHT)
-    assert body.startswith("This'll take 45 seconds.\n\n")
-    assert "AI-generated" not in body
+def test_outside_work_is_formatted_and_reads_back_as_the_same_text():
+    """Operator request (2026-09-25): bullets and proper formatting. The
+    formatted version must turn back into exactly the plain text, or the
+    checks and the anchors would read a different letter from the one sent."""
+    from app.domain import rich_text
+
+    body = letter.assemble_body("Zave", INSIGHT, founder_line=LINE)
+    html = letter.formatted_html(body)
+    assert "<ul><li><strong>Lerno.ai</strong>:" in html
+    assert rich_text.sanitize(html) == html
+    assert rich_text.to_text(html) == body
 
 
-def test_what_he_built_is_the_three_numbered_items_led_by_better():
-    items = letter.BUILT.split("\n\n", 1)[1].split("\n")
-    assert [i.split(":", 1)[0] for i in items] == ["1. At Better", "2. Lerno.ai", "3. WaveWatch"]
+def test_every_detail_of_outside_work_is_from_his_resume():
+    for fact in ("about 8 minutes to under 3", "20+ REST APIs", "68,000+ teams", "1,000+ teams"):
+        assert fact in letter.OUTSIDE
 
 
-def test_a_letter_with_the_old_list_is_still_found():
-    # Drafted before the list changed; still reviewable, so the company
-    # paragraph must still be findable and swappable.
-    old = letter.assemble_body("Zave", INSIGHT).replace(letter.BUILT, letter.OLD_BUILT)
-    assert letter.insight_region(old) == INSIGHT[0]
-    assert letter.OLD_BUILT in letter.with_insight(old, ["Another line."])
+def test_the_previous_templates_own_words_are_still_exempt():
+    from app.domain.validation import _generated_region
+
+    region = _generated_region(_old_letter(), "Zave")
+    assert letter.OLD_BACKGROUND not in region
+    assert "An older company paragraph." in region
+
+
+def test_the_ask_is_his_even_when_the_company_has_a_legal_suffix():
+    """Live, 2026-09-25: "Wifi Dabba, Inc." is asked for as "Wifi Dabba",
+    and his "remote or on-site" was flagged as the model raising location."""
+    from app.domain.validation import validate_style
+
+    body = letter.assemble_body("Wifi Dabba", INSIGHT)
+    errors = validate_style(_Draft("Would love to build at Wifi Dabba", body), None, "Wifi Dabba, Inc.")
+    assert not [e for e in errors if "location" in e]
+
+
+def test_calling_something_physical_backend_work_is_refused():
+    """Live, 2026-09-25: crop-breeding chambers called "backend work"."""
+    from types import SimpleNamespace
+
+    from app.domain.validation import SourceRow, validate_grounding
+
+    tie = ("While looking at UrbanKisaan, I noticed you build chambers for crop breeding. "
+           "Keeping that physical infrastructure reliable is the kind of backend work I enjoyed most at Better.")
+    body = letter.assemble_body("UrbanKisaan", [tie, INSIGHT[1]])
+    draft = SimpleNamespace(body=body, subject="s", research_source_id=1, sequence_step=0)
+    source = SourceRow("long_description", "chambers for crop breeding", None, None)
+    errors = validate_grounding(draft, source, "UrbanKisaan", None, [])
+    assert any("physical" in e for e in errors)
+
+
+def test_a_founder_line_never_lands_after_the_placeholder():
+    """Live, Inito 2026-09-25: the line went after ">>> YOUR TURN"."""
+    body = letter.assemble_body("Inito", INSIGHT, include_user_fit_stub=True)
+    added = letter.with_founder_line(body, None, LINE)
+    assert f"{INSIGHT[1]} {LINE}\n\n{letter.USER_FIT_STUB}" in added

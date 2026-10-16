@@ -39,6 +39,20 @@ def _no_real_subject_writer(monkeypatch):
 
     monkeypatch.setattr(deps, "build_subject_writer", _offline)
 
+    # 2026-09-25: the founder line and its web search, likewise - a web
+    # search is a real request that spends a credit.
+    def _no_founder_writer(settings):
+        raise RuntimeError("offline test: no founder line writer")
+
+    monkeypatch.setattr(deps, "build_founder_writer", _no_founder_writer)
+
+    def _no_researcher(settings):
+        raise RuntimeError("offline test: no researcher")
+
+    monkeypatch.setattr(deps, "build_researcher", _no_researcher)
+    monkeypatch.setattr(deps, "build_followup_writer", _no_researcher)
+    monkeypatch.setattr(deps, "build_web_search", lambda settings: None)
+
 
 @pytest.fixture(autouse=True)
 def _ignore_operator_dotenv(monkeypatch):

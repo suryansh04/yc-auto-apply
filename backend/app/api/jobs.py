@@ -144,7 +144,10 @@ def _draft(session: Session, progress: ProgressFn) -> str:
         OutreachRepo,
         ResumeProfileRepo,
     )
-    from app.api.deps import build_critic, build_drafter, build_subject_writer, on_gemini_free_tier
+    from app.api.deps import (
+        build_critic, build_drafter, build_founder_writer, build_researcher,
+        build_subject_writer, build_web_search, on_gemini_free_tier,
+    )
     from app.application.draft_outreach import DraftOutreach, DraftRepos
     from app.config import get_settings
 
@@ -201,7 +204,24 @@ def _draft(session: Session, progress: ProgressFn) -> str:
     except RuntimeError as exc:
         log.warning("subject writer unavailable, keeping the fixed subject: %s", exc)
         subject_writer = None
-    result = DraftOutreach(drafter, repos, critic=critic, subject_writer=subject_writer).run()
+    # 2026-09-25: the line about the founder. Without a writer the letter
+    # simply has none; without TAVILY_API_KEY it comes from the YC bio only.
+    try:
+        founder_writer = build_founder_writer(settings)
+    except RuntimeError as exc:
+        log.warning("founder line writer unavailable, writing no founder line: %s", exc)
+        founder_writer = None
+    # 2026-09-25: research before writing (his pipeline document).
+    try:
+        researcher = build_researcher(settings)
+    except RuntimeError as exc:
+        log.warning("researcher unavailable, writing from the YC page only: %s", exc)
+        researcher = None
+    result = DraftOutreach(
+        drafter, repos, critic=critic, subject_writer=subject_writer,
+        founder_writer=founder_writer, web_search=build_web_search(settings),
+        researcher=researcher,
+    ).run()
     session.commit()  # once at the end, same as `cli.py draft`
 
     progress(result.drafted + result.manual_write + result.errors, None)

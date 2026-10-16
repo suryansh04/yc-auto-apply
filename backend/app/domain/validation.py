@@ -195,12 +195,85 @@ def _generated_region(body: str, company_name: str) -> str:
     removal, not a fuzzy one. A body that was not assembled from them comes
     back unchanged, which is the safe direction: every rule still applies.
     """
-    from app.domain.letter import fixed_blocks
+    from app.domain.letter import known_blocks
 
     remaining = body or ""
-    for block in fixed_blocks(company_name or "Company"):
+    # Every block he has ever written (2026-09-25): a letter drafted from
+    # the previous template is still his words, not the model's.
+    # The ask names the company by its DISPLAY name ("Wifi Dabba", not
+    # "Wifi Dabba, Inc." - live, 2026-09-25), so both spellings are tried.
+    names = dict.fromkeys([company_name or "Company", company_display_name(company_name or "Company")])
+    for block in (b for name in names for b in known_blocks(name)):
         remaining = remaining.replace(block, " ")
     return remaining
+
+
+# His pipeline document (2026-09-25): "Never use these words or phrases".
+CHECKLIST_BANNED = [
+    "genuinely", "passionate", "thrive", "excited to", "leverage", "synergy",
+    "cutting-edge", "cutting edge", "i'd be grateful", "high ownership", "fast-paced",
+    "caught my eye", "resonates", "deeply", "i believe i can add value", "exactly what",
+    "in today's world",
+]
+COMPANY_PART_MIN_WORDS = 50
+COMPANY_PART_MAX_WORDS = 110   # his choice (2026-09-25), over "whole email under 200"
+_LINK = re.compile(r"https?://|www\.|\b[a-z0-9-]+\.(?:com|ai|io|in|co|org)/", re.I)
+# "No lists of three adjectives or three verbs in a row": three plain
+# lower-case words run together with commas and "and"/"or".
+_DIRECT_QUESTION = re.compile(r"^(?:how|what|why|where|when|which|who|do|does|did|is|are|can|could|would)\b", re.I)
+_INDIRECT_QUESTION = re.compile(
+    r"\bI(?:'m| am) curious (?:how|what|whether|why|if|which|about how)\b|\bI (?:kept|keep) wondering\b",
+    re.I,
+)
+_DESCRIBING = re.compile(r"(?:ly|ive|ing|ed|ful|able|ible|ous|ic|al|less|ant|ent|ize|ise|ify|ate)$")
+_TRIPLE = re.compile(r"\b[a-z]+, [a-z]+,? (?:and|or) [a-z]+\b")
+
+
+def company_part_problems(text: str, *, operator_edit: bool = False) -> list[str]:
+    """His quality checklist over the company part: the tie-in, the
+    company paragraph and the founder line. Each problem is named the
+    way the retry prompt needs it."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    errs = []
+    words = len(text.split())
+    if words < COMPANY_PART_MIN_WORDS:
+        errs.append(f"the company paragraph is {words} words - write {COMPANY_PART_MIN_WORDS} to "
+                    f"{COMPANY_PART_MAX_WORDS}")
+    elif words > COMPANY_PART_MAX_WORDS:
+        errs.append(f"the company paragraph is {words} words - cut it to {COMPANY_PART_MAX_WORDS}")
+    if "—" in text or "–" in text:
+        errs.append("contains an em-dash or en-dash - use commas, periods or colons")
+    # One question: a direct one with its question mark, or an indirect
+    # one ("I'm curious how much ...") - his Kosh example asks it that way.
+    # A direct question that ends in a full stop is his BAD example.
+    sentences = _sentences(text)
+    unmarked = [s for s in sentences if _DIRECT_QUESTION.match(s) and not s.endswith("?")]
+    questions = text.count("?") + sum(1 for s in sentences if _INDIRECT_QUESTION.search(s)
+                                      and not s.endswith("?"))
+    if unmarked:
+        errs.append(f"a question is missing its question mark: {unmarked[0][:50]!r}")
+    elif questions != 1:
+        errs.append(f"asks {questions} questions - ask exactly one real technical question")
+    if _LINK.search(text):
+        errs.append("contains a link")
+    low = text.lower()
+    if re.search(r"\binstead of\b", low):
+        errs.append('uses an "X instead of Y" contrast')
+    # Adjectives and verbs, as his rule says - "coaches, trainers and
+    # creators" (live, Exly) is a list of who they serve, which is fine.
+    for match in _TRIPLE.finditer(text):
+        words = re.findall(r"[a-z]+", match.group(0))
+        picked = [w for w in words if w not in ("and", "or")]
+        if all(_DESCRIBING.search(w) for w in picked):
+            errs.append(f"lists three describing words in a row: {match.group(0)!r}")
+            break
+    if not operator_edit:
+        for phrase in CHECKLIST_BANNED:
+            if re.search(rf"(?<![a-z]){re.escape(phrase)}(?![a-z])", low):
+                errs.append(f"banned phrase: {phrase!r}")
+    return errs
 
 
 def validate_style(
@@ -267,6 +340,18 @@ def validate_style(
     if _BRACKETED_CITATION.search(generated_raw):
         errs.append("contains a bracketed citation like '[3]' - never cite by number")
 
+    # His pipeline document's checklist (2026-09-25), over the company
+    # part of today's letter - the only part written fresh.
+    from app.domain.letter import BETTER, insight_region
+
+    if draft.sequence_step == 0 and BETTER in body:
+        from app.domain.letter import USER_FIT_STUB
+
+        # The fill-it-in-yourself placeholder is his to write, not part of
+        # the company paragraph (and it asks him a question).
+        part = (insight_region(body) or "").replace(USER_FIT_STUB, "")
+        errs += company_part_problems(part, operator_edit=operator_edit)
+
     sents = _sentences(body)
     if sents:
         i_starts = sum(1 for s in sents if re.match(r"^I\b", s))
@@ -288,12 +373,25 @@ def validate_style(
         for phrase in BANNED_PHRASES:
             if phrase in generated:
                 errs.append(f"banned phrase: {phrase!r}")
-    for phrase in SENIORITY_PHRASES:
-        if phrase in low:
-            errs.append(f"implies seniority: {phrase!r}")
+    # Over what the MODEL wrote only (2026-09-25): his own ask now says
+    # "remote or on-site", which is his offer, not a model raising it. And
+    # not over the company part, which describes THEM - live, 2026-09-25:
+    # Wifi Dabba's internet for remote villages, AlgoSurg's remote
+    # surgery planning. The rule is about the sender asking to work from
+    # somewhere, which only happens outside that part.
+    from app.domain.letter import insight_region
+
+    about_them = (insight_region(body) or "").lower()
+    outside_company_part = generated.replace(about_them, " ") if about_them else generated
     for phrase in LOCATION_PHRASES:
-        if re.search(rf"\b{re.escape(phrase)}\b", low):
+        if re.search(rf"\b{re.escape(phrase)}\b", outside_company_part):
             errs.append(f"raises location: {phrase!r}")
+    # Seniority is a claim about HIM. "Your 20 years of experience" in the
+    # founder line is about them (live, AlgoSurg, 2026-09-25).
+    low_outside = low.replace(about_them, " ") if about_them else low
+    for phrase in SENIORITY_PHRASES:
+        if phrase in low_outside:
+            errs.append(f"implies seniority: {phrase!r}")
 
     if not any(t in low for t in INTERN_TOKENS):
         errs.append("no explicit internship ask")
@@ -375,6 +473,10 @@ class SourceRow:
 
 
 _SHORT_TERM_ALLOWLIST = {"ai", "ml", "vr", "3d"}
+_PHYSICAL = re.compile(
+    r"\b(?:physical|hardware|chambers?|machines?|machinery|robots?|farms?|factor(?:y|ies)|"
+    r"vehicles?|labs?|laborator(?:y|ies)|greenhouses?|devices?|sensors?)\b"
+)
 
 
 def _terms(text: str) -> set[str]:
@@ -429,9 +531,28 @@ def validate_grounding(draft, source, company_name, one_liner, claims,
     if source.kind == "job_posting" and source.intern_appropriate is False:
         errs.append("cited job posting is not intern-appropriate")
 
-    if one_liner:
+    # Live, 2026-09-25 (UrbanKisaan, twice): "Keeping that kind of physical
+    # infrastructure reliable is the kind of backend work I enjoyed most at
+    # Better" - about crop-breeding chambers. Calling a machine, a farm or
+    # a lab "backend work" is a link he never made.
+    for sentence in _sentences(hook):
+        low_s = sentence.lower()
+        if "backend" in low_s and _PHYSICAL.search(low_s):
+            errs.append("calls something physical 'backend work' - link to their software, or drop the link")
+            break
+
+    # Not for today's letter (2026-09-25): his pipeline document asks it
+    # to open with what they do "in their own words", which is what their
+    # one-liner is. The restatement rule predates that.
+    from app.domain.letter import BETTER
+
+    if one_liner and BETTER not in body:
+        # Sentence by sentence (2026-09-25): the company part is now two
+        # paragraphs, which cover most of a short one-liner's words by
+        # sheer length. What the rule catches is a SENTENCE that parrots
+        # the one-liner back.
         ol = _terms(one_liner)
-        if ol and len(ol & _terms(hook)) / len(ol) > 0.6:
+        if ol and any(len(ol & _terms(s)) / len(ol) > 0.6 for s in _sentences(hook)):
             errs.append("hook overlaps more than 60% with one_liner")
 
     return errs
@@ -492,6 +613,15 @@ _CLAIM_STOPWORDS = frozenset({
 })
 
 
+def _about_him() -> str:
+    """His letter's own facts about himself (2026-09-25). The model ties
+    his Better work to theirs - "the kind of backend work I enjoyed most
+    at Better" - and his letter IS the backing for naming Better."""
+    from app.domain.letter import ABOUT_HIM
+
+    return ABOUT_HIM
+
+
 def _claim_field(claim, name: str) -> str:
     if isinstance(claim, dict):
         return str(claim.get(name) or "")
@@ -519,7 +649,7 @@ def validate_claims(draft, claims, allowed_text=(), company_name: str = "") -> l
     known_text = " ".join(
         [_claim_field(c, "text") + " " + _claim_field(c, "source_span") for c in claims]
         + [str(t or "") for t in allowed_text]
-        + [TEMPLATE_VOCABULARY]
+        + [TEMPLATE_VOCABULARY, _about_him()]
     ).lower()
     known_tokens = set(_KNOWN_TOKEN.findall(known_text)) | _CLAIM_STOPWORDS
     known_numbers = _numbers_in(known_text)
@@ -607,6 +737,10 @@ def _unsourced_work_stories(draft, claims) -> list[str]:
     errs: list[str] = []
     for sentence in _sentences(draft.body):
         if not (_FIRST_PERSON.search(sentence) and _WORK_VERBS.search(sentence)):
+            continue
+        # "I'm curious how the model is implemented" asks about THEIR
+        # work (live, 2026-09-25) - a question is not a story about him.
+        if _INDIRECT_QUESTION.search(sentence) or sentence.rstrip().endswith("?"):
             continue
         words = {w.lower().strip(".,;:!?()[]{}\"'") for w in sentence.split()}
         if not (words & names):

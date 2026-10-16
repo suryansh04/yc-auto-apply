@@ -23,15 +23,18 @@ DESCRIPTION = (
 # what a template answer looks like (see `_FORMULA_TELLS`), and a test
 # fixture that trips the check it is testing teaches nothing.
 GOOD = (
-    "I really like how you're not just selling a policy and leaving the clinic out of it. "
-    "Health cover here usually pays out only when someone is admitted, so the years where "
-    "nothing goes badly wrong are years of paying for nothing. Putting the everyday visits "
-    "inside the cover changes what a person actually gets for it."
+    "I read about how Loop Health gives employees unlimited primary care visits at its "
+    "own clinics, alongside the usual hospital cover. Health cover here usually pays out "
+    "only when someone is admitted, so the years where nothing goes badly wrong feel like "
+    "paying for nothing. I'm curious how you decide which clinic visits the plan should "
+    "cover as more employers join. I'd love to learn how your team thinks about that."
 )
+# Passes the checklist, so the only thing wrong with it is the template.
 TEMPLATE = (
     "I like that you put doctors and insurers on the same side. Most health insurance in "
-    "India only pays out at a hospital, so people barely use what they buy. You made it "
-    "something people use day to day, which is the kind of thing I want to build."
+    "India only pays out at a hospital, so people barely use what they buy. How do you get "
+    "employees to actually use the clinics? You made it something people use day to day, "
+    "which is the kind of thing I want to build."
 )
 
 
@@ -63,7 +66,7 @@ def test_the_model_is_handed_the_description_and_nothing_about_the_letter():
     _run(writer)
     assert writer.context == {
         "company_name": NAME, "one_liner": ONE_LINER, "description": DESCRIPTION,
-        "built": "", "avoid": [],
+        "built": "", "research": None, "avoid": [],
     }
 
 
@@ -98,8 +101,16 @@ def test_an_empty_paragraph_is_a_legitimate_answer_and_is_dropped():
 
 
 def test_a_number_from_their_yc_page_is_refused():
-    assert "number" in unusable_reason(GOOD.replace("the years", "the 22 years"))
-    assert "number" in unusable_reason(GOOD.replace("usually", "70 percent of the time"))
+    # 2026-09-25: numbers from the facts are fine ("49 plant genomes") -
+    # but never one they did not write, and never an investor number.
+    assert "not in what they wrote" in unusable_reason(
+        GOOD.replace("the years", "the 22 years"), "a description with no digits")
+    assert "investor" in unusable_reason(GOOD.replace("usually", "in 70 percent of cases"))
+
+
+def test_numbers_they_wrote_are_allowed():
+    text = GOOD.replace("the years", "the 22 years")
+    assert unusable_reason(text, "We have run 22 years of clinics.") is None
 
 
 def test_a_company_name_with_a_digit_is_not_a_number():
@@ -111,48 +122,45 @@ def test_a_company_name_with_a_digit_is_not_a_number():
 
 def test_the_tells_the_letter_bans_everywhere_else_are_banned_here():
     assert unusable_reason("I am reaching out because " + GOOD)
-    assert unusable_reason("I came across Loop Health and " + GOOD)
-    assert unusable_reason(GOOD.replace("Putting", "I signed up and tried it. Putting"))
+    assert unusable_reason(GOOD.replace("Health cover", "I signed up and tried it. Health cover"))
 
 
-def test_markdown_is_refused_because_the_letter_is_plain_text():
+def test_his_documents_opening_is_allowed():
+    # "I came across Aadi on Hugging Face" - his own example.
+    assert unusable_reason(GOOD.replace("I read about how", "I came across how")) is None
+
+
+def test_markdown_and_dashes_are_refused():
     assert unusable_reason("**Loop** " + GOOD) == "not plain text"
-    assert unusable_reason(GOOD.replace("the clinic", "the clinic —")) == "not plain text"
+    assert "dash" in unusable_reason(GOOD.replace("own clinics,", "own clinics —"))
 
 
-def test_it_has_to_be_one_paragraph():
-    assert unusable_reason(GOOD + "\n\n" + GOOD) == "more than one paragraph"
+def test_it_is_at_most_the_tie_in_and_the_company_paragraph():
+    assert unusable_reason(GOOD + "\n\n" + GOOD + "\n\n" + GOOD)
 
 
-def test_length_is_bounded_at_both_ends():
-    assert "too short" in unusable_reason("I like what you built.")
-    assert "too long" in unusable_reason(" ".join(["word"] * (MAX_WORDS + 1)))
-    assert MIN_WORDS < len(GOOD.split()) < MAX_WORDS
+def test_length_is_his_50_to_110_words():
+    assert "50 to 110" in unusable_reason("I like what you built. How does it work?")
+    assert "110" in unusable_reason(GOOD + " " + GOOD.replace("?", "."))
+    assert 50 <= len(GOOD.split()) <= 110
 
 
-def test_the_voice_the_operator_asked_for_passes():
-    """"I really like how you are not dumping every route into a messy
-    list and instead actually built a dedicated platform" - his words for
-    what this should sound like. If the rules here would drop it, the
-    rules are wrong."""
-    assert unusable_reason(GOOD) is None
-    assert unusable_reason(
-        "I really like how you're not dumping every route into one messy list and instead "
-        "actually built a dedicated platform for intercity buses. Most aggregators are happy "
-        "being a search box, so nobody owns whether the bus runs on time. Running the "
-        "schedule yourself means the person waiting at the pickup point has someone who cares."
-    ) is None
+def test_his_checklist_is_applied():
+    assert "question" in unusable_reason(GOOD.replace("I'm curious how you decide", "You decide"))
+    assert "instead of" in unusable_reason(GOOD.replace("alongside", "instead of"))
+    assert "caught my eye" in unusable_reason(GOOD.replace("I read about", "What caught my eye is"))
 
 
 def test_the_case_study_symmetry_is_refused():
     """Live finding (2026-09-23): "no this looks properly ai generated" -
     a formal setup, "Usually ...", then "Instead you ...". The symmetry
     is the tell, not the vocabulary."""
-    assert "template" in unusable_reason(
+    assert unusable_reason(
         "You could have just listed operators without touching their schedules, and you did "
         "not. Usually an aggregator dumps every route into one messy list and leaves the "
-        "operator to figure out timing alone. Instead you built a dedicated platform that "
-        "sets schedules for them."
+        "operator to figure out timing alone. How do you set schedules for them without "
+        "losing the operators you already have on board? Instead you built a dedicated "
+        "platform that sets schedules for them."
     )
 
 
@@ -181,8 +189,6 @@ class TwoAnswers:
 
 
 def test_a_template_answer_is_asked_once_more_rather_than_dropped():
-    # Silence is a worse answer than a second attempt, and this is a
-    # failure the model can correct when shown what it just wrote.
     writer = TwoAnswers(TEMPLATE, GOOD)
     assert _run(writer)["options"][0]["paragraph"] == GOOD
     assert len(writer.contexts) == 2
@@ -196,35 +202,31 @@ def test_it_gives_up_after_the_second_template():
 
 
 def test_other_rejections_are_not_retried():
-    # A model that quoted a number or invented a detail is not more
-    # trustworthy on the second ask; only the template is worth another.
     writer = TwoAnswers(GOOD.replace("the years", "the 40 years"), GOOD)
     assert _run(writer) is None
     assert len(writer.contexts) == 1
 
 
 def test_what_the_letter_already_says_is_never_offered_back():
-    writer = TwoAnswers(GOOD, GOOD + " And one more thought about it.")
+    writer = TwoAnswers(GOOD, GOOD.replace("more employers join", "new employers sign up"))
     out = run_insight_writer(writer, NAME, ONE_LINER, DESCRIPTION, avoid=[GOOD])
     assert out["options"][0]["paragraph"] != GOOD
     assert GOOD in writer.contexts[0]["avoid"]
 
 
+# --- three options -----------------------------------------------------------
 
-# --- three options (operator request 2026-09-25) -----------------------------
-#
-# "tell the suggestion to also suggest option like this": an excited one,
-# a plainer curious one that admits he does not know how they do it yet,
-# and a short one.
-
-CURIOUS = (
-    "The way Loop Health folds clinic visits into the cover is what caught my eye. "
-    "Keeping that cheap enough to be unlimited sounds hard to get right, and I'd like to "
-    "see how you do it."
+ANGLE = (
+    "I came across the way Loop Health runs its own asset-light clinics for employers and "
+    "keeps hospital cover alongside them. How do you decide where a new clinic goes when a "
+    "large employer signs up in a city you are not in yet? Getting that wrong seems "
+    "expensive for everyone, and planning around it is the kind of work I'd love to do."
 )
 SHORT = (
-    "I got curious about how Loop Health makes everyday clinic visits part of the cover. "
-    "That's the kind of problem I want to work on."
+    "I read that Loop Health gives employees unlimited primary care visits at its own "
+    "clinics, on top of the usual hospital cover. I'm curious how you keep unlimited visits "
+    "affordable for an employer as the team keeps growing each quarter. I'd love to learn how your whole team "
+    "approaches that."
 )
 
 
@@ -239,31 +241,32 @@ class Options:
 
 
 def test_all_three_styles_come_back_when_all_three_are_usable():
-    out = _run(Options({"style": "excited", "paragraph": GOOD},
-                       {"style": "curious", "paragraph": CURIOUS},
+    out = _run(Options({"style": "template", "paragraph": GOOD},
+                       {"style": "angle", "paragraph": ANGLE},
                        {"style": "short", "paragraph": SHORT}))
-    assert [o["style"] for o in out["options"]] == ["excited", "curious", "short"]
+    assert [o["style"] for o in out["options"]] == ["template", "angle", "short"]
 
 
 def test_a_bad_option_is_dropped_and_the_rest_are_still_offered():
-    out = _run(Options({"style": "excited", "paragraph": TEMPLATE},
+    out = _run(Options({"style": "template", "paragraph": TEMPLATE},
                        {"style": "short", "paragraph": SHORT}))
-    assert out["options"] == [{"style": "short", "paragraph": SHORT}]
+    assert [o["paragraph"] for o in out["options"]] == [SHORT]
 
 
 def test_two_identical_options_are_one_option():
-    out = _run(Options({"style": "curious", "paragraph": CURIOUS},
-                       {"style": "short", "paragraph": CURIOUS}))
+    out = _run(Options({"style": "angle", "paragraph": SHORT},
+                       {"style": "short", "paragraph": SHORT}))
     assert len(out["options"]) == 1
-
-
-def test_his_own_closing_line_is_not_refused_any_more():
-    # "That's the kind of problem I want to work on" closes two of the
-    # three examples he asked for.
-    assert unusable_reason(SHORT) is None
 
 
 def test_what_he_has_built_is_passed_through_as_the_only_thing_about_him():
     writer = Options({"style": "short", "paragraph": SHORT})
     run_insight_writer(writer, NAME, ONE_LINER, DESCRIPTION, built="1. WaveWatch: ...")
     assert writer.context["built"] == "1. WaveWatch: ..."
+
+
+def test_the_verified_research_is_handed_to_the_writer():
+    writer = Options({"style": "short", "paragraph": SHORT})
+    research = {"facts": [{"kind": "specific_thing", "text": "Clinics.", "old": False}]}
+    run_insight_writer(writer, NAME, ONE_LINER, DESCRIPTION, research=research)
+    assert writer.context["research"] == research

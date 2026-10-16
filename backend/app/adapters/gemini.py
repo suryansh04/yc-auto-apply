@@ -180,122 +180,317 @@ FIRST_EMAIL_SCHEMA: dict[str, Any] = {
     "type": "OBJECT",
     "properties": {
         "subject": {"type": "STRING"},
-        "company_paragraphs": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "tie_in": {"type": "STRING"},
+        "paragraph": {"type": "STRING"},
+        "founder_line": {"type": "STRING"},
         "could_be_a_user": {"type": "BOOLEAN"},
     },
-    "required": ["subject", "company_paragraphs", "could_be_a_user"],
+    "required": ["subject", "tie_in", "paragraph", "founder_line", "could_be_a_user"],
 }
 
-_FIRST_EMAIL_SYSTEM = """You write ONE part of a cold email from a computer science student to a
-startup founder. The rest of the email is already written by the sender
-himself and you will never see or change it: how he introduces himself,
-what he has built, and what he is asking for.
+# Operator's pipeline document (2026-09-25): his own system prompt for
+# Sarvam, adapted in ONE way - the model writes only the parts that
+# change (the company paragraph, an optional tie-in and an optional line
+# about the founder) and the fixed blocks are assembled around them in
+# code (app/domain/letter.py), so they can never be altered. Everything
+# else - the voice, the rules, the banned words - is his.
+_EMAIL_RULES = """The sender is Suryansh Singh, a final-year CS (Data Science) student at
+Manipal University Jaipur. The emails must sound like he wrote them
+himself: plain, direct, a little curious. Not polished, not salesy.
 
-Your paragraph sits directly after the list of things the sender has
-built, and directly BEFORE the sentence where he asks for the internship,
-which he wrote and you must not repeat or anticipate.
+THE EMAIL, in this order. Everything outside [brackets] is fixed and is
+put in by code - you never write, change or repeat it:
 
-It is the part that proves a real person looked at this specific
-company. Everything before it was about the sender; your paragraph is
-the turn to the founder.
+  Hi <FounderFirstName>,
 
-Operator request (2026-09-24): this paragraph must sound like the
-sender, not like a case study. It is written the way the AI suggestion
-on the review screen writes it, because the two are the same paragraph.
+  I'm Suryansh, a final-year CS (Data Science) student at Manipal
+  University Jaipur. I just wrapped up an internship at Better, where I
+  worked on Operate, an AI agent that debugs production incidents.
 
-THE VOICE: a twenty-year-old typing to a founder he admires. The way he
-would say it out loud:
+  My main work there was the GitHub integration. I moved it to read-only
+  access and cut repeated GitHub token requests by 98% with caching.
+  [TIE-IN - optional]
 
-  I really like how you're not dumping every route into one messy list
-  and instead actually built a dedicated platform for intercity buses.
+  [COMPANY PARAGRAPH] [FOUNDER LINE - optional]
 
-"I really like how", "you're", "actually", "messy" - a person's words.
-The contrast lives INSIDE one sentence. Say "you're", "don't", "it's".
-Short words.
+  Outside work:
+  - Lerno.ai: an AI product that turns any topic into an animated video
+    lesson. I built the full stack and cut generation time from about 8
+    minutes to under 3 with async rendering. Won CodeClash 2.0 against
+    1,000+ teams.
+  - WaveWatch: a coastal risk platform. I built the entire backend: 20+
+    REST APIs for auth, incident reporting and admin triage. Won Smart
+    India Hackathon 2025 against 68,000+ teams.
 
-NEVER the case-study shape. For an invented used-car company:
+  I'd love to intern at <Company> this winter, remote or on-site. Resume
+  attached.
 
-  BAD:  Carvaan could have taken the obvious route and listed every car
-        without inspecting it. Instead you built an inspection step that
-        standardises quality. That decision is the thing that stuck with
-        me.
-  GOOD: I really like how you're not letting a car onto the site until
-        someone has actually looked at it. Most marketplaces are happy
-        being a noticeboard, so the buyer ends up doing the inspecting
-        with a friend who knows engines. That's what I find exciting
-        about Carvaan, and honestly the main reason I'm writing to you.
+  Suryansh Singh
 
-The first reads as generated because of its symmetry: "could have taken
-the obvious route", then "Instead you built", then "the thing that stuck
-with me". Never write any of those three.
+HOW TO WRITE THE COMPANY PARAGRAPH (the only part written fresh, 3 to 5
+sentences):
+- Open with something specific you read or saw: a named product, model,
+  feature or technical choice. Use only the facts given to you.
+- Ask ONE real technical question about how they do something. Phrase it
+  as curiosity ("I'm curious how...", "How do you figure out..."), not as
+  a claim about how they work.
+- Only connect it to Suryansh's skills if the connection is real and
+  obvious (for example, data pipelines for an ML company). If the
+  connection is a stretch, skip it.
 
-THE SHAPE - ONE paragraph, two or three sentences:
+THE TIE-IN (optional): one or two sentences that continue his Better
+paragraph, ONLY when the company's work is obviously the same kind of
+thing he did there - integrations with other systems, keeping them
+reliable, caching, safe access, AI agents, developer tooling. Like
+"While looking at WareIQ, I noticed you sync orders across 50+ channels.
+Keeping that many integrations reliable is the kind of backend work I
+enjoyed most at Better." Anything physical - farms, labs, chambers,
+machines, lending groups, clinics - is NOT backend work. When in doubt,
+leave it empty; most letters have none.
 
-1. What you noticed - the CHOICE inside what they built, not what the
-   product is. In his voice: "I really like how you ...", "What I like
-   is that you ...", "It's interesting that you ...". Vary the opening.
-2. Optional: one short sentence on why that choice matters to the person
-   on the other end.
-3. ALWAYS end on HIM: that this is what he finds exciting about them and
-   the reason he is writing - "That's what I find exciting about X, and
-   it's why I'm applying." Vary the wording; keep it tied to the thing
-   you named.
-
-Ground it in WHAT THEY SAID below, and in nothing else.
-
-THE SOURCE IS HOW YOU LEARNED IT, never what the sentence is about.
-Naming the founder's own channel is fine and wanted - their launch post,
-their job posting, what they wrote - because that is where you actually
-read it. But NEVER name the news outlet or publication that covered them,
-and never write "the article", "the piece", "coverage", "featured in" or
-a date. A third party's write-up is not the founder's own words.
-
-Naming where you read it is OPTIONAL and only worth doing when it reads
-as a natural clause - "in your launch post you said ...", "the role you
-posted asks for ...". If it will not sit inside a real sentence, leave it
-out and simply state what they chose. Never bolt the channel onto the end
-of a sentence as a fragment: "...sits outside the sterile field - what
-you wrote about the company" is broken English and worse than saying
-nothing. Never write a bracketed citation, a number or an id.
+THE FOUNDER LINE (optional): one sentence using ONLY the founder fact
+given, framed as something he'd like to hear about ("I also read that
+..., and I'd love to hear what you learned from that."). Empty when the
+founder fact is "none found". No question mark. No flattery about their
+college, title or credentials on their own, no awards.
 
 HARD RULES:
+- Use ONLY the facts provided in the user message. Never add facts about
+  the company or founder.
+- If a fact is marked OLD, frame it as "I read that..." not "you do...".
+- No em-dashes or en-dashes anywhere. Use commas, periods or colons.
+- Never use these words or phrases: genuinely, passionate, thrive,
+  excited to, leverage, synergy, cutting-edge, I'd be grateful, high
+  ownership, fast-paced, caught my eye, resonates, deeply, I believe I
+  can add value, exactly what, in today's world.
+- No "X instead of Y" contrast sentences. No lists of three adjectives or
+  three verbs in a row.
+- Exactly ONE question, in the company paragraph: a direct one that
+  ends with a question mark, or an indirect one ("I'm curious how
+  much ..."). A direct question never ends with a full stop.
+- Do not add links. Do not repeat the fixed blocks.
+- Never claim he used, signed up for or tested their product - the
+  founder can check their own signup list. Reading about it is fine.
+- Never mention Y Combinator or their YC page, and never name a news
+  outlet.
+- The tie-in, the company paragraph and the founder line together: 50 to
+  110 words."""
 
-- Write about THEM. Never a sentence about the sender's skills,
-  education, projects or character - those are already in the email and
-  repeating them wastes the founder's attention.
-- NEVER claim to have signed up for, tried, used, downloaded or tested
-  the product. You do not know whether he has, and the founder can check
-  their own signup list. Say what is visible from outside.
-- Do not say he has NOT tried it either. That is an apology for homework
-  nobody asked for.
-- Excitement about the specific thing, yes, in the closing line. Hype,
-  no: never "impressive", "I'm excited", "resonates", "aligns",
-  "fascinating", "passionate about", "amazing". ("I find exciting" and
-  "got me excited" are fine.) Never "reaching out".
-- Never restate the company's one-liner back to them.
-- Name the company once.
-- No semicolons. At most two em dashes. Contractions are good.
-- Vary sentence length. Three sentences of the same shape in a row is the
-  clearest sign a machine wrote it.
-- No numbers from the source - no funding amounts, growth or headcount.
+_FIRST_EMAIL_SYSTEM = """You write short cold emails from a student to a startup founder, asking
+for a winter internship. You write only the parts that change from one
+founder to the next.
+
+""" + _EMAIL_RULES + """
 
 could_be_a_user: TRUE only if this is something a computer science
 student in India could plausibly be a user of himself - a consumer app, a
-developer tool, a student product. FALSE for anything sold to businesses,
-to factories, to hospitals, to other founders as infrastructure. You are
-judging THE COMPANY, not the sender: do not guess whether he has used it,
-only whether someone like him could. When true, the sender is given a
-blank to fill in with his own real experience; you never write that part.
+developer tool, a student product. FALSE for anything sold to businesses.
 
-SUBJECT: three to ten words, no emoji, no all-caps words, naming the
-company or their product.
+OUTPUT: JSON with "subject" ("Would love to build at <Company>"),
+"tie_in" (or ""), "paragraph", "founder_line" (or "") and
+"could_be_a_user". Plain text in each, no line breaks. No commentary."""
 
-OUTPUT: JSON with "subject", "company_paragraphs" (a JSON ARRAY, one
-plain-text string per paragraph, one or two entries, no markdown, no
-greeting, no sign-off - ONE entry is the norm) and "could_be_a_user". Nothing else - and never a
-citation of any kind in the letter. The founder is reading a letter, not
-a paper.
-"""
+# His three finished examples, sent in every call, as his document says.
+# The "Why it works" lines are his, too.
+EXAMPLE_EMAILS = """EXAMPLE 1: WareIQ (logistics / fulfillment)
+
+Hi Harsh,
+
+I'm Suryansh, a final-year CS (Data Science) student at Manipal University Jaipur. I just wrapped up an internship at Better, where I worked on Operate, an AI agent that debugs production incidents.
+
+My main work there was the GitHub integration. I moved it to read-only access and cut repeated GitHub token requests by 98% with caching. While looking at WareIQ, I noticed you sync orders across 50+ channels. Keeping that many integrations reliable is the kind of backend work I enjoyed most at Better.
+
+The other thing I got curious about is RTO. How do you figure out which orders are likely to come back before they ship? I'd love to learn how your team approaches that.
+
+Outside work: (fixed block)
+
+I'd love to intern at WareIQ this winter, remote or on-site. Resume attached.
+
+Suryansh Singh
+
+Why it works: the integrations link is real (Suryansh built an integration, WareIQ runs 50+). The RTO question is a real problem for them.
+As JSON: tie_in = "While looking at WareIQ, ... at Better.", paragraph = "The other thing ... approaches that.", founder_line = "".
+
+EXAMPLE 2: UrbanKisaan (ML / plant biology)
+
+Hi Vihari,
+
+(fixed blocks A and B, no tie-in)
+
+I came across Aadi on Hugging Face and spent some time going through the dataset card. Pretraining on 49 plant genomes and then adding RNA-seq and ATAC heads for maize was really interesting to read about. What I kept wondering is the other side of the loop: how do you make sure the phenotype data coming out of your growth chambers is clean enough to retrain on? Building the pipelines around that is the kind of work I'd love to do.
+
+(fixed block C and the ask)
+
+Why it works: names their actual model (Aadi) and a real detail about it. The skill link (data pipelines) fits an ML company.
+As JSON: tie_in = "", paragraph = the paragraph above, founder_line = "".
+
+EXAMPLE 3: Kosh (fintech / lending)
+
+Hi Aayush,
+
+(fixed blocks A and B, no tie-in)
+
+I read about Kosh's joint liability model, and one thing stuck with me: each group needed at least one member with a traditional credit history, and you also used SMS data to check eligibility. I'm curious how much of the risk call now comes from the group itself versus the individual data. I'd love to learn how your team thinks about that. I also read that you and Sahil spent time talking to drivers and factory workers before starting Kosh, and I'd love to hear what you learned from those conversations.
+
+(fixed block C and the ask)
+
+Why it works: the facts come from an older article, so they are framed as "I read" and "needed" (past tense). The founder line is a real story, not flattery. No forced skill link, because there isn't an obvious one.
+As JSON: tie_in = "", paragraph = everything up to "thinks about that.", founder_line = "I also read that you and Sahil ... from those conversations."
+
+These examples show the STYLE. Their facts belong to those three
+companies only - never reuse a fact, name or phrase from them for
+another company."""
+
+
+# --- research: verified facts before the letter (2026-09-25) ---------------
+
+RESEARCH_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "facts": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "kind": {"type": "STRING", "enum": ["what_they_do", "specific_thing", "founder_fact"]},
+                    "text": {"type": "STRING"},
+                    "source": {"type": "STRING"},
+                    "old": {"type": "BOOLEAN"},
+                },
+                "required": ["kind", "text", "source", "old"],
+            },
+        },
+        "question": {"type": "STRING"},
+        "skill_connection": {"type": "STRING"},
+        "note": {"type": "STRING"},
+    },
+    "required": ["facts", "question", "skill_connection", "note"],
+}
+
+_RESEARCH_SYSTEM = """You research a startup so a student can write its founder a short, specific
+cold email. You are given numbered SOURCES (S1, S2, ...), each with a
+label, a URL and a date when known. You pick facts ONLY from them.
+
+Find, as "facts" (each with the id of the ONE source it comes from):
+
+- what_they_do: what the company does, in one or two lines, in their own
+  words where the source has them.
+- specific_thing: ONE specific, named thing - a product, a model, a
+  feature, a technical choice, a blog post, a public repo or dataset -
+  plus one concrete detail about it. Prefer something an engineer would
+  find interesting over a marketing claim.
+- founder_fact: ONE real fact about the founder - a past company, their
+  background, a story they have told publicly, something they wrote.
+  Never a credential on its own (a college, a title), never an award,
+  ranking or press list.
+
+Also:
+- question: ONE technical question an engineer would genuinely ask about
+  how they work, tied to the specific thing or their core problem.
+  Answerable in a reply, ends with "?". Not a question their homepage
+  answers, not advice.
+- skill_connection: only if there is a real and obvious link between
+  their work and what the student has done - otherwise "". The student
+  has done: a GitHub integration for an AI agent that debugs production
+  incidents (read-only access, token caching); a full-stack AI product
+  that turns topics into animated video lessons (async rendering); the
+  whole backend of a coastal risk platform (20+ REST APIs); he studies
+  Data Science. Example of a real link: "they need data pipelines around
+  their model; he studies Data Science". A stretch is worse than "".
+- note: one line on anything you were unsure about, or "".
+
+RULES:
+- Copy names and numbers EXACTLY as the source writes them. Never
+  combine two sources into one fact, never add anything the source does
+  not say.
+- old: true when the source is dated two or more years before today, or
+  describes the thing in the past tense ("needed", "used to").
+- If nothing in the sources fits a kind, leave that kind out. A missing
+  fact is fine; an invented one is not.
+- A source labelled "web" may be about a different company or person
+  with a similar name. Use it only if it clearly is about this company or
+  this founder.
+
+Return JSON: {"facts": [{"kind": ..., "text": ..., "source": "S2", "old":
+false}, ...], "question": ..., "skill_connection": ..., "note": ...}."""
+
+
+def build_research_prompt(context: dict) -> str:
+    lines = [
+        f"TODAY: {context.get('today') or ''}",
+        f"COMPANY: {context.get('company_name') or 'unknown'}",
+        f"FOUNDER: {context.get('founder_name') or 'unknown'}",
+        "",
+        "SOURCES",
+    ]
+    for s in context.get("sources") or []:
+        date = s.get("date") or "unknown date"
+        lines += [f"[{s.get('id')}] {s.get('label')} ({s.get('url') or 'no URL'}, {date})",
+                  str(s.get("text") or "").strip(), ""]
+    lines += ["Pick the facts now."]
+    return "\n".join(lines)
+
+
+def _research(data: Any, stage: str) -> dict:
+    if not isinstance(data, dict):
+        raise ValueError(f"{stage}: expected a JSON object")
+    facts = [f for f in (data.get("facts") or []) if isinstance(f, dict)]
+    return {
+        "facts": facts,
+        "question": str(data.get("question") or ""),
+        "skill_connection": str(data.get("skill_connection") or ""),
+        "note": str(data.get("note") or ""),
+    }
+
+
+class GeminiResearcher:
+    """Real `CompanyResearcher` port. Picks facts from numbered sources;
+    decides nothing. Verifying them is
+    `app.application.research_company.run_researcher`'s job."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def research(self, context: dict) -> dict:
+        response = _generate_with_retry(
+            self._client, self._sleep, "research",
+            model=self._model,
+            contents=build_research_prompt(context),
+            config=types.GenerateContentConfig(
+                system_instruction=_RESEARCH_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=RESEARCH_SCHEMA,
+                temperature=0.2,   # picking facts, not writing
+            ),
+        )
+        return _research(_decode_json(response.text, "research"), "research")
+
+
+def format_verified_facts(research: dict | None, fallback: str = "") -> str:
+    """His USER MESSAGE TEMPLATE's fact block, from verified research.
+    Shared by the draft and the AI suggestion, so both are handed exactly
+    the same facts."""
+    facts = {f["kind"]: f for f in ((research or {}).get("facts") or [])}
+
+    def line(kind: str, missing: str) -> str:
+        fact = facts.get(kind)
+        if not fact:
+            return missing
+        return fact["text"] + (" (OLD)" if fact.get("old") else "")
+
+    what = line("what_they_do", fallback or "none found")
+    old = [f["text"] for f in facts.values() if f.get("old")]
+    return "\n".join([
+        "VERIFIED FACTS (use only these):",
+        f"- What they do: {what}",
+        f"- Specific thing to mention: {line('specific_thing', 'none found - use what they do')}",
+        f"- Founder fact: {line('founder_fact', 'none found')}",
+        f"- Technical question to ask: {(research or {}).get('question') or 'write one about what they do'}",
+        f"- Real skill connection (optional): {(research or {}).get('skill_connection') or 'none'}",
+        f"- Facts marked OLD: {'; '.join(old) if old else 'none'}",
+    ])
 
 
 _DRAFTER_SYSTEM = """You write a cold email from a student to a startup founder, asking for a
@@ -469,6 +664,19 @@ SOURCE_KIND_LABELS = {
 }
 
 
+# 2026-09-25: the order a FIRST email's one source is chosen in. His
+# template notices one concrete thing the product does and asks about a
+# second, which only the founders' own description reliably has - a news
+# headline like "The Best Of Inc42's 30 Startups To Watch" (Kosh, live)
+# gives the model nothing to notice, and a job posting says what they
+# need rather than what they built.
+_FIRST_EMAIL_ORDER = {"long_description": 0, "launch": 1, "news": 2, "job_posting": 3}
+
+
+def _first_email_sources(sources: list[dict]) -> list[dict]:
+    return sorted(sources, key=lambda s: _FIRST_EMAIL_ORDER.get(str(s.get("kind")), 9))
+
+
 def _format_one_source(sources: list[dict]) -> str:
     """The single best source, with no number and no kind, for a first
     email.
@@ -482,7 +690,7 @@ def _format_one_source(sources: list[dict]) -> str:
     """
     if not sources:
         return "(none)"
-    top = sources[0]
+    top = _first_email_sources(sources)[0]
     text = str(top.get("text", "")).replace("\n", " ").strip()
     label = SOURCE_KIND_LABELS.get(str(top.get("kind")), "their research material")
     return f"This is {label}:\n{text}"
@@ -519,7 +727,7 @@ def first_email_source(context: dict, index=1) -> tuple[str, int | None]:
     always the priority-ordered first. `index` remains for the follow-up
     path and for tests; anything out of range falls back to the best one.
     """
-    sources = context.get("available_sources") or []
+    sources = _first_email_sources(context.get("available_sources") or [])
     if not sources:
         return "", None
     try:
@@ -598,8 +806,20 @@ def build_draft_prompt(context: dict) -> str:
         "",
         *(
             [
-                "WHAT THEY SAID (ground your paragraph on this, and nothing else)",
-                _format_one_source(context.get("available_sources") or []),
+                "Write the cold email.",
+                "",
+                f"Founder first name: {str(founder.get('full_name') or '').split(' ')[0]}",
+                f"Company: {company_display_name(company.get('name') or '')}",
+                "",
+                format_verified_facts(
+                    context.get("research"),
+                    fallback=_format_one_source(context.get("available_sources") or []),
+                ),
+                "",
+                "Follow the system prompt exactly. Here are three finished examples of "
+                "the style and structure I want.",
+                "",
+                EXAMPLE_EMAILS,
             ]
             if int(context.get("sequence_step") or 0) == 0
             else [
@@ -663,14 +883,13 @@ def build_draft_prompt(context: dict) -> str:
     if step == 0:
         parts += [
             "",
-            "Write ONLY the paragraph about this company - one or two "
-            "entries in \"company_paragraphs\". The sender's own "
-            "introduction, what he has built and his ask are already "
-            "written and are not yours to produce or repeat.",
-            "Name the choice they made that is not the obvious one: what "
-            "they did NOT do, then what they did instead. Both halves must "
-            "be visible in the source you cite.",
-            "No entry may contain a blank line. Name the company once.",
+            "Write ONLY \"tie_in\" (usually \"\"), \"paragraph\" and "
+            "\"founder_line\" (\"\" when the founder fact is none found). "
+            "The fixed blocks are not yours to produce or repeat.",
+            "The paragraph names the specific thing, asks exactly ONE "
+            "question with a question mark, and uses only the verified facts.",
+            "Together 50 to 110 words - count them; under 50 is rejected. "
+            "No dashes, no links, no line breaks.",
             "Set could_be_a_user by judging THE COMPANY: could a computer "
             "science student in India plausibly be a user of this himself?",
         ]
@@ -695,6 +914,38 @@ def _paragraph_list(raw) -> list[str]:
 def _paragraph_text(raw) -> str:
     """The same paragraphs as one body, blank line between each."""
     return "\n\n".join(_paragraph_list(raw))
+
+
+def _first_email(data: dict, prompt_context: dict, stage: str) -> dict:
+    """A first email's answer, in the shape `draft_outreach` assembles.
+
+    His pipeline document (2026-09-25): the model answers `tie_in`
+    (usually empty), `paragraph` and `founder_line` (optional). The tie-in
+    continues his Better paragraph; the founder line ends the company
+    paragraph (see `app.domain.letter.assemble_body`). Older shapes -
+    `tie_in`/`curious`, `company_paragraphs` - are still understood, so a
+    provider that ignores the schema is not a failure nobody can see.
+    """
+    if "subject" not in data:
+        raise ValueError(f"{stage}: response missing subject")
+    tie_in = str(data.get("tie_in") or "").strip()
+    if "paragraph" in data or "curious" in data:
+        paragraphs = [str(data.get("paragraph") or data.get("curious") or "").strip()]
+        paragraphs = [p for p in paragraphs if p]
+    elif "company_paragraphs" in data:
+        paragraphs = _paragraph_list(data["company_paragraphs"])
+    else:
+        raise ValueError(f"{stage}: response missing paragraph")
+    kind, source_id = first_email_source(prompt_context, 1)
+    return {
+        "subject": str(data["subject"]),
+        "tie_in": tie_in,
+        "company_paragraphs": paragraphs,
+        "founder_line": str(data.get("founder_line") or "").strip(),
+        "could_be_a_user": bool(data.get("could_be_a_user")),
+        "research_source_type": kind,
+        "research_source_id": source_id,
+    }
 
 
 class GeminiDrafter:
@@ -737,17 +988,7 @@ class GeminiDrafter:
         if not isinstance(data, dict):
             raise ValueError("drafter: expected a JSON object")
         if first_email:
-            missing = [k for k in ("subject", "company_paragraphs") if k not in data]
-            if missing:
-                raise ValueError(f"drafter: response missing {', '.join(missing)}")
-            kind, source_id = first_email_source(prompt_context, 1)
-            return {
-                "subject": str(data["subject"]),
-                "company_paragraphs": _paragraph_list(data["company_paragraphs"]),
-                "could_be_a_user": bool(data.get("could_be_a_user")),
-                "research_source_type": kind,
-                "research_source_id": source_id,
-            }
+            return _first_email(data, prompt_context, "drafter")
         missing = [k for k in ("subject", "body", "research_source_type",
                                "research_source_id") if k not in data]
         if missing:
@@ -1129,6 +1370,8 @@ class GeminiReviser:
 # from the request, and the two after it are invented companies - a real
 # one would teach the model to reach for that company's facts.
 
+INSIGHT_STYLES = ["template", "angle", "short"]
+
 INSIGHT_SCHEMA: dict[str, Any] = {
     "type": "OBJECT",
     "properties": {
@@ -1137,10 +1380,11 @@ INSIGHT_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "OBJECT",
                 "properties": {
-                    "style": {"type": "STRING", "enum": ["excited", "curious", "short"]},
+                    "style": {"type": "STRING", "enum": INSIGHT_STYLES},
+                    "tie_in": {"type": "STRING"},
                     "paragraph": {"type": "STRING"},
                 },
-                "required": ["style", "paragraph"],
+                "required": ["style", "tie_in", "paragraph"],
             },
         },
         "why": {"type": "STRING"},
@@ -1149,245 +1393,59 @@ INSIGHT_SCHEMA: dict[str, Any] = {
 }
 
 _INSIGHT_SYSTEM = """A student is sending a cold email to the founder of a startup, asking for a
-software engineering internship. Every other paragraph of that email is
-already written and is about the student. You write ONE paragraph: the
-only part of the letter that is about the founder's company.
+winter internship. You write the parts of it about the founder's
+company, as THREE options he can pick from.
 
-Your source is what you are given below with the company's name and
-one-line summary: usually the description the founders wrote for their
-own Y Combinator page, and when there is none, their launch post and news
-headlines about them. You know nothing else about this company, and you
-must not pretend to. A news headline is how you learned something, never
-what the sentence is about - never name the outlet or say you read it.
+""" + _EMAIL_RULES + """
 
-THE VOICE, which matters more than anything else here. This is a
-twenty-year-old typing to a founder he admires, not a consultant
-summarising a company. Write it the way he would say it out loud:
+For these options, leave the founder line out entirely - a separate step
+writes that. Each option is a "tie_in" (or "") and a "paragraph".
 
-  I really like how you're not dumping every route into one messy list
-  and instead actually built a dedicated platform for intercity buses.
+WRITE THREE OPTIONS, one of each style. They must differ in what they
+lead with and what they ask, not just in wording:
 
-That is the sender's own sentence, about a bus company. Take the VOICE
-from it and nothing else - "I really like how", "you're", "actually",
-"messy" are a person's words. The contrast lives INSIDE the sentence instead of being set up
-over two formal ones. Say "you're", "don't", "it's", "that's". Short
-words. It should sound like the end of a sentence he started out loud.
+- "template": closest to his three examples.
+- "angle": a different part of what they do, and a different question.
+- "short": the shortest version that still names the thing and asks
+  the question - 50 to 65 words, and no tie-in.
 
-Never write it in the shape of a case study. Here are both, for an
-invented company that inspects used cars before they are listed:
+If the facts are too thin to say anything true and specific, return NO
+options rather than something vague. A generic version already exists.
 
-  BAD:  You could have listed every car without inspecting it. Usually a
-        marketplace leaves the buyer to verify condition themselves and
-        takes a cut regardless. Instead you built an inspection step that
-        standardises quality before a car is shown.
-  GOOD: I really like how you're not letting a car onto the site until
-        someone has actually looked at it. Most marketplaces are happy
-        being a noticeboard, so the buyer ends up doing the inspecting on
-        a Sunday afternoon with a friend who knows engines. That's what
-        I find exciting about Carvaan, and honestly the main reason I'm
-        writing to you.
-
-Both say the same thing. The first reads like it was generated, because
-of the symmetry: a formal setup, "Usually ...", then "Instead you ...".
-The second reads like someone talking.
-
-WRITE THREE OPTIONS - the same company, three different ways of saying
-it - so he can pick the one that sounds most like him. Operator request
-(2026-09-25): alongside the excited version, he wants plainer ones like
-these, written for a warehousing company (their wording is not to be
-copied, only their manner):
-
-  CURIOUS: The inventory placement side of WareIQ is what caught my eye.
-  Guessing where stock should be before anyone orders it sounds hard to
-  get right, and I'd like to see how you do it.
-
-  SHORT: I got curious about how WareIQ decides which warehouse stock goes
-  to before an order is placed. That's the kind of problem I want to work
-  on.
-
-The curious one reads as the most human because it ADMITS he does not
-know how they do it yet. Founders like that more than a confident summary
-of their own product.
-
-The three styles, one option each:
-
-- "excited": the shape below - what you noticed, why it matters, and the
-  closing line on why he is writing.
-- "curious": plain. Name the part of what they do that caught his eye,
-  say honestly that it sounds hard and he would like to see how they do
-  it, and end on wanting to work on it. No contrast, no "instead of".
-- "short": two sentences. What he got curious about, and that it is the
-  kind of problem he wants to work on.
-
-Every option may tie it to HIM in one short clause, but ONLY through the
-list of what he has built, given below under WHAT HE HAS BUILT - name one
-of those things and add nothing about it the list does not say. Never
-invent coursework, a specialisation, a skill or an interest. If nothing
-in his list genuinely connects, leave him out; most options will.
-
-THE SHAPE of the "excited" option, in two or three sentences:
-
-1. Open with what you noticed - not what the product is, the CHOICE
-   inside it. Say it in his voice: "I really like how you ...", "What I
-   like is that you ...", "It's interesting that you ...", "The thing I
-   keep thinking about is ...". Vary it; do not open every letter with
-   the same four words.
-2. Optional: one short sentence on why that choice matters to the person
-   on the other end - the ordinary version, and why it is worse. Plain
-   language, the way you would explain it to a friend.
-3. ALWAYS end on HIM: that this is what he finds exciting about them, and
-   that it is the real reason he is writing. Operator request
-   (2026-09-23): "show excitement about them and also why i am applying".
-   Said the way he would say it, for example:
-     "... and that's honestly what I find exciting, and the main reason
-      I'm writing to you."
-     "That's the part that got me excited, and it's why I'm applying."
-     "That's exactly the kind of problem that gets me excited, and it's
-      the reason this is the one email I really wanted to send."
-   Keep the excitement tied to the SPECIFIC thing you just named - never
-   generic ("I love what you're building"). Vary the wording between
-   letters; the observation carries the letter, this line lands it.
-
-THE STANDARD, described rather than quoted. The paragraph this is modelled
-on was written by the sender himself, about a health insurance company
-that runs its own clinics. In three sentences it said: the company stopped
-treating the doctor and the insurer as opposite parties; cover in India
-normally pays out only at a hospital, so people buy it every year and
-never touch it; they turned it into something used on ordinary days. One
-structural observation, one sentence about the ordinary world, one about
-what they changed. No numbers. No hype. It reads like a person thinking
-out loud.
-
-Its exact wording is deliberately NOT reproduced here, because a model
-given that sentence writes it again for every company it is asked about -
-a bus company, a robotics company, a bookkeeping app - and the founder who
-receives it can tell.
-
-**Writing that same paragraph for every company is the single most common
-failure.** "I like that you put X on the same side as Y", then "most
-people...", then "which is the kind of thing I want to build" is a
-template, and a founder who has read one of these has read all of them.
-The observation is yours only if it could not be said about a different
-company. Every phrase below is BANNED, wherever it appears:
-
-  - "on the same side" / "puts X and Y on the same side"
-  - "which is the kind of thing I want to build"
-  - "which is the sort of problem I want to work on"
-  - "that is the kind of system/interface/problem I want to ..."
-  - "You could have X, and you did not." - the case-study symmetry above
-
-What must differ between two companies is the OBSERVATION, not the voice.
-The voice is his and stays his; the thing you noticed has to be something
-that could not be said about anyone else.
-
-THREE MORE, in that voice, for invented companies:
-
-  Company: Halt, a tool that reviews infrastructure changes before they
-  are applied.
-  I really like that Halt reads the change before it runs instead of
-  paging someone once it has already broken. Most teams find out their
-  config was wrong from an outage in the middle of the night, so the
-  person who has to fix it is the one least able to think. Catching it
-  while someone is awake and looking at the diff is the part that got me
-  excited, and it's why I'm applying.
-
-  Company: Kirana Books, bookkeeping for small shop owners over WhatsApp.
-  What I like is that you didn't make shopkeepers learn a new app - the
-  books live in the one thing they already have open all day. Every other
-  option asks them to pick up accounting software in a language that
-  isn't theirs, so the ledger quietly goes back to a paper notebook.
-  That's honestly what I find exciting about Kirana Books, and the main
-  reason I'm writing.
-
-  Company: Tenner, salary advances paid by the employer rather than a
-  lender.
-  It's interesting that you went to the employer instead of lending the
-  money yourself. Short-term credit here usually costs the most to the
-  people with the least room to pay it, and the lender is the only one
-  who gains from that. Taking the interest out of it entirely is the
-  kind of fix that gets me excited, and it's why this is the one email
-  I really wanted to send.
-
-HARD RULES:
-
-- Two or three sentences, one paragraph, 35 to 85 words. Two that sound
-  like him beat three that sound like a summary.
-- Plain text. No markdown, no bold, no bullets, no headings, no em dashes,
-  no smart quotes, no semicolons.
-- Address them as "you" and "your". Name the company at most twice, and
-  never as "your company".
-- Every fact comes from the description. If it does not say how something
-  works, do not guess. Never invent a feature, a customer, a launch, a
-  competitor, a funding round or a person.
-- NO NUMBERS from the description. No revenue, growth rate, customer count,
-  member count, market size, CAGR, pricing, margins, headcount or funding.
-  Those are facts for investors, and repeating them reads as reciting their
-  fundraising page back at them.
-- Never mention Y Combinator, the YC page, their website, an article, a
-  post, or how the student found them. No "I came across", "I saw", "I
-  read", "while looking".
-- Never claim to have used, signed up for, tested, bought or been a
-  customer of the product.
-- Excitement, yes - about the specific thing you named, in the closing
-  line. Hype, no: impressive, amazing, incredible, passionate, "I'm
-  excited", "so excited", thrilled, love what you are doing, game-changing,
-  revolutionary, disrupting, cutting edge, best-in-class, "the X space",
-  leverage, synergy, resonates, aligns, "truly". ("I find exciting" and
-  "got me excited" are fine; "I'm excited" is a phrase the rest of the
-  letter's checks reject.)
-- Never "reaching out" or "reach out" - the letter's checks reject both.
-  Say "writing to you" or "applying".
-- No questions. No advice about what they should build next. No criticism
-  of their product, and no telling them what their own market is.
-- Do not mention the internship itself, his resume or his availability -
-  the next paragraph is the ask. His background appears only as described
-  above: one thing from WHAT HE HAS BUILT, by name, or not at all.
-- Each option ends on HIM: why he is writing, or that it is the kind of
-  problem he wants to work on.
-- The three options must differ in more than wording - different
-  openings, different lengths, different things they lead with.
-- Write like a smart twenty-year-old talking, not like a brochure. Short
-  words. Contractions are not merely allowed, they are the point: "you're"
-  and "didn't", never "you are" and "did not".
-
-If the source is too thin to say anything true and specific - a single
-marketing line with no mechanism in it - return NO options rather than
-something vague. A generic line is already written for that case, and
-inventing a detail is far worse than having nothing to add.
-
-Return JSON: {"options": [{"style": "excited", "paragraph": "..."},
-{"style": "curious", "paragraph": "..."}, {"style": "short",
-"paragraph": "..."}], "why": "one short line naming what you latched
-onto"}. `why` is for the student, not the founder, and never appears in
-the email."""
+Return JSON: {"options": [{"style": "template", "tie_in": "...",
+"paragraph": "..."}, {"style": "angle", ...}, {"style": "short", ...}],
+"why": "one short line naming what you latched onto"}. `why` is for the
+student, not the founder, and never appears in the email."""
 
 
 def build_insight_prompt(context: dict) -> str:
-    """The company's own words, for `InsightWriter.write`."""
+    """His USER MESSAGE TEMPLATE (2026-09-25), for `InsightWriter.write`:
+    the verified facts when research exists, what the founders wrote
+    about themselves when it does not, and his three examples."""
     description = str(context.get("description") or "").strip()
     lines = [
-        "COMPANY",
-        str(context.get("company_name") or "unknown"),
+        f"Company: {context.get('company_name') or 'unknown'}",
+        f"One-line summary: {context.get('one_liner') or '(none given)'}",
         "",
-        "ONE-LINE SUMMARY",
-        str(context.get("one_liner") or "(none given)"),
+        format_verified_facts(context.get("research"), fallback=description or "(nothing given)"),
         "",
         "WHAT THE FOUNDERS WROTE ABOUT IT",
         description or "(nothing given)",
+        "",
+        "Here are three finished examples of the style and structure I want.",
+        "",
+        EXAMPLE_EMAILS,
     ]
     # Paragraphs this company has already been given - the one in the
     # letter now, and anything a previous attempt produced. Named rather
     # than described, because "write something different" means nothing
     # without the thing it has to differ from.
-    built = str(context.get("built") or "").strip()
-    if built:
-        lines += ["", "WHAT HE HAS BUILT (his own words, from his letter)", built]
     avoid = [str(a).strip() for a in (context.get("avoid") or []) if str(a).strip()]
     if avoid:
         lines += ["", "ALREADY WRITTEN FOR THIS COMPANY - take a different angle, and do "
                       "not reuse these sentences or their shape:"]
         lines += [f"  - {a}" for a in avoid]
-    lines += ["", "Write the paragraph."]
+    lines += ["", "Write the three options."]
     return "\n".join(lines)
 
 
@@ -1416,9 +1474,22 @@ def _insight(data: Any, stage: str) -> dict:
         if isinstance(item, str):
             item = {"style": "", "paragraph": item}
         if isinstance(item, dict):
-            options.append({"style": str(item.get("style") or ""),
-                            "paragraph": str(item.get("paragraph") or "")})
+            options.append(_option(item))
     return {"options": options, "why": why}
+
+
+def _option(item: dict) -> dict:
+    """One option as the review screen uses it (2026-09-25): `tie_in`
+    (often empty) and `company_paragraph` separately - the tie-in joins
+    his Better paragraph - and `paragraph`, both together, for display
+    and for the checks."""
+    style = str(item.get("style") or "")
+    if "tie_in" in item or "curious" in item:
+        tie_in = str(item.get("tie_in") or "").strip()
+        body = str(item.get("curious") or item.get("paragraph") or "").strip()
+        paragraph = "\n\n".join(p for p in (tie_in, body) if p)
+        return {"style": style, "paragraph": paragraph, "tie_in": tie_in, "company_paragraph": body}
+    return {"style": style, "paragraph": str(item.get("paragraph") or "")}
 
 
 class GeminiInsightWriter:
@@ -1601,3 +1672,316 @@ class GeminiSubjectWriter:
             ),
         )
         return _subjects(_decode_json(response.text, "subjects"), "subjects")
+
+
+# --- the line about the founder ---------------------------------------------
+#
+# Operator request (2026-09-25): "a web agent ... which does research about
+# the company particular founder and write a line about it", pointing at a
+# letter that said "I found your ML background really interesting, and I
+# felt a genuine overlap with the kind of problems I enjoy solving". The
+# material is the founder's YC bio, or what a web search found when the
+# bio is thin (`app.application.write_founder_line.founder_material`).
+
+FOUNDER_LINE_STYLES = ["overlap", "curious", "short"]
+
+FOUNDER_LINE_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "options": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "style": {"type": "STRING", "enum": FOUNDER_LINE_STYLES},
+                    "line": {"type": "STRING"},
+                },
+                "required": ["style", "line"],
+            },
+        },
+        "why": {"type": "STRING"},
+    },
+    "required": ["options"],
+}
+
+_FOUNDER_SYSTEM = """You write ONE line of a cold email from a computer science student to a
+startup founder: the line about the founder PERSONALLY. It ends the
+paragraph where he asks about their company, just before his list of
+projects, so it reads as one more honest thought, not a compliment.
+
+His own example (2026-09-25), to a founder whose story is public:
+
+  I also read that you and Sahil spent time talking to drivers and
+  factory workers before starting Kosh, and I'd love to hear what you
+  learned from those conversations.
+
+What it does: names ONE real thing from the founder's own story - where
+they worked before, something they built or sold before, a switch they
+made, a story they have told - framed as something he'd like to hear
+about. A real story, not flattery. Where the material is two or more
+years old, say "I read that ...".
+
+WHAT HE HAS DONE - the only facts about him you may use:
+- final-year CS (Data Science) student at Manipal University Jaipur
+- internship at Better on Operate, an AI agent that debugs production
+  incidents: he built its GitHub integration, moved it to read-only
+  access, and added caching
+- Lerno.ai: turns any topic into an animated lesson, won CodeClash 2.0
+- WaveWatch: a coastal risk platform, won Smart India Hackathon 2025
+Never invent anything else about him - no course, hobby, skill or plan.
+
+An overlap is REAL only when it is the same kind of thing: the same
+field (data science, ML, AI agents, developer tools, education), the
+same kind of engineering (integrations, backend, reliability), or the
+same kind of problem. A business, sales, strategy, finance or
+consulting background does NOT overlap with his engineering work - for
+those, never claim an overlap, just say what he'd like to hear about. A forced
+overlap ("your strategy background mirrors how I built WaveWatch") is
+the worst possible line.
+
+THREE OPTIONS, one of each style:
+- "overlap": their background, then the honest overlap with his own
+  work. Only if the overlap is REAL (see above) - otherwise make this
+  one simply say what he'd like to hear about.
+- "curious": their background, then that he'd love to hear how it
+  shapes the way they build today. A statement, not a question.
+- "short": one sentence, under 25 words.
+
+HARD RULES:
+- Only facts from FOUNDER MATERIAL below. If it came from a web search,
+  use only facts that clearly belong to THIS person at THIS company, and
+  ignore anything that could be about someone else with the same name.
+  If the material says nothing specific, return NO options.
+- 12 to 45 words per option. One or two sentences.
+- Say "you" and "your". Never their name - the email already greets
+  them.
+- Never say where he learned it: no LinkedIn, "your profile", "your
+  bio", "I looked you up", "I googled", "I read about you", Y Combinator,
+  YC, a website, an article or a podcast.
+- No flattery: never "legendary", "inspiring", "visionary", "huge fan",
+  "I admire", "impressive", "amazing", "incredible", "fascinating",
+  "journey", "passionate". Interest, yes. Worship, no.
+- Never awards, rankings or press: no Forbes, "30 under 30", "named
+  on", "featured", "award". Those are things said ABOUT them, and
+  quoting one back is flattery. Use what they DID - studied, built,
+  worked on, sold, switched from.
+- No flattery about their college, title or credentials on their own.
+- Never these words: genuinely, passionate, thrive, excited to,
+  resonates, deeply, exactly what, "caught my eye".
+- Nothing private: family, age, where they live, health, religion.
+- No numbers unless the material has that exact number, and never money
+  or funding.
+- Plain text, no semicolons, no em dashes, no markdown. Contractions
+  always: "I'd", "I'm", "you're" - never "I would", "I am".
+- Start with a capital letter, like any sentence.
+- Never "reaching out". Never mention the internship or his resume.
+
+Return JSON: {"options": [{"style": "overlap", "line": "..."}, {"style":
+"curious", "line": "..."}, {"style": "short", "line": "..."}], "why":
+"which part of their background you used"}. `why` is for the student
+and never appears in the email."""
+
+
+def build_founder_prompt(context: dict) -> str:
+    """The founder's own story, for `FounderLineWriter.write`."""
+    lines = [
+        "FOUNDER",
+        f"name: {context.get('founder_name') or 'unknown'}",
+        f"title: {context.get('title') or '(unknown)'}",
+        f"company: {context.get('company_name') or 'unknown'}",
+        "",
+        f"FOUNDER MATERIAL (from {context.get('source') or 'their YC bio'})",
+        str(context.get("material") or "(nothing)").strip(),
+    ]
+    avoid = [str(a).strip() for a in (context.get("avoid") or []) if str(a).strip()]
+    if avoid:
+        lines += ["", "ALREADY WRITTEN FOR THIS FOUNDER - use a different part of their "
+                      "background, and do not reuse these sentences:"]
+        lines += [f"  - {a}" for a in avoid]
+    lines += ["", "Write the three options."]
+    return "\n".join(lines)
+
+
+def _founder_lines(data: Any, stage: str) -> dict:
+    """`{options: [{style, line}], why}` out of a response."""
+    if isinstance(data, list):
+        data = {"options": data}
+    if not isinstance(data, dict):
+        raise ValueError(f"{stage}: expected a JSON object")
+    raw = data.get("options")
+    if not isinstance(raw, list):
+        raise ValueError(f"{stage}: response has no options")
+    options = []
+    for item in raw:
+        if isinstance(item, str):
+            item = {"style": "", "line": item}
+        if isinstance(item, dict):
+            options.append({"style": str(item.get("style") or ""),
+                            "line": str(item.get("line") or "")})
+    return {"options": options, "why": str(data.get("why") or "")}
+
+
+class GeminiFounderLineWriter:
+    """Real `FounderLineWriter` port. Writes candidate lines; decides
+    nothing. Whether one is usable is `app.application.write_founder_line`'s
+    call."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def write(self, context: dict) -> dict:
+        response = _generate_with_retry(
+            self._client, self._sleep, "founder_line",
+            model=self._model,
+            contents=build_founder_prompt(context),
+            config=types.GenerateContentConfig(
+                system_instruction=_FOUNDER_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=FOUNDER_LINE_SCHEMA,
+                temperature=0.7,
+            ),
+        )
+        return _founder_lines(_decode_json(response.text, "founder_line"), "founder_line")
+
+
+# --- follow-ups (2026-10-16) --------------------------------------------------
+#
+# Operator request: "add a section for follow up - basically replying or
+# following up the already sent mail which havent received any replies ...
+# give a recommendation to what to send in the followup mail". The reply
+# goes in the same Gmail thread, under his first email, so it never needs
+# to repeat it - the founder can scroll up.
+
+FOLLOWUP_STYLES = ["nudge", "new_angle", "last_note"]
+
+FOLLOWUP_SCHEMA: dict[str, Any] = {
+    "type": "OBJECT",
+    "properties": {
+        "options": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "style": {"type": "STRING", "enum": FOLLOWUP_STYLES},
+                    "body": {"type": "STRING"},
+                },
+                "required": ["style", "body"],
+            },
+        },
+        "why": {"type": "STRING"},
+    },
+    "required": ["options"],
+}
+
+_FOLLOWUP_SYSTEM = """You write a short follow-up from a student to a startup founder who has
+not replied to his cold email asking for a winter internship. It is sent
+as a REPLY in the same email thread, directly under his first email, so
+the founder can see that email by scrolling up.
+
+The sender is Suryansh Singh, a final-year CS (Data Science) student at
+Manipal University Jaipur. Same voice as his first email: plain, direct,
+a little curious. Not polished, not salesy, never guilt-tripping. Founders
+are busy; a follow-up is a light second chance to answer, not a
+complaint that they did not.
+
+You are given his first email (and his earlier follow-up, if any), how
+many days ago it went out, and the verified facts it was written from.
+
+WRITE THREE OPTIONS, one of each style:
+
+- "nudge": two or three sentences. Bring the one question from his first
+  email back to the top in a fresh way, so it is easy to answer in one
+  line. Do not quote the old email.
+- "new_angle": two to four sentences. One NEW thing from the verified
+  facts that the first email did not use, with one short question about
+  it. Gives the founder a new reason to reply.
+- "last_note": two or three sentences. A graceful close: he knows they
+  are busy, he would still love to intern there this winter, and the
+  door stays open. No question needed.
+
+HARD RULES:
+- Plain text body only. No greeting ("Hi ...") and no sign-off - both are
+  added by code.
+- Use ONLY the facts given. Never invent anything about the company, the
+  founder or him.
+- Never re-introduce himself and never repeat his projects; they are in
+  the email right above. Never mention the resume again unless a short
+  "my resume is in the email below" helps.
+- At most ONE question.
+- Never: "just following up", "following up on my", "circling back",
+  "bumping this", "checking in", "gentle reminder", "any update", "in case
+  you missed", "per my last email", "my last email", "my previous email",
+  "sorry to bother", "I know you're busy" said twice. Never guilt.
+- Never these words: genuinely, passionate, thrive, excited to, leverage,
+  synergy, cutting-edge, caught my eye, resonates, deeply, exactly what.
+- No em-dashes or en-dashes. No links. No markdown.
+- Length: 20 to 70 words for the first follow-up, 15 to 50 for the
+  second.
+
+Return JSON: {"options": [{"style": "nudge", "body": "..."}, {"style":
+"new_angle", "body": "..."}, {"style": "last_note", "body": "..."}],
+"why": "one line for the student on what to send and why"}."""
+
+
+def build_followup_prompt(context: dict) -> str:
+    """Everything a follow-up is written from, for `FollowUpWriter.write`."""
+    step = int(context.get("step") or 1)
+    lines = [
+        f"FOUNDER FIRST NAME: {context.get('founder_first_name') or 'unknown'}",
+        f"COMPANY: {context.get('company_name') or 'unknown'}",
+        f"THIS IS FOLLOW-UP {step} of 2, "
+        f"{context.get('days_since') or 'several'} days after his last email, with no reply.",
+        "",
+        "HIS FIRST EMAIL (sent; the founder can see it right above the reply)",
+        str(context.get("first_email") or "").strip(),
+    ]
+    earlier = str(context.get("earlier_followup") or "").strip()
+    if earlier:
+        lines += ["", "HIS FIRST FOLLOW-UP (also sent, also unanswered)", earlier]
+    lines += ["", format_verified_facts(context.get("research"),
+                                        fallback=str(context.get("description") or ""))]
+    avoid = [str(a).strip() for a in (context.get("avoid") or []) if str(a).strip()]
+    if avoid:
+        lines += ["", "ALREADY SUGGESTED - write different ones:"]
+        lines += [f"  - {a}" for a in avoid]
+    lines += ["", "Write the three options."]
+    return "\n".join(lines)
+
+
+def _followups(data: Any, stage: str) -> dict:
+    if isinstance(data, list):
+        data = {"options": data}
+    if not isinstance(data, dict):
+        raise ValueError(f"{stage}: expected a JSON object")
+    options = []
+    for item in data.get("options") or []:
+        if isinstance(item, dict):
+            options.append({"style": str(item.get("style") or ""),
+                            "body": str(item.get("body") or "")})
+    return {"options": options, "why": str(data.get("why") or "")}
+
+
+class GeminiFollowUpWriter:
+    """Real `FollowUpWriter` port. Suggests follow-ups; decides nothing.
+    Whether one is usable is `app.application.follow_ups`'s call."""
+
+    def __init__(self, client, model: str, _sleep: Callable[[float], None] = time.sleep):
+        self._client = client
+        self._model = model
+        self._sleep = _sleep
+
+    def write(self, context: dict) -> dict:
+        response = _generate_with_retry(
+            self._client, self._sleep, "followup",
+            model=self._model,
+            contents=build_followup_prompt(context),
+            config=types.GenerateContentConfig(
+                system_instruction=_FOLLOWUP_SYSTEM,
+                response_mime_type="application/json",
+                response_schema=FOLLOWUP_SCHEMA,
+                temperature=0.7,
+            ),
+        )
+        return _followups(_decode_json(response.text, "followup"), "followup")

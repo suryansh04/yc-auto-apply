@@ -124,6 +124,13 @@ class QueueItemOut(BaseModel):
     # swap on trust. None for a letter that does not have the assembled
     # shape, which is the same condition `generic_line` is gated on.
     insight_text: str | None = None
+    # 2026-09-25: the line about the founder as it stands in `body`, or
+    # None when the letter has none (or it was edited away).
+    founder_line: str | None = None
+    # 2026-09-25 (his pipeline document): the verified facts the letter was
+    # written from - {facts: [{kind, text, label, url, old}], question,
+    # skill_connection, note} - shown beside it with their source links.
+    research: dict | None = None
 
 
 class EditIn(BaseModel):
@@ -236,7 +243,53 @@ class InsightIn(BaseModel):
 
 class InsightOptionOut(BaseModel):
     style: str = ""
+    # The whole company part as it goes into the letter: the tie-in, a
+    # blank line, the curious paragraph (2026-09-25). The halves are kept
+    # alongside for display.
     paragraph: str
+    tie_in: str = ""
+    company_paragraph: str = ""
+
+
+class UseInsightIn(BaseModel):
+    """An AI suggestion to put in (2026-09-25): the tie-in joins his
+    Better paragraph (none when empty), the paragraph stands alone."""
+
+    tie_in: str = ""
+    paragraph: str
+
+
+class FounderLineIn(BaseModel):
+    """What the screen has already shown, so **Another** asks for
+    something different (2026-09-25)."""
+
+    avoid: list[str] = []
+
+
+class FounderLineOptionOut(BaseModel):
+    style: str = ""
+    line: str
+
+
+class FounderLineOut(BaseModel):
+    """Lines about the founder personally (2026-09-25). Advice: the route
+    writes nothing, and having nothing to offer answers 200 with a reason
+    in `unavailable` - never an error.
+
+    `source` says where the material came from ("their YC bio" or "a web
+    search") and `material` is that material itself, so the operator can
+    check a line against what it was written from before sending it to a
+    real person."""
+
+    options: list[FounderLineOptionOut] = []
+    why: str = ""
+    source: str = ""
+    material: str = ""
+    unavailable: str | None = None
+
+
+class UseFounderLineIn(BaseModel):
+    line: str = ""
 
 
 class InsightOut(BaseModel):

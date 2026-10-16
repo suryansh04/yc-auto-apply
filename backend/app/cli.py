@@ -445,14 +445,26 @@ def draft(
         )
         # 2026-09-23: a subject written per company; without a writer the
         # letter keeps the operator's fixed subject, as before.
-        from app.api.deps import build_subject_writer
+        from app.api.deps import (
+            build_founder_writer, build_researcher, build_subject_writer, build_web_search,
+        )
         try:
             subject_writer = build_subject_writer(get_settings())
         except RuntimeError:
             subject_writer = None
+        # 2026-09-25: the line about the founder, as in `app.api.jobs`.
+        try:
+            founder_writer = build_founder_writer(get_settings())
+        except RuntimeError:
+            founder_writer = None
+        try:
+            researcher = build_researcher(get_settings())
+        except RuntimeError:
+            researcher = None
         result = DraftOutreach(
             drafter, repos, keep_unverified=keep_unverified, critic=critic,
-            subject_writer=subject_writer,
+            subject_writer=subject_writer, founder_writer=founder_writer,
+            web_search=build_web_search(get_settings()), researcher=researcher,
         ).run(limit=limit)
         session.commit()
 

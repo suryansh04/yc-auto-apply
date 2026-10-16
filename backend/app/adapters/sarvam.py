@@ -46,13 +46,26 @@ from app.adapters.gemini import (
     _PARSER_PROMPT,
     _REVISER_SYSTEM,
     _SUBJECT_SYSTEM,
+    FOUNDER_LINE_STYLES,
+    INSIGHT_STYLES,
+    _FOUNDER_SYSTEM,
+    _FOLLOWUP_SYSTEM,
+    FOLLOWUP_STYLES,
+    _followups,
+    build_followup_prompt,
+    _RESEARCH_SYSTEM,
+    _research,
+    build_research_prompt,
     _decode_json,
+    _founder_lines,
+    _first_email,
     _insight,
     _revisions,
     _subjects,
     build_classify_prompt,
     build_critic_prompt,
     build_draft_prompt,
+    build_founder_prompt,
     build_insight_prompt,
     build_revise_prompt,
     build_subject_prompt,
@@ -122,10 +135,12 @@ FIRST_EMAIL_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "subject": {"type": "string"},
-        "company_paragraphs": {"type": "array", "items": {"type": "string"}},
+        "tie_in": {"type": "string"},
+        "paragraph": {"type": "string"},
+        "founder_line": {"type": "string"},
         "could_be_a_user": {"type": "boolean"},
     },
-    "required": ["subject", "company_paragraphs", "could_be_a_user"],
+    "required": ["subject", "tie_in", "paragraph", "founder_line", "could_be_a_user"],
     "additionalProperties": False,
 }
 
@@ -213,16 +228,66 @@ INSIGHT_JSON_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "style": {"type": "string", "enum": ["excited", "curious", "short"]},
+                    "style": {"type": "string", "enum": INSIGHT_STYLES},
+                    "tie_in": {"type": "string"},
                     "paragraph": {"type": "string"},
                 },
-                "required": ["style", "paragraph"],
+                "required": ["style", "tie_in", "paragraph"],
                 "additionalProperties": False,
             },
         },
         "why": {"type": "string"},
     },
     "required": ["options", "why"],
+    "additionalProperties": False,
+}
+
+
+FOUNDER_LINE_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "options": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "style": {"type": "string", "enum": FOUNDER_LINE_STYLES},
+                    "line": {"type": "string"},
+                },
+                "required": ["style", "line"],
+                "additionalProperties": False,
+            },
+        },
+        "why": {"type": "string"},
+    },
+    "required": ["options", "why"],
+    "additionalProperties": False,
+}
+
+
+RESEARCH_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "facts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string",
+                             "enum": ["what_they_do", "specific_thing", "founder_fact"]},
+                    "text": {"type": "string"},
+                    "source": {"type": "string"},
+                    "old": {"type": "boolean"},
+                },
+                "required": ["kind", "text", "source", "old"],
+                "additionalProperties": False,
+            },
+        },
+        "question": {"type": "string"},
+        "skill_connection": {"type": "string"},
+        "note": {"type": "string"},
+    },
+    "required": ["facts", "question", "skill_connection", "note"],
     "additionalProperties": False,
 }
 
@@ -371,13 +436,7 @@ class SarvamDrafter:
         if not isinstance(data, dict):
             raise ValueError("drafter: expected a JSON object")
         if first_email:
-            missing = [k for k in ("subject", "company_paragraphs") if k not in data]
-            if missing:
-                raise ValueError(f"drafter: response missing {', '.join(missing)}")
-            kind, source_id = first_email_source(prompt_context)
-            data["research_source_type"] = kind
-            data["research_source_id"] = source_id
-            return data
+            return _first_email(data, prompt_context, "drafter")
         missing = [k for k in ("subject", "body", "research_source_type",
                                "research_source_id") if k not in data]
         if missing:
@@ -529,3 +588,91 @@ class SarvamSubjectWriter:
             temperature=0.9,
         )
         return _subjects(_decode_json(content, "subjects"), "subjects")
+
+
+class SarvamFounderLineWriter:
+    """Real `FounderLineWriter` port over Sarvam - the provider that
+    actually runs. Shares `_FOUNDER_SYSTEM`/`build_founder_prompt` with
+    `GeminiFounderLineWriter`. Advisory only: nothing here changes a draft."""
+
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, **chat_kwargs):
+        self._chat = _SarvamChat(api_key, model, **chat_kwargs)
+
+    def write(self, context: dict) -> dict:
+        content = self._chat.complete(
+            "founder_line",
+            [
+                {"role": "system", "content": _FOUNDER_SYSTEM},
+                {"role": "user", "content": build_founder_prompt(context)},
+            ],
+            FOUNDER_LINE_JSON_SCHEMA,
+            "founder_line",
+            temperature=0.7,
+        )
+        return _founder_lines(_decode_json(content, "founder_line"), "founder_line")
+
+
+class SarvamResearcher:
+    """Real `CompanyResearcher` port over Sarvam (2026-09-25). Shares
+    `_RESEARCH_SYSTEM`/`build_research_prompt` with `GeminiResearcher`.
+    Picks facts from numbered sources; verifying them is
+    `app.application.research_company.run_researcher`'s job."""
+
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, **chat_kwargs):
+        self._chat = _SarvamChat(api_key, model, **chat_kwargs)
+
+    def research(self, context: dict) -> dict:
+        content = self._chat.complete(
+            "research",
+            [
+                {"role": "system", "content": _RESEARCH_SYSTEM},
+                {"role": "user", "content": build_research_prompt(context)},
+            ],
+            RESEARCH_JSON_SCHEMA,
+            "research",
+            temperature=0.2,
+        )
+        return _research(_decode_json(content, "research"), "research")
+
+
+FOLLOWUP_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "options": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "style": {"type": "string", "enum": FOLLOWUP_STYLES},
+                    "body": {"type": "string"},
+                },
+                "required": ["style", "body"],
+                "additionalProperties": False,
+            },
+        },
+        "why": {"type": "string"},
+    },
+    "required": ["options", "why"],
+    "additionalProperties": False,
+}
+
+
+class SarvamFollowUpWriter:
+    """`FollowUpWriter` over Sarvam (2026-10-16), sharing the Gemini prompt,
+    so switching LLM_PROVIDER back keeps follow-ups working."""
+
+    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, **chat_kwargs):
+        self._chat = _SarvamChat(api_key, model, **chat_kwargs)
+
+    def write(self, context: dict) -> dict:
+        content = self._chat.complete(
+            "followup",
+            [
+                {"role": "system", "content": _FOLLOWUP_SYSTEM},
+                {"role": "user", "content": build_followup_prompt(context)},
+            ],
+            FOLLOWUP_JSON_SCHEMA,
+            "followup",
+            temperature=0.7,
+        )
+        return _followups(_decode_json(content, "followup"), "followup")

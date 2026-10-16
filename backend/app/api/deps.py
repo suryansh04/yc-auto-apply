@@ -72,6 +72,11 @@ class Repos:
     insight_writer: Any = None
     # Same seam again, for the subject writer (2026-09-23).
     subject_writer: Any = None
+    # 2026-09-25: the founder line. None in production (built per request
+    # from settings); tests inject fakes, like the writers above.
+    founder_writer: Any = None
+    web_search: Any = None
+    followup_writer: Any = None   # 2026-10-16; None in production, like the rest
 
 
 def _session() -> Session:
@@ -310,6 +315,76 @@ def build_insight_writer(settings: Settings):
         raise RuntimeError("GEMINI_API_KEY is not set")
     client = genai.Client(api_key=settings.gemini_api_key)
     return GeminiInsightWriter(client, model=settings.gemini_model)
+
+
+def build_founder_writer(settings: Settings):
+    """The same LLM-provider switch as `build_insight_writer`, for a
+    `FounderLineWriter` - the line about the founder (2026-09-25)."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamFounderLineWriter(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiFounderLineWriter
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiFounderLineWriter(client, model=settings.gemini_model)
+
+
+def build_followup_writer(settings: Settings):
+    """The same LLM-provider switch, for a `FollowUpWriter` (2026-10-16)."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamFollowUpWriter(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiFollowUpWriter
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiFollowUpWriter(client, model=settings.gemini_model)
+
+
+def build_researcher(settings: Settings):
+    """The same LLM-provider switch as `build_insight_writer`, for a
+    `CompanyResearcher` - verified facts before the letter (2026-09-25)."""
+    if settings.llm_provider == "sarvam":
+        from app.adapters import sarvam
+
+        if not settings.sarvam_api_key:
+            raise RuntimeError("SARVAM_API_KEY is not set")
+        return sarvam.SarvamResearcher(settings.sarvam_api_key, model=settings.sarvam_model)
+
+    from google import genai
+
+    from app.adapters.gemini import GeminiResearcher
+
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    return GeminiResearcher(client, model=settings.gemini_model)
+
+
+def build_web_search(settings: Settings):
+    """A `WebSearch`, or None when TAVILY_API_KEY is blank - which is a
+    choice, not an error: the founder line then comes from the YC bio
+    alone (2026-09-25)."""
+    if not (settings.tavily_api_key or "").strip():
+        return None
+    from app.adapters.tavily import TavilySearch
+
+    return TavilySearch(settings.tavily_api_key.strip())
 
 
 def build_subject_writer(settings: Settings):

@@ -77,7 +77,7 @@ const cases = [
     hook: useSend,
     mock: () => http.post('/api/send', () => HttpResponse.json({ sent: 1 })),
     variables: 5,
-    expectedKeys: [['stats'], ['queue'], ['approved']],
+    expectedKeys: [['stats'], ['queue'], ['approved'], ['followups']],
   },
   {
     name: 'useStartJob',

@@ -23,11 +23,15 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
+from app.api import deps
 from app.api.deps import Repos, build_insight_writer, build_reviser, build_subject_writer, get_repos
 from app.api.schemas import (
     CheckIn,
     CheckOut,
     EditIn,
+    FounderLineIn,
+    FounderLineOptionOut,
+    FounderLineOut,
     HighlightOut,
     InsightIn,
     InsightOptionOut,
@@ -38,14 +42,18 @@ from app.api.schemas import (
     SubjectsOut,
     SuggestOut,
     SuggestionOut,
+    UseFounderLineIn,
+    UseInsightIn,
 )
 from app.application.review_outreach import OutreachNotFound, ReviewItem, ReviewOutreach, ReviewRepos
 from app.application.suggest_fixes import run_reviser
+from app.application.write_founder_line import founder_material, run_founder_line_writer
 from app.application.write_insight import run_insight_writer
 from app.application.write_subjects import run_subject_writer
 from app.domain import letter
 from app.domain.compose import compose_wire_html, compose_wire_text, first_name
 from app.domain.highlight import highlights_for
+from app.domain.names import company_display_name
 from app.domain.states import IllegalTransition
 from app.config import get_operator_settings, get_settings
 
@@ -144,6 +152,15 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
     insight = letter.insight_region(body)
     generic = letter.generic_insight(company_name or "") if company_name and insight else None
     body_html = getattr(message, "body_html", None) or None
+    # The line about the founder (2026-09-25) lives at the end of the
+    # company part. The screen swaps the company part by replacing
+    # `insight_text` in the body, so the line is left OUT of it - a new
+    # company part then lands in front of the line instead of erasing it.
+    founder_line = (getattr(message, "founder_line", None) or "").strip() or None
+    if founder_line and founder_line not in body:
+        founder_line = None
+    if insight and founder_line and insight.endswith(founder_line):
+        insight = insight[: -len(founder_line)].rstrip() or None
     return QueueItemOut(
         outreach_id=item.outreach.id,
         company_name=company_name,
@@ -170,6 +187,8 @@ def _to_out(item: ReviewItem) -> QueueItemOut:
         attachment_name=attachment_name,
         generic_line=generic,
         insight_text=insight if generic else None,
+        founder_line=founder_line,
+        research=getattr(message, "research", None) or None,
     )
 
 
@@ -360,9 +379,10 @@ def write_insight(outreach_id: int, payload: InsightIn | None = None,
         one_liner=getattr(company, "one_liner", None) or "",
         description=description,
         avoid=avoid,
-        # His own list of what he has built - the only thing about him an
-        # option may mention (2026-09-25).
-        built=letter.BUILT,
+        # His own letter - the only facts about him an option may use.
+        built=letter.ABOUT_HIM,
+        # The verified facts the letter was written from (2026-09-25).
+        research=getattr(item.message, "research", None),
     )
     if answer is None:
         return InsightOut(
@@ -480,6 +500,93 @@ def redraft(outreach_id: int, repos: Repos = Depends(get_repos)) -> OkOut:
         raise _action_error(exc)
     repos.session.commit()
     return OkOut()
+
+
+@router.post("/outreach/{outreach_id}/insight/use", response_model=CheckOut)
+def use_insight(outreach_id: int, payload: UseInsightIn,
+                repos: Repos = Depends(get_repos)) -> CheckOut:
+    """Put an AI suggestion into the letter (2026-09-25). Done here, not
+    by text replacement in the browser, because a suggestion with no
+    tie-in must not be glued onto his Better paragraph. An edit like any
+    other - saved, checked, never refused."""
+    try:
+        notes = _use_case(repos).use_insight(outreach_id, payload.tie_in, payload.paragraph,
+                                             now=_UTCClock().now())
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except (ValueError, IllegalTransition) as exc:
+        raise _action_error(exc)
+    repos.session.commit()
+    return _checked(repos, outreach_id, notes, None)
+
+
+@router.post("/outreach/{outreach_id}/founder-line", response_model=FounderLineOut)
+def write_founder_line(outreach_id: int, payload: FounderLineIn | None = None,
+                       repos: Repos = Depends(get_repos)) -> FounderLineOut:
+    """Lines about the founder personally, from their YC bio or a web
+    search (operator request 2026-09-25).
+
+    Advice, like `/insight`: writes nothing (the web search result is
+    cached on the founder, which is not the letter), and every way of
+    having nothing to offer answers 200 with a reason.
+    """
+    try:
+        item = _use_case(repos).load(outreach_id)
+    except (OutreachNotFound, ValueError):
+        raise HTTPException(404, "no such outreach")
+
+    writer = getattr(repos, "founder_writer", None)
+    if writer is None:
+        try:
+            writer = deps.build_founder_writer(get_operator_settings())
+        except RuntimeError as exc:
+            # A setting NAME ("SARVAM_API_KEY is not set"), never a key.
+            return FounderLineOut(unavailable=str(exc))
+    search = getattr(repos, "web_search", None)
+    if search is None:
+        search = deps.build_web_search(get_operator_settings())
+
+    founder, company = item.founder, item.company
+    company_name = company_display_name(getattr(company, "name", None) or "")
+    material, source = founder_material(
+        founder, company_name, search=search, founder_repo=getattr(repos, "founder", None),
+    )
+    if repos.session is not None:
+        repos.session.commit()  # keep the cached search even if nothing is usable
+    if not material:
+        return FounderLineOut(unavailable=(
+            "their YC bio says nothing about them"
+            + ("" if search is not None else " - add TAVILY_API_KEY to backend/.env to search the web")
+        ))
+
+    current = getattr(item.message, "founder_line", None)
+    avoid = [a for a in [current, *(payload.avoid if payload else [])] if a]
+    answer = run_founder_line_writer(
+        writer, founder_name=founder.full_name, title=getattr(founder, "title", None) or "",
+        company_name=company_name, material=material, source=source, avoid=avoid,
+    )
+    if answer is None:
+        return FounderLineOut(source=source, material=material,
+                              unavailable="nothing specific enough in their background this time")
+    return FounderLineOut(
+        options=[FounderLineOptionOut(**o) for o in answer["options"]],
+        why=answer["why"], source=source, material=material,
+    )
+
+
+@router.post("/outreach/{outreach_id}/founder-line/use", response_model=CheckOut)
+def use_founder_line(outreach_id: int, payload: UseFounderLineIn,
+                     repos: Repos = Depends(get_repos)) -> CheckOut:
+    """Put a line about the founder into the letter, replacing the one it
+    had; an empty line removes it (2026-09-25). An edit like any other."""
+    try:
+        notes = _use_case(repos).use_founder_line(outreach_id, payload.line, now=_UTCClock().now())
+    except OutreachNotFound:
+        raise HTTPException(404, "no such outreach")
+    except (ValueError, IllegalTransition) as exc:
+        raise _action_error(exc)
+    repos.session.commit()
+    return _checked(repos, outreach_id, notes, None)
 
 
 @router.post("/outreach/{outreach_id}/generic-line", response_model=CheckOut)

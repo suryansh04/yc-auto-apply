@@ -68,17 +68,17 @@ def test_the_plain_text_is_paragraphs_lines_and_list_markers():
 
 
 def test_a_real_list_of_what_he_built_keeps_the_letters_anchors():
-    # Turning the "A few things I've built" bullets into a real list in
-    # the editor must not lose the company paragraph: the plain text of
-    # the list is exactly the plain-text block it replaced.
+    # Turning his "Outside work" lines into a real list in the editor
+    # must not lose the company part: it is found by "Outside work:",
+    # which the list comes after.
     body = letter.assemble_body("Zave", ["You built a layer on top of shopping."])
     html = from_text(body)
-    items = [l.split(". ", 1)[1] for l in letter.BUILT.split("\n\n")[1].split("\n")]
+    lines = letter.OUTSIDE.split("\n\n")[1]
     listed = html.replace(
-        from_text(letter.BUILT.split("\n\n")[1]),
-        "<ol>" + "".join(f"<li>{escape(i, quote=False)}</li>" for i in items) + "</ol>",
+        from_text(lines),
+        "<ul>" + "".join(f"<li>{escape(i, quote=False)}</li>" for i in lines.split("\n")) + "</ul>",
     )
-    assert "<ol>" in listed
+    assert "<ul>" in listed
     assert letter.insight_region(to_text(listed)) == "You built a layer on top of shopping."
 
 

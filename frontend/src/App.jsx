@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import {
+  Reply,
   ChevronsUpDown,
   Inbox,
   LogOut,
@@ -21,6 +22,7 @@ import Approved from './screens/Approved'
 import Resume from './screens/Resume'
 import Applications from './screens/Applications'
 import Sent from './screens/Sent'
+import FollowUps from './screens/FollowUps'
 import ConnectGmail from './screens/ConnectGmail'
 import { useDisconnectGmail, useGmailStatus } from './api/hooks'
 import {
@@ -84,6 +86,7 @@ const NAV = [
   { to: '/queue', label: 'Review', icon: Inbox },
   { to: '/approved', label: 'Approved', icon: SendHorizontal },
   { to: '/sent', label: 'Sent', icon: MailCheck },
+  { to: '/followups', label: 'Follow-ups', icon: Reply },
   { to: '/applications', label: 'Applications', icon: ListChecks },
   { to: '/contacts', label: 'Founders', icon: Users },
   { to: '/manual', label: 'Missing addresses', icon: MailQuestion },
@@ -356,6 +359,7 @@ function GatedRoutes({ gmail, outcome }) {
       <Route path="/queue" element={<ReviewQueue />} />
       <Route path="/approved" element={<Approved />} />
       <Route path="/sent" element={<Sent />} />
+      <Route path="/followups" element={<FollowUps />} />
       <Route path="/applications" element={<Applications />} />
       <Route path="/contacts" element={<Contacts />} />
       <Route path="/thread/:id" element={<Thread />} />

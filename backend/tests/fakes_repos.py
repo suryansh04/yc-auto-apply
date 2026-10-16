@@ -60,6 +60,8 @@ class FakeCompanyRow:
     status: str | None = None
     is_hiring: bool = False
     last_synced_at: object = None   # final fix wave (F12): stamped via the injected Clock port
+    web_research: list | None = None  # 2026-09-25: cached web search (0008)
+    web_researched_at: object = None
 
 
 class FakeCompanyRepo:
@@ -75,6 +77,12 @@ class FakeCompanyRepo:
 
     def get(self, id: int) -> FakeCompanyRow | None:
         return self.rows.get(id)
+
+    def set_web_research(self, id: int, results: list, at) -> None:
+        row = self.rows.get(id)
+        if row is not None:
+            row.web_research = results
+            row.web_researched_at = at
 
     def upsert(self, **fields) -> FakeCompanyRow:
         """Task 16: mirrors `CompanyRepo.upsert` (keyed on `yc_id`)."""
@@ -227,6 +235,8 @@ class FakeFounderRow:
     yc_user_id: int | None = None   # Task 16 (offline e2e): what `ScrapeCompanyPage` keys on
     twitter_url: str | None = None
     scraped_at: object = None       # final fix wave (F12): stamped via the injected Clock port
+    web_research: str | None = None  # 2026-09-25: cached web search (0007)
+    web_researched_at: object = None
 
 
 class FakeFounderRepo:
@@ -247,6 +257,12 @@ class FakeFounderRepo:
 
     def get(self, id: int) -> FakeFounderRow | None:
         return self.rows.get(id)
+
+    def set_web_research(self, id: int, text: str, at) -> None:
+        row = self.rows.get(id)
+        if row is not None:
+            row.web_research = text
+            row.web_researched_at = at
 
     def upsert(self, **fields) -> FakeFounderRow:
         """Task 16: mirrors `FounderRepo.upsert` (keyed on `yc_user_id`)."""
@@ -395,6 +411,8 @@ class FakeMessageRow:
     body: str
     subject: str | None = None
     body_html: str | None = None      # 2026-09-23: formatted letters
+    founder_line: str | None = None   # 2026-09-25: the line about the founder
+    research: dict | None = None      # 2026-09-25: verified facts (0008)
     research_source_type: str | None = None
     research_source_id: int | None = None
     approved_at: object = None

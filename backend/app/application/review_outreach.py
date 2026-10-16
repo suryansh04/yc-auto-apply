@@ -54,11 +54,12 @@ What each action guarantees:
   uniform.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol
 
 from app.application.draft_outreach import build_sources, load_resume_claims
+from app.application.research_company import facts_text
 from app.domain import letter, rich_text
 from app.domain.entities import Draft
 from app.domain.ranking import rank_key
@@ -341,7 +342,8 @@ class ReviewOutreach:
         # returned so the screen can show them, and the text is saved
         # either way.
         notes = self._validate(draft, source, company, founder, self._previous_body(outreach, step),
-                               all_publications=sources.publications)
+                               all_publications=sources.publications,
+                               research=getattr(row, "research", None) if row is not None else None)
 
         approved_at = now if state is OutreachState.APPROVED else None
         fields = dict(
@@ -401,6 +403,59 @@ class ReviewOutreach:
                 "company paragraph to swap - edit it by hand"
             )
         return self.edit(outreach_id, row.subject or "", swapped, now=now)
+
+    def use_insight(self, outreach_id: int, tie_in: str, paragraph: str,
+                    now: datetime | None = None) -> list[str]:
+        """Put an AI suggestion in as the company part (2026-09-25): the
+        tie-in joins his Better paragraph (none when empty), the paragraph
+        stands on its own, and the founder line the letter had stays on
+        the end of it. Saved through `edit`, like every other change."""
+        outreach = self._outreach(outreach_id)
+        step = int(getattr(outreach, "sequence_step", 0) or 0)
+        row = self._repos.message.get_outbound(outreach.id, step)
+        if row is None or not getattr(row, "body", None):
+            raise ValueError("there is no draft to rewrite yet")
+        paragraph = (paragraph or "").strip()
+        if not paragraph:
+            raise ValueError("the suggestion is empty")
+        line = (getattr(row, "founder_line", None) or "").strip()
+        region = letter.insight_region(row.body) or ""
+        if line and line in region:
+            paragraph = f"{paragraph} {line}"
+        body = letter.with_insight(row.body, [paragraph], tie_in=tie_in or "")
+        if body is None:
+            raise ValueError(
+                "this letter does not have the assembled shape, so there is no "
+                "company paragraph to swap - edit it by hand"
+            )
+        return self.edit(outreach_id, row.subject or "", body, now=now)
+
+    def use_founder_line(self, outreach_id: int, line: str,
+                         now: datetime | None = None) -> list[str]:
+        """Put `line` in as this letter's line about the founder, replacing
+        the one it had (2026-09-25). An empty `line` removes it.
+
+        The old line is found by what was last stored (`founder_line`),
+        wherever it now sits; a letter that never had one gets the new
+        line at the end of the company part. Saved through `edit`, so it
+        is checked, never refused, and re-stamps an approval like any
+        other edit. Returns the checks' notes.
+        """
+        outreach = self._outreach(outreach_id)
+        step = int(getattr(outreach, "sequence_step", 0) or 0)
+        row = self._repos.message.get_outbound(outreach.id, step)
+        if row is None or not getattr(row, "body", None):
+            raise ValueError("there is no draft to add a line to yet")
+        line = (line or "").strip()
+        body = letter.with_founder_line(row.body, getattr(row, "founder_line", None), line)
+        if body is None:
+            raise ValueError(
+                "this letter does not have the assembled shape, so there is nowhere "
+                "to put the line - add it by hand"
+            )
+        notes = self.edit(outreach_id, row.subject or "", body, now=now)
+        self._repos.message.upsert(id=row.id, founder_line=line or None)
+        return notes
 
     def skip(self, outreach_id: int, now: datetime | None = None) -> None:
         """Pass over this draft without deciding anything.
@@ -479,12 +534,18 @@ class ReviewOutreach:
         return getattr(previous, "body", None) if previous is not None else None
 
     def _validate(self, draft: Draft, source: SourceRow | None, company, founder,
-                  previous_body: str | None, all_publications=()) -> list[str]:
+                  previous_body: str | None, all_publications=(), research=None) -> list[str]:
         claims = load_resume_claims(self._repos.resume_profile, keep_unverified=self._keep_unverified)
         name = getattr(company, "name", None)
         one_liner = getattr(company, "one_liner", None)
-        # The same "facts about them" the drafter's validation allowed (F4).
-        extra_allowed = [getattr(company, "long_description", None) or "", founder.full_name]
+        # The same "facts about them" the drafter's validation allowed (F4),
+        # including the verified research the letter was written from
+        # (2026-09-25).
+        known = facts_text(research)
+        extra_allowed = [getattr(company, "long_description", None) or "", founder.full_name,
+                         getattr(founder, "bio", None) or "", known]
+        if source is not None and known:
+            source = replace(source, text=f"{source.text}\n{known}")
         # `operator_edit=True`: this text was typed by the person who
         # signs it. The phrase bans police the model's habits, not his
         # own word choices - rejecting his edit for "genuinely" would be

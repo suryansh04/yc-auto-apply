@@ -94,6 +94,12 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from app.application.critique_draft import CritiqueResult, run_critic
+from app.application.research_company import (
+    facts_text, gather_sources, research_problems, run_researcher,
+)
+from app.application.write_founder_line import (
+    founder_material, run_founder_line_writer, unusable_reason as founder_line_problem,
+)
 from app.application.write_subjects import run_subject_writer
 from app.application.errors import OperatorError
 from app.domain.entities import Draft, ResumeClaim
@@ -101,7 +107,7 @@ from app.domain.interns import is_intern_appropriate
 from app.domain.states import OutreachState, assert_transition
 from app.domain.targeting import OUT_OF_BAND_STATUS
 from app.domain.layout import normalise_paragraphs
-from app.domain.letter import assemble_body, insight_region
+from app.domain.letter import assemble_body, formatted_html, insight_region, with_founder_line
 from app.domain.letter import subject as fixed_subject
 from app.domain.names import company_display_name
 from app.domain.validation import SourceRow, validate_draft
@@ -168,7 +174,7 @@ class _Sources:
 
 class DraftOutreach:
     def __init__(self, drafter, repos: DraftRepos, keep_unverified: bool = False, critic=None,
-                 subject_writer=None):
+                 subject_writer=None, founder_writer=None, web_search=None, researcher=None):
         self._drafter = drafter
         self._repos = repos
         self._keep_unverified = keep_unverified
@@ -176,6 +182,14 @@ class DraftOutreach:
         # 2026-09-23: writes the subject for a first email. None keeps the
         # operator's fixed subject, exactly as before.
         self._subject_writer = subject_writer
+        # 2026-09-25: the line about the founder, from their YC bio or a
+        # web search. None writes no line, exactly as before.
+        self._founder_writer = founder_writer
+        self._web_search = web_search
+        # 2026-09-25 (his pipeline document): research the company and the
+        # founder first, and hand the writer only verified facts. None
+        # writes from the YC description alone, as before.
+        self._researcher = researcher
 
     def run(self, limit: int | None = None) -> DraftResult:
         result = DraftResult()
@@ -223,9 +237,15 @@ class DraftOutreach:
                 "sequence_step": step,
                 "thread_history": self._thread_history(outreach, step),
             }
+            research, research_sources = (
+                self._research(company, founder) if step == 0 else (None, [])
+            )
+            context["research"] = research
             # Fix round 1 (F4): facts about *them* that the prompt hands the
             # model, so the claims rule must not treat them as fabrications.
-            extra_allowed = [getattr(company, "long_description", None) or "", founder.full_name]
+            extra_allowed = [getattr(company, "long_description", None) or "", founder.full_name,
+                             getattr(founder, "bio", None) or "", facts_text(research),
+                             *(s.get("text", "") for s in research_sources)]
             previous_body = self._previous_body(outreach, step)
 
             draft: Draft | None = None
@@ -244,11 +264,21 @@ class DraftOutreach:
                     break
                 draft = _to_draft(raw, step, getattr(company, "name", "") or "")
                 source = sources.resolvable.get((draft.research_source_type, draft.research_source_id))
+                if source is not None and research and research.get("facts"):
+                    # The letter is written from the verified facts, so
+                    # they count as what it is grounded on (2026-09-25).
+                    source = replace(source, text=f"{source.text}\n{facts_text(research)}")
                 errors = validate_draft(
                     draft, source, company.name, getattr(company, "one_liner", None), claims,
                     previous_body=previous_body, extra_allowed_text=extra_allowed,
                     all_publications=sources.publications,
                 )
+                if step == 0:
+                    draft = self._checked_founder_line(draft, founder, company, research)
+                    errors += research_problems(
+                        insight_region(draft.body) or "", research, research_sources,
+                        company_display_name(getattr(company, "name", "") or ""), founder.full_name,
+                    )
                 if errors:
                     # Deterministic failure — retry (if a further attempt
                     # remains) with the validation errors, same as before
@@ -291,7 +321,9 @@ class DraftOutreach:
             consecutive_errors = 0
             if step == 0 and not errors:
                 draft = self._with_written_subject(draft, company)
-            self._finish(outreach, step, draft=draft, errors=errors, critic_result=critic_result)
+                draft = self._with_founder_line(draft, founder, company)
+            self._finish(outreach, step, draft=draft, errors=errors, critic_result=critic_result,
+                         research=research)
             if errors:
                 result.manual_write += 1
             else:
@@ -321,6 +353,77 @@ class DraftOutreach:
             paragraph=insight_region(draft.body) or "",
         )
         return replace(draft, subject=subjects[0]) if subjects else draft
+
+    def _with_founder_line(self, draft: Draft, founder, company) -> Draft:
+        """The draft with a line about the founder at the end of the
+        company part, or unchanged (2026-09-25).
+
+        Only for a first email that passed its checks and only when a
+        writer was given. The line has its own checks
+        (`app.application.write_founder_line`), which is why it is added
+        after `validate_draft` rather than before it.
+        """
+        if self._founder_writer is None or company is None or draft.founder_line:
+            return draft
+        name = company_display_name(getattr(company, "name", "") or "")
+        material, source = founder_material(
+            founder, name, search=self._web_search, founder_repo=self._repos.founder,
+        )
+        answer = run_founder_line_writer(
+            self._founder_writer, founder_name=founder.full_name,
+            title=getattr(founder, "title", None) or "", company_name=name,
+            material=material, source=source,
+        )
+        if not answer:
+            return draft
+        # "curious" first: nobody is there to check a draft-time line
+        # before it is shown, and an overlap is the style most likely to
+        # be forced (live, 2026-09-25: "strategy at Pitney Bowes caught my
+        # eye, since I've been working on backend"). He can pick the
+        # overlap one himself on the review screen.
+        preference = {"curious": 0, "short": 1, "overlap": 2}
+        best = min(answer["options"], key=lambda o: preference.get(o["style"], 3))
+        line = best["line"]
+        body = with_founder_line(draft.body, None, line)
+        return replace(draft, body=body, founder_line=line) if body else draft
+
+    def _research(self, company, founder) -> tuple[dict | None, list[dict]]:
+        """Verified facts for this letter, and the sources they came from.
+        `(None, [])` when no researcher is configured. Never raises."""
+        if self._researcher is None:
+            return None, []
+        sources = gather_sources(
+            company, founder,
+            news=self._repos.news.list_by_company_id(company.id),
+            launches=self._repos.launch.list_by_company_id(company.id),
+            search=self._web_search, company_repo=self._repos.company,
+            founder_repo=self._repos.founder,
+        )
+        research = run_researcher(
+            self._researcher, company_display_name(getattr(company, "name", "") or ""),
+            founder.full_name, sources,
+        )
+        return research, sources
+
+    def _checked_founder_line(self, draft: Draft, founder, company, research) -> Draft:
+        """The writer's own founder line, kept only if it passes the same
+        checks a founder line from the founder panel does - otherwise it
+        is taken out, and `_with_founder_line` may write another."""
+        line = (draft.founder_line or "").strip()
+        if not line:
+            return draft
+        material = "\n".join(p for p in (
+            facts_text(research), getattr(founder, "bio", None) or "",
+        ) if p)
+        problem = founder_line_problem(
+            line, material, founder.full_name,
+            company_display_name(getattr(company, "name", "") or ""),
+        )
+        if problem is None:
+            return draft
+        log.info("draft: dropped the writer's founder line - %s", problem)
+        body = with_founder_line(draft.body, line, "")
+        return replace(draft, body=body or draft.body, founder_line=None)
 
     def _load_claims(self) -> list[ResumeClaim]:
         return load_resume_claims(self._repos.resume_profile, keep_unverified=self._keep_unverified)
@@ -369,7 +472,7 @@ class DraftOutreach:
         return build_sources(self._repos.news, self._repos.launch, self._repos.job_posting, company)
 
     def _finish(self, outreach, step: int, draft: Draft | None, errors: list[str],
-                critic_result: CritiqueResult | None = None) -> None:
+                critic_result: CritiqueResult | None = None, research: dict | None = None) -> None:
         # The transition is checked BEFORE anything is written, so an
         # illegal state never gets a half-persisted draft.
         assert_transition(OutreachState(outreach.state), OutreachState.PENDING_APPROVAL)
@@ -385,6 +488,15 @@ class DraftOutreach:
                 approved_at=None,        # a redraft voids any earlier approval
                 edited_by_user=False,
             )
+            if step == 0:
+                # Always written for a first email, so a redraft never
+                # keeps the previous letter's line (2026-09-25).
+                fields["founder_line"] = draft.founder_line
+                # ...and its formatting: "Outside work" as a real list
+                # with bold names (operator request 2026-09-25).
+                fields["body_html"] = formatted_html(draft.body)
+                # ...and what it was written from, for the review screen.
+                fields["research"] = research
             # Task 13 (D22): only written when a critic actually ran this
             # run (`critic_result is not None`) — with no critic injected
             # at all, these three columns are left untouched, which is
@@ -521,10 +633,15 @@ def _to_draft(raw: dict, step: int, company_name: str = "") -> Draft:
     subject = str(raw.get("subject") or "")
     if step == 0 and "company_paragraphs" in raw:
         display = company_display_name(company_name or "")
+        founder_line = str(raw.get("founder_line") or "").strip() or None
         body = assemble_body(
             display,
             _paragraph_list(raw.get("company_paragraphs")),
             include_user_fit_stub=bool(raw.get("could_be_a_user")),
+            # 2026-09-25: an answer with a `tie_in` field (even empty)
+            # joins only that to the Better paragraph.
+            tie_in=str(raw.get("tie_in") or "") if "tie_in" in raw else None,
+            founder_line=founder_line,
         )
         # Operator request (2026-09-23): the subject is his, like every
         # other fixed block - "Would love to build at {company}". The
@@ -545,6 +662,8 @@ def _to_draft(raw: dict, step: int, company_name: str = "") -> Draft:
         research_source_type=str(raw.get("research_source_type") or ""),
         research_source_id=source_id,
         sequence_step=step,
+        founder_line=(str(raw.get("founder_line") or "").strip() or None)
+        if step == 0 and "company_paragraphs" in raw else None,
     )
 
 
